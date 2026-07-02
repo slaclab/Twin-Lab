@@ -1,0 +1,3 @@
+# Compatibility file for tools that still expect requirements.txt.
+# Project dependencies live in pyproject.toml.
+-e .[dev]
