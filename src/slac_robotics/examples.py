@@ -4,18 +4,34 @@ from __future__ import annotations
 
 from itertools import combinations
 import math
+from pathlib import Path
+import sys
 from typing import Dict, Iterable
 
-from .collision import detect_interferences
-from .model import (
-    CollisionPair,
-    JointKind,
-    SpectrometerModel,
-    Stage,
-    StageLimit,
-    StageStack,
-    collision_pair,
-)
+if __package__ in (None, ""):
+    # Allow direct execution: python src/slac_robotics/examples.py
+    sys.path.append(str(Path(__file__).resolve().parents[1]))
+    from slac_robotics.collision import detect_interferences
+    from slac_robotics.model import (
+        CollisionPair,
+        JointKind,
+        SpectrometerModel,
+        Stage,
+        StageLimit,
+        StageStack,
+        collision_pair,
+    )
+else:
+    from .collision import detect_interferences
+    from .model import (
+        CollisionPair,
+        JointKind,
+        SpectrometerModel,
+        Stage,
+        StageLimit,
+        StageStack,
+        collision_pair,
+    )
 
 
 def build_polycap_spectrometer_model() -> SpectrometerModel:

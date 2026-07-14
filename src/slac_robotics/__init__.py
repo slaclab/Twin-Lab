@@ -15,6 +15,7 @@ from .model import (
     SpectrometerModel,
     collision_pair,
 )
+from .step_io import MeshCollisionReport, detect_mesh_interferences, detect_step_interferences, load_step_mesh
 
 __all__ = [
     "Body",
@@ -28,6 +29,10 @@ __all__ = [
     "StageStack",
     "SpectrometerModel",
     "collision_pair",
+    "MeshCollisionReport",
+    "detect_mesh_interferences",
+    "detect_step_interferences",
     "detect_interferences",
+    "load_step_mesh",
     "place_bodies",
 ]

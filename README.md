@@ -27,20 +27,40 @@ fast iteration loop to:
 ### Install
 
 ```bash
-uv venv
-uv pip install -e ".[dev]"
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev,cad]"
 ```
 
 ### Run Example
 
 ```bash
-uv run python -m slac_robotics.examples
+python -m slac_robotics.examples
+```
+
+### Run STEP Collision Demo
+
+```bash
+python -m slac_robotics.step_demo
+```
+
+### Run Drake Collision Demo
+
+```bash
+python -m slac_robotics.drake_example
+```
+
+Expected output:
+
+```text
+overlap_count: 1
+separated_count: 0
 ```
 
 ### Run Tests
 
 ```bash
-uv run pytest -q
+pytest -q
 ```
 
 ## WSL Notes (Solid Edge + Python)
@@ -62,6 +82,18 @@ If you are running in WSL while using Solid Edge on Windows:
 - `src/slac_robotics/transforms.py`: rigid transform math.
 - `src/slac_robotics/collision.py`: conservative interference checks.
 - `src/slac_robotics/examples.py`: starter XCS-style 7-stack model and demo.
+- `src/slac_robotics/step_io.py`: STEP-to-mesh import and mesh interference checks.
+- `src/slac_robotics/step_demo.py`: runnable generated-STEP collision demo.
+
+## STEP Workflow (Simple Start)
+
+1. Export each moving assembly as one STEP file from Solid Edge.
+2. Place files in a known folder, for example `/mnt/c/Users/<you>/cad_exports/`.
+3. Use `slac_robotics.step_io.load_step_mesh(...)` to load each file.
+4. Run `slac_robotics.step_io.detect_step_interferences(...)` for pair checks.
+
+This gives you a real mesh collision path today while you continue refining
+joint frames and motion constraints in the kinematic model.
 
 ## Drake Status
 

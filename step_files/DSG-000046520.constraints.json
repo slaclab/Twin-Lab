@@ -1,0 +1,91 @@
+{
+  "assembly_step": "step_files/DSG-000046520.stp",
+  "notes": [
+    "Set base_components to fixed structure that does not move.",
+    "Create one entry per motorized axis in joints.",
+    "Each joint components list should include all parts that move together on that axis.",
+    "Units: meters for limits_m and home_m."
+  ],
+  "base_components": [
+    "DSG-000046522"
+  ],
+  "joints": [
+    {
+      "name": "linear_motor_1",
+      "type": "linear",
+      "axis_xyz": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "limits_m": [
+        0.0,
+        0.05
+      ],
+      "home_m": 0.0,
+      "components": []
+    },
+    {
+      "name": "linear_motor_2",
+      "type": "linear",
+      "axis_xyz": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "limits_m": [
+        0.0,
+        0.05
+      ],
+      "home_m": 0.0,
+      "components": []
+    },
+    {
+      "name": "linear_motor_3",
+      "type": "linear",
+      "axis_xyz": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "limits_m": [
+        0.0,
+        0.05
+      ],
+      "home_m": 0.0,
+      "components": []
+    }
+  ],
+  "available_components": [
+    "REF-000221283",
+    "DSG-000040767",
+    "LIB-000007591",
+    "DSG-000046522",
+    "DSG-000046523",
+    "M3 X 0.5 X 10 SCREW, CAP, HEX SCH, 304 SST#1",
+    "M3 X 0.5 X 10 SCREW, CAP, HEX SCH, 304 SST#2",
+    "M3 X 0.5 X 10 SCREW, CAP, HEX SCH, 304 SST#3",
+    "0.25-20 UNC-2A X 2.5 SCREW, HEX SCH CAP, SST316#1",
+    "0.25-20 UNC-2A X 2.5 SCREW, HEX SCH CAP, SST316#2",
+    "0.25-20 UNC-2A X 2.5 SCREW, HEX SCH CAP, SST316#3",
+    "McMasterCarr__SHCS_M3x.5x8mmSST__92290A113#1",
+    "McMasterCarr__SHCS_M3x.5x8mmSST__92290A113#2",
+    "McMasterCarr__SHCS_M3x.5x8mmSST__92290A113#3",
+    "0.25-20 UNC-2A X 2.5 SCREW, HEX SCH CAP, SST316#4",
+    "McMasterCarr__ScrewCap_HexSch_4-40x.375L_316SST__92185A108#1",
+    "McMasterCarr__ScrewCap_HexSch_4-40x.375L_316SST__92185A108#2",
+    "McMasterCarr__ScrewCap_HexSch_4-40x.375L_316SST__92185A108#3",
+    "McMasterCarr__ScrewCap_HexSch_4-40x.375L_316SST__92185A108#4",
+    "McMasterCarr__SHCS_M3x.5x8mmSST__92290A113#4",
+    "McMasterCarr__SHCS_M3x.5x8mmSST__92290A113#5",
+    "McMasterCarr__SHCS_M3x.5x8mmSST__92290A113#6",
+    "McMasterCarr__SHCS_M3x.5x8mmSST__92290A113#7",
+    "LIB-000014334",
+    "M3 X 0.5 X 10 SCREW, CAP, HEX SCH, 304 SST#4",
+    "McMasterCarr__SHCS_M3x.5x8mmSST__92290A113#8",
+    "McMasterCarr__SHCS_M3x.5x8mmSST__92290A113#9",
+    "McMasterCarr__SHCS_M3x.5x8mmSST__92290A113#10",
+    "McMasterCarr__SHCS_M3x.5x8mmSST__92290A113#11",
+    "McMasterCarr__SHCS_M3x.5x8mmSST__92290A113#12"
+  ]
+}
