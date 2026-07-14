@@ -27,6 +27,18 @@ Build and evaluate the starter polycapillary-style model:
 python -m slac_robotics.examples
 ```
 
+Run the STEP mesh-collision demo:
+
+```bash
+python -m slac_robotics.step_demo
+```
+
+Run the Drake collision demo:
+
+```bash
+python -m slac_robotics.drake_example
+```
+
 Run tests:
 
 ```bash
@@ -39,6 +51,9 @@ Core modules:
 - `slac_robotics.transforms`
 - `slac_robotics.collision`
 - `slac_robotics.examples`
+- `slac_robotics.step_io`
+- `slac_robotics.step_demo`
+- `slac_robotics.drake_example`
 
 Recommended workflow:
 
@@ -46,6 +61,10 @@ Recommended workflow:
 2. Calibrate geometry from CAD exports.
 3. Check interference for nominal and worst-case states.
 4. Add trajectory sweeps for planned homing and maintenance moves.
+
+Constraints walkthrough:
+
+- See `docs/constraints-workflow.md` for assembly STEP joint assignment steps.
 
 ## Contributing
 
