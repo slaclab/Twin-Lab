@@ -26,6 +26,21 @@ from OCP.TopLoc import TopLoc_Location
 from OCP.TopoDS import TopoDS
 
 
+_SUPPORTED_STEP_SUFFIXES = {".stp", ".step"}
+
+
+def _ensure_supported_step_path(path: Path) -> None:
+    suffix = path.suffix.lower()
+    if suffix in _SUPPORTED_STEP_SUFFIXES:
+        return
+
+    raise ValueError(
+        "Unsupported CAD format. This importer currently supports STEP only "
+        f"({sorted(_SUPPORTED_STEP_SUFFIXES)}), got: {path.suffix or '<none>'}. "
+        "If your source is Solid Edge Parasolid (.x_t/.x_b), export as STEP AP242/AP214 first."
+    )
+
+
 @dataclass(frozen=True)
 class MeshCollisionReport:
     """Collision result for one mesh pair."""
@@ -44,6 +59,7 @@ def load_step_mesh(
     step_path = Path(path)
     if not step_path.exists():
         raise FileNotFoundError(f"STEP file not found: {step_path}")
+    _ensure_supported_step_path(step_path)
 
     reader = STEPControl_Reader()
     status = reader.ReadFile(str(step_path))
