@@ -87,6 +87,11 @@ If you are running in WSL while using Solid Edge on Windows:
 
 ## STEP Workflow (Simple Start)
 
+Supported import format right now: STEP (`.stp`, `.step`) only.
+Parasolid (`.x_t`, `.x_b`) is not imported directly by the current Python
+pipeline. In Solid Edge, export Parasolid assemblies as STEP AP242 (preferred)
+or AP214 before running the tooling below.
+
 1. Export each moving assembly as one STEP file from Solid Edge.
 2. Place files in a known folder, for example `/mnt/c/Users/<you>/cad_exports/`.
 3. Use `slac_robotics.step_io.load_step_mesh(...)` to load each file.
