@@ -1,105 +1,151 @@
-# STEP Constraints Workflow (3 Linear Motors)
+# STEP-to-SDF Workflow
 
-This walkthrough is for assembly STEP files where motor constraints are not
-encoded in the CAD export.
+STEP contains useful assembly geometry and occurrence placement, but it does not
+provide a trustworthy robotics joint model. Generated CAD facts and
+human-reviewed mechanical intent are therefore kept separate.
 
-## 1) Generate the template
-
-From repo root:
+## 1. Generate the CAD manifest
 
 ```bash
-python -m slac_robotics.constraints_wizard step_files/DSG-000046520.stp
+python -m slac_robotics.constraints_wizard \
+  step_files/DSG-000046520.stp --show-tree
 ```
 
-This writes:
+Successful output starts with something like:
 
-- `step_files/DSG-000046520.constraints.json`
+```text
+STEP READ OK
+  Assemblies: 4
+  Leaf parts: 10
 
-## 2) Fill base components
+- [A001] DSG-000046520
+  - [A002] REF-000221283
+    - [P001] REF-000221282
+```
 
-In `base_components`, add the names that should remain fixed (chamber base,
-hard mounts, static adapters).
+`A` labels are assemblies and `P` labels are assignable leaf parts. The generated
+`.cad.json` contains the complete path-based IDs, component names, parent
+relationships, assembly flags, and local 4×4 transforms. Regenerate it when the
+STEP assembly changes; do not edit it manually.
 
-Tip: start conservative. Anything uncertain can stay out until joint groups are
- clear.
+Open Cascade reports these CAD transforms in millimetres. SDF and Drake use
+metres, so the later conversion step must apply a factor of `0.001`.
 
-## 3) Fill the 3 linear motor joints
+## 2. Review rigid groups
 
-In each `joints[i]` block:
+First, confirm visually that the imported geometry is recognizable:
 
-- Set `name` to your axis naming (for example `motor_x`, `motor_y`, `motor_z`).
-- Keep `type` as `linear`.
-- Set `axis_xyz` in assembly frame.
-- Set `limits_m` from stage travel specs.
-- Set `home_m` to your operational home.
-- Add all rigidly-connected parts that move with that axis to `components`.
+```bash
+slac-cad-manifest step_files/DSG-000046520.stp --view
+```
 
-Important: each moving part should belong to exactly one moving joint.
+This converts the STEP assembly to a temporary glTF preview and displays it in
+Meshcat. The preview verifies geometry and placement, but it does not move yet.
+The kinematics review is what tells Drake which pieces move together.
 
-## 4) Practical filtering strategy
+Edit the much smaller `.kinematics.yaml` file. For each moving carriage, copy the
+short `P` references into one rigid group:
 
-Your STEP contains many fasteners and hardware. Start by assigning only major
-sub-assemblies (for example `DSG-*`, `REF-*`, `LIB-*` names). Add screws later
-if needed.
+```yaml
+rigid_groups:
+  x_carriage:
+    occurrences:
+      - P003
+      - P004
+```
 
-## 5) Solid Edge-first method (specific)
+An occurrence must belong to exactly one rigid group. Fasteners can initially be
+left unassigned; start with the interference-significant housings, carriages,
+mounts, and payloads.
 
-Use Solid Edge for all kinematic interpretation, then copy results into JSON.
+Think of a rigid group as answering one physical question: “If I jog this motor,
+which of these parts move together without changing their relative position?”
 
-### 5.1 Open and prepare the assembly
+For a serial XYZ stack:
 
-1. Open the native assembly in Solid Edge (not the exported STEP).
-2. In Pathfinder, expand to the level where each motor-driven carriage/stage is visible.
-3. Create three temporary selection sets (or a simple text list) named for each motor axis.
+- `base`: structure that never moves.
+- `x_carriage`: everything moved by X, including the downstream Y and Z hardware
+  only when that hardware is represented as part of the X link.
+- `y_carriage`: the rigid Y-moving link.
+- `z_carriage`: the rigid Z-moving link and payload.
 
-### 5.2 Identify each moving group
+Each physical leaf part belongs to exactly one link. Parent motion automatically
+carries child links, so a Z-carriage part must not also be listed in X and Y.
 
-For each of the 3 linear motors:
+## 3. Review joints and frames
 
-1. Select the carriage (or primary moving body) driven by that motor.
-2. Use Show/Hide isolate to verify which components move rigidly with it.
-3. Add those components to that motor's selection set.
-4. Exclude obvious fixed structure (base plates, chamber mounts, static adapters).
+For each axis, record:
 
-Result: three clean moving groups and one implicit fixed group.
+- Parent and child rigid groups.
+- Prismatic or revolute joint type.
+- Axis and sign.
+- Travel limits and home.
+- Parent-to-joint translation and orientation.
 
-### 5.3 Determine axis direction and sign
+Use metres and radians. Prefer stable assembly coordinate systems or reference
+planes over faces and edges that may disappear in a CAD revision.
 
-For each motor axis:
+Do not start by measuring perfect joint transforms. First get the component
+groups, parent/child order, axis directions, and approximate travel correct. The
+Meshcat sliders will expose gross mistakes before precision calibration matters.
 
-1. Read the axis direction from the stage orientation in assembly coordinates.
-2. Jog or evaluate motion direction in Solid Edge so you know what positive travel means.
-3. Map that direction into `axis_xyz` as a unit-like vector:
-   - X axis motion: `[1, 0, 0]` or `[-1, 0, 0]`
-   - Y axis motion: `[0, 1, 0]` or `[0, -1, 0]`
-   - Z axis motion: `[0, 0, 1]` or `[0, 0, -1]`
+Check progress at any time:
 
-### 5.4 Capture travel limits and home
+```bash
+slac-cad-manifest step_files/DSG-000046520.stp --check --no-preview
+```
 
-1. Pull min/max travel from your stage specs or assembly definition.
-2. Convert to meters before entering JSON.
-3. Set `home_m` to the operational reference you actually use at beamline startup.
+The check reports assigned and unassigned parts, duplicate assignments, stale
+references, and joints that name missing rigid groups. Regenerating the CAD
+manifest does not overwrite the review file unless `--force-template` is passed.
 
-### 5.5 Map Solid Edge names to STEP names
+## 4. Compile one reusable SDF model
 
-STEP export can rename or duplicate part labels. Use this mapping process:
+The reviewed groups and joints become one SDF mechanism containing links,
+joints, visual meshes, simplified collision meshes, and named mounting/tool
+frames. The current reference is:
 
-1. In Solid Edge, export a part list for each motor selection set.
-2. In `available_components`, find the matching names.
-3. If duplicates exist (for example `name#1`, `name#2`), assign consistently using count/order.
-4. Put final mapped names into each joint's `components` list.
+- `models/stages/three_axis_stage.sdf`
 
-### 5.6 Fill fixed components
+Define a stage or subassembly once, then instantiate it many times. Do not copy
+its component list into the top-level spectrometer scene.
 
-Add known static structure to `base_components`.
+## 5. Compose the instrument
 
-Tip: start with major fixed structure only. You can add hardware (fasteners,
-washers) after first validation if needed.
+Drake Model Directives adds named model instances and welds each mounting frame
+into the chamber or another mechanism. The current three-instance example is:
 
-## 6) Suggested next repo step
+- `models/scenes/three_stage_demo.dmd.yaml`
 
-After this file is filled, the next useful code step is to add a validator that:
+Large instruments should use nested directive files by subsystem: detector,
+crystals, polycapillaries, chamber, and robot arms.
 
-1. Confirms every listed component exists in `available_components`.
-2. Confirms no component is assigned to multiple joints.
-3. Reports unassigned major components.
+## 6. Inspect motion visually
+
+```bash
+python -m slac_robotics.scene models/scenes/three_stage_demo.dmd.yaml
+```
+
+Open the printed Meshcat URL and move the joint sliders. Inspect visual geometry,
+collision geometry, and coordinate frames before trusting automated clearance
+results.
+
+For the reviewed real STEP groups, use:
+
+```bash
+slac-motion step_files/DSG-000046520.kinematics.yaml
+```
+
+This produces generated `.obj` meshes under `DSG-000046520.motion/`, colors the
+four rigid groups, and provides millimetre X/Y/Z sliders. The original assembled
+pose is zero. Parent motion carries all downstream groups.
+
+This first viewer only exercises prismatic motion. It does not yet compute mesh
+interference, and provisional group assignments must be confirmed before any
+hardware decision.
+
+## Next implementation step
+
+The next code boundary is a compiler from the reviewed kinematics YAML and CAD
+manifest into an SDF model with per-rigid-group collision meshes. Until that
+compiler exists, the checked-in SDF proxy is the executable reference model.

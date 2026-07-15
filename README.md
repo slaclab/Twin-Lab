@@ -1,131 +1,133 @@
 # SLAC Robotics Framework
 
-Python-first starter framework for stage-stack kinematics and interference checks,
-targeted at complex XCS-like spectrometer assemblies.
+Stage-stack modeling and interference analysis for compact X-ray spectrometer
+assemblies. The project uses standard formats wherever possible:
 
-## Why This Exists
+```text
+STEP assembly                         human-reviewed intent
+      │                                       │
+      └── Open Cascade ──> CAD manifest       └──> reusable SDF models
+                                                       │
+                                      Drake Model Directives
+                                                       │
+                                      MultibodyPlant + SceneGraph
+                                                       │
+                                      Meshcat + clearance queries
+```
 
-Many LCLS instruments have tightly packed motorized devices with mixed kinematics
-(linear, rotary, gonio) in a constrained chamber envelope. This package gives a
-fast iteration loop to:
+## Tools
 
-1. Model stage motion and detect interference.
-2. Evaluate redesign options to reduce collisions.
-3. Build toward homing/path-planning workflows.
-4. Prepare for ray-tracing and auto-alignment integration.
+The runtime has only two substantive tool families:
 
-## Current Capabilities
+- **Open Cascade (`cadquery-ocp`)** reads STEP hierarchy and occurrence poses.
+- **Drake** parses SDF/URDF and Model Directives, evaluates kinematics and
+  interference, and provides the browser-based Meshcat viewer.
 
-- Stage primitives: linear, rotary, gonio.
-- Ordered stage stacks with mount offsets.
-- Conservative interference detection using transformed AABBs.
-- Chamber envelope violation checks.
-- Example 7-stack polycapillary-like spectrometer layout.
+Ruff and pytest are the only development tools. The previous custom kinematics,
+trimesh, SciPy, and FCL paths have been removed.
 
-## Quick Start
-
-### Install
+## Setup
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install -e ".[dev,cad]"
+python -m pip install -r requirements.txt
 ```
 
-### Run Example
+## View the Three-Stack Scene
 
 ```bash
-python -m slac_robotics.examples
+python -m slac_robotics.scene models/scenes/three_stage_demo.dmd.yaml
 ```
 
-### Run STEP Collision Demo
+Open the printed Meshcat URL, normally `http://localhost:7000`. Meshcat provides
+joint sliders for all nine axes, visual/collision geometry controls, and visible
+coordinate frames. In WSL, open that URL in the Windows browser.
+
+The reusable stage model is
+[three_axis_stage.sdf](models/stages/three_axis_stage.sdf). The scene instantiates
+it three times using
+[three_stage_demo.dmd.yaml](models/scenes/three_stage_demo.dmd.yaml).
+
+These boxes are deliberately simple proxies. They prove model composition,
+joint motion, visualization, and interference queries before real CAD component
+groups are available.
+
+## Extract the Real CAD Assembly
 
 ```bash
-python -m slac_robotics.step_demo
+python -m slac_robotics.constraints_wizard step_files/DSG-000046520.stp --show-tree
 ```
 
-### Run Drake Collision Demo
+The command prints `STEP READ OK`, the number of assemblies and parts, and a
+numbered tree using short labels such as `P003`. It writes three outputs:
+
+- `DSG-000046520.cad.json`: generated occurrence IDs, hierarchy, and transforms;
+  do not edit it manually.
+- `DSG-000046520.kinematics.yaml`: a compact review template for rigid groups,
+  joints, axes, limits, and frames.
+- `DSG-000046520.preview.gltf`: a generated browser preview; it is ignored by Git.
+
+View the imported STEP without installing another CAD application:
 
 ```bash
-python -m slac_robotics.drake_example
+slac-cad-manifest step_files/DSG-000046520.stp --view
 ```
 
-Expected output:
+After assigning `P` references to rigid groups, check progress with:
+
+```bash
+slac-cad-manifest step_files/DSG-000046520.stp --check --no-preview
+```
+
+The checker lists every unassigned, unknown, or multiply assigned part. Existing
+kinematics assignments are never overwritten unless `--force-template` is used.
+
+## Move the Actual STEP Groups
+
+Once the review reports every part assigned, run:
+
+```bash
+slac-motion step_files/DSG-000046520.kinematics.yaml
+```
+
+Open the printed Meshcat URL and use the X, Y, and Z sliders in the Controls
+panel. This viewer tessellates one OBJ per rigid group and nests the groups so
+parent motion carries its children. Slider units are millimetres.
+
+The checked-in assignments are provisional guesses for the KOHZU YA04A XY stage
+and ZA05A Z stage. The provisional physical chain runs from the large left fixed
+block through Z, lower Y, and upper X to the polycap-side payload. The display
+origin is the center of that fixed block; replace it with a surveyed mounting
+datum later. This is a visual motion test, not yet a collision or hardware safety
+model.
+
+The template is intentionally not a second simulation format. It is a review
+artifact that will be compiled into an SDF model after the real component groups
+are filled.
+
+## Repository Layout
 
 ```text
-overlap_count: 1
-separated_count: 0
+models/stages/       reusable SDF mechanisms
+models/scenes/       Drake Model Directives assemblies
+step_files/          source STEP plus generated manifest/review files
+src/slac_robotics/
+  constraints_wizard.py  STEP → CAD manifest and review template
+  scene.py               standard model loading, queries, and Meshcat
+tests/                CAD extraction and Drake composition tests
 ```
 
-### Run Tests
+## Verification
 
 ```bash
 pytest -q
+ruff check .
+ruff format --check .
 ```
 
-## WSL Notes (Solid Edge + Python)
+## Accuracy
 
-If you are running in WSL while using Solid Edge on Windows:
-
-1. Export STEP/Parasolid from Windows to a shared path, for example:
-   - `/mnt/c/Users/<you>/cad_exports/` for direct access from WSL.
-2. Keep simulation code and generated artifacts in Linux paths under your repo
-   for better Python tooling performance.
-3. Avoid very large mesh processing directly on `/mnt/c/...` when possible; copy
-   large CAD-derived mesh files into the repo or another Linux filesystem path.
-4. If you later use Drake binaries, confirm compatibility with your WSL distro
-   and keep Python + Drake in the same virtual environment.
-
-## Package Layout
-
-- `src/slac_robotics/model.py`: joints, bodies, geometry, limits, stacks, filters.
-- `src/slac_robotics/transforms.py`: rigid transform math.
-- `src/slac_robotics/collision.py`: conservative interference checks.
-- `src/slac_robotics/examples.py`: starter XCS-style 7-stack model and demo.
-- `src/slac_robotics/step_io.py`: STEP-to-mesh import and mesh interference checks.
-- `src/slac_robotics/step_demo.py`: runnable generated-STEP collision demo.
-
-## STEP Workflow (Simple Start)
-
-Supported import format right now: STEP (`.stp`, `.step`) only.
-Parasolid (`.x_t`, `.x_b`) is not imported directly by the current Python
-pipeline. In Solid Edge, export Parasolid assemblies as STEP AP242 (preferred)
-or AP214 before running the tooling below.
-
-1. Export each moving assembly as one STEP file from Solid Edge.
-2. Place files in a known folder, for example `/mnt/c/Users/<you>/cad_exports/`.
-3. Use `slac_robotics.step_io.load_step_mesh(...)` to load each file.
-4. Run `slac_robotics.step_io.detect_step_interferences(...)` for pair checks.
-
-This gives you a real mesh collision path today while you continue refining
-joint frames and motion constraints in the kinematic model.
-
-## Drake Status
-
-This package does not use Drake yet. The current implementation is a pure-Python
-broad-phase model that uses simple joint chains and transformed bounding boxes.
-That keeps the first iteration easy to inspect while dimensions, coordinate
-frames, collision filters, and operating states are still being established.
-
-## Suggested Next Steps For XCS Polycap
-
-1. Replace placeholder dimensions and offsets with CAD-derived values.
-2. Add all stage travel limits and software guard bands.
-3. Define representative operating poses and sweep trajectories.
-4. Create a collision matrix to identify high-risk stage pairs.
-5. Add feasibility checks for homing without encoders.
-
-## CAD + Drake Integration Plan
-
-1. Near-term: enter measured stack offsets, joint limits, body boxes, and
-   collision filters.
-2. Mid-term: import CAD-derived meshes and compare mesh collision results
-   against the fast bounding-box screen.
-3. Long-term: migrate the kinematic tree and planning to Drake's MultibodyPlant +
-   SceneGraph when constraints and planning complexity require it.
-
-## Notes On Accuracy
-
-The current interference engine is conservative and intentionally simple. It is
-best used as a fast screening tool, not a final clearance authority. For final
-clearance decisions, use mesh collisions with measured assembly tolerances.
+Proxy boxes are not clearance authority. Hardware decisions require CAD-derived
+collision meshes, surveyed joint frames, encoder-zero calibration, tolerances,
+and explicit clearance margins.
