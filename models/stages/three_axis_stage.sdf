@@ -1,0 +1,97 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <model name="three_axis_stage">
+    <link name="base">
+      <inertial>
+        <mass>5.0</mass>
+        <inertia>
+          <ixx>0.0385</ixx><iyy>0.0385</iyy><izz>0.075</izz>
+        </inertia>
+      </inertial>
+      <visual name="base_visual">
+        <geometry><box><size>0.30 0.30 0.05</size></box></geometry>
+        <material><diffuse>0.25 0.25 0.28 1</diffuse></material>
+      </visual>
+      <collision name="base_collision">
+        <geometry><box><size>0.30 0.30 0.05</size></box></geometry>
+      </collision>
+    </link>
+
+    <link name="x_carriage">
+      <pose relative_to="base">0 0 0.055 0 0 0</pose>
+      <inertial>
+        <mass>2.0</mass>
+        <inertia>
+          <ixx>0.0097</ixx><iyy>0.0097</iyy><izz>0.0192</izz>
+        </inertia>
+      </inertial>
+      <visual name="x_visual">
+        <geometry><box><size>0.24 0.24 0.04</size></box></geometry>
+        <material><diffuse>0.20 0.45 0.85 1</diffuse></material>
+      </visual>
+      <collision name="x_collision">
+        <geometry><box><size>0.24 0.24 0.04</size></box></geometry>
+      </collision>
+    </link>
+
+    <link name="y_carriage">
+      <pose relative_to="x_carriage">0 0 0.045 0 0 0</pose>
+      <inertial>
+        <mass>1.5</mass>
+        <inertia>
+          <ixx>0.0046</ixx><iyy>0.0061</iyy><izz>0.0104</izz>
+        </inertia>
+      </inertial>
+      <visual name="y_visual">
+        <geometry><box><size>0.20 0.16 0.035</size></box></geometry>
+        <material><diffuse>0.25 0.75 0.40 1</diffuse></material>
+      </visual>
+      <collision name="y_collision">
+        <geometry><box><size>0.20 0.16 0.035</size></box></geometry>
+      </collision>
+    </link>
+
+    <link name="z_carriage">
+      <pose relative_to="y_carriage">0 0 0.045 0 0 0</pose>
+      <inertial>
+        <mass>1.0</mass>
+        <inertia>
+          <ixx>0.0021</ixx><iyy>0.0021</iyy><izz>0.0033</izz>
+        </inertia>
+      </inertial>
+      <visual name="z_visual">
+        <geometry><box><size>0.14 0.14 0.03</size></box></geometry>
+        <material><diffuse>0.90 0.55 0.15 1</diffuse></material>
+      </visual>
+      <collision name="z_collision">
+        <geometry><box><size>0.14 0.14 0.03</size></box></geometry>
+      </collision>
+    </link>
+
+    <frame name="tool" attached_to="z_carriage">
+      <pose>0 0 0.03 0 0 0</pose>
+    </frame>
+
+    <joint name="x" type="prismatic">
+      <parent>base</parent><child>x_carriage</child>
+      <axis>
+        <xyz expressed_in="base">1 0 0</xyz>
+        <limit><lower>-0.05</lower><upper>0.05</upper></limit>
+      </axis>
+    </joint>
+    <joint name="y" type="prismatic">
+      <parent>x_carriage</parent><child>y_carriage</child>
+      <axis>
+        <xyz expressed_in="x_carriage">0 1 0</xyz>
+        <limit><lower>-0.04</lower><upper>0.04</upper></limit>
+      </axis>
+    </joint>
+    <joint name="z" type="prismatic">
+      <parent>y_carriage</parent><child>z_carriage</child>
+      <axis>
+        <xyz expressed_in="y_carriage">0 0 1</xyz>
+        <limit><lower>-0.03</lower><upper>0.03</upper></limit>
+      </axis>
+    </joint>
+  </model>
+</sdf>

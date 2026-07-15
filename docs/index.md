@@ -1,71 +1,17 @@
-# SLAC Robotics Framework Documentation
+# Documentation
 
-Welcome to the SLAC Robotics Framework documentation.
+The active architecture is:
 
-This project provides a practical path for modeling kinematics and
-interference in tightly packed stage-stack systems such as XCS spectrometers.
+1. Open Cascade extracts immutable CAD occurrence facts from STEP.
+2. A small kinematics review file records the mechanical interpretation.
+3. Reusable mechanisms are represented as SDF.
+4. Drake Model Directives compose mechanisms into the full instrument.
+5. Drake SceneGraph evaluates signed clearance and Meshcat provides joint sliders.
 
-## Getting Started
+See [constraints-workflow.md](constraints-workflow.md) for the CAD-to-SDF process
+and the repository [README](../README.md) for runnable commands.
 
-### Installation
+Active modules:
 
-```bash
-pip install -e .
-```
-
-### Development Setup
-
-```bash
-pip install -e ".[dev]"
-```
-
-## Usage
-
-Build and evaluate the starter polycapillary-style model:
-
-```bash
-python -m slac_robotics.examples
-```
-
-Run the STEP mesh-collision demo:
-
-```bash
-python -m slac_robotics.step_demo
-```
-
-Run the Drake collision demo:
-
-```bash
-python -m slac_robotics.drake_example
-```
-
-Run tests:
-
-```bash
-pytest -q
-```
-
-Core modules:
-
-- `slac_robotics.model`
-- `slac_robotics.transforms`
-- `slac_robotics.collision`
-- `slac_robotics.examples`
-- `slac_robotics.step_io`
-- `slac_robotics.step_demo`
-- `slac_robotics.drake_example`
-
-Recommended workflow:
-
-1. Encode each stack and axis limits from engineering docs.
-2. Calibrate geometry from CAD exports.
-3. Check interference for nominal and worst-case states.
-4. Add trajectory sweeps for planned homing and maintenance moves.
-
-Constraints walkthrough:
-
-- See `docs/constraints-workflow.md` for assembly STEP joint assignment steps.
-
-## Contributing
-
-Contributions are welcome. Please follow the coding standards and add tests for new features.
+- `slac_robotics.constraints_wizard`
+- `slac_robotics.scene`

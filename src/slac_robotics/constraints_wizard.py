@@ -1,472 +1,511 @@
-"""Utilities to bootstrap joint-constraint configs from assembly STEP files.
+"""Extract a reviewable CAD manifest from a STEP assembly.
 
-Run:
-    python -m slac_robotics.constraints_wizard step_files/your_assembly.stp
+STEP provides geometry, occurrence hierarchy, and occurrence poses. It does not
+provide a reliable robotics joint model. This tool therefore keeps generated CAD
+facts separate from the small, human-reviewed kinematics overlay.
 """
 
 from __future__ import annotations
 
-import importlib
 import json
-from collections import Counter
 from pathlib import Path
 from typing import Any
 
+import yaml
+from OCP.BRepMesh import BRepMesh_IncrementalMesh
+from OCP.Message import Message_ProgressRange
+from OCP.RWGltf import RWGltf_CafWriter
+from OCP.STEPCAFControl import STEPCAFControl_Reader
+from OCP.TCollection import TCollection_AsciiString, TCollection_ExtendedString
+from OCP.TColStd import TColStd_IndexedDataMapOfStringString
+from OCP.TDataStd import TDataStd_Name
+from OCP.TDF import TDF_Label, TDF_LabelSequence
+from OCP.TDocStd import TDocStd_Document
+from OCP.XCAFDoc import XCAFDoc_DocumentTool, XCAFDoc_ShapeTool
 
-def _ocp_symbol(module_name: str, symbol_name: str) -> Any:
-    module = importlib.import_module(module_name)
-    return getattr(module, symbol_name)
-
-
-STEPCAFControl_Reader = _ocp_symbol("OCP.STEPCAFControl", "STEPCAFControl_Reader")
-TCollection_ExtendedString = _ocp_symbol("OCP.TCollection", "TCollection_ExtendedString")
-TDF_Label = _ocp_symbol("OCP.TDF", "TDF_Label")
-TDF_LabelSequence = _ocp_symbol("OCP.TDF", "TDF_LabelSequence")
-TDataStd_Name = _ocp_symbol("OCP.TDataStd", "TDataStd_Name")
-TDocStd_Document = _ocp_symbol("OCP.TDocStd", "TDocStd_Document")
-XCAFDoc_DocumentTool = _ocp_symbol("OCP.XCAFDoc", "XCAFDoc_DocumentTool")
-XCAFDoc_ShapeTool = _ocp_symbol("OCP.XCAFDoc", "XCAFDoc_ShapeTool")
-
-
-_SUPPORTED_STEP_SUFFIXES = {".stp", ".step"}
+SUPPORTED_STEP_SUFFIXES = {".stp", ".step"}
 
 
-def _ensure_supported_step_path(path: Path) -> None:
-    suffix = path.suffix.lower()
-    if suffix in _SUPPORTED_STEP_SUFFIXES:
-        return
+def extract_cad_manifest(step_path: str | Path) -> dict[str, Any]:
+    """Return assembly occurrences, hierarchy, and local poses from STEP."""
 
-    raise ValueError(
-        "Unsupported CAD format for constraints wizard. STEP is required "
-        f"({sorted(_SUPPORTED_STEP_SUFFIXES)}), got: {path.suffix or '<none>'}. "
-        "For Solid Edge Parasolid (.x_t/.x_b), export assembly as STEP AP242/AP214."
+    path = _validated_step_path(step_path)
+    document, shape_tool, roots = _read_step_document(path)
+    # Keep the XCAF document alive while its labels are traversed.
+    assert document is not None
+    occurrences: list[dict[str, Any]] = []
+
+    for root_index in range(1, roots.Length() + 1):
+        root = roots.Value(root_index)
+        root_name = _label_name(root)
+        root_id = f"root[{root_index}]/{root_name}"
+        occurrences.append(
+            {
+                "id": root_id,
+                "name": root_name,
+                "parent_id": None,
+                "depth": 0,
+                "is_assembly": bool(XCAFDoc_ShapeTool.IsAssembly_s(root)),
+                "transform_to_parent": _identity_transform(),
+            }
+        )
+        _append_occurrences(
+            shape_tool=shape_tool,
+            parent=root,
+            parent_id=root_id,
+            depth=1,
+            output=occurrences,
+        )
+
+    assembly_number = 0
+    part_number = 0
+    for occurrence in occurrences:
+        if occurrence["is_assembly"]:
+            assembly_number += 1
+            occurrence["ref"] = f"A{assembly_number:03d}"
+        else:
+            part_number += 1
+            occurrence["ref"] = f"P{part_number:03d}"
+
+    return {
+        "schema": "slac-cad-manifest/v1",
+        "source_step": str(path),
+        "transform_convention": "4x4 row-major transform from occurrence to parent",
+        "length_unit": "millimeter",
+        "occurrences": occurrences,
+    }
+
+
+def write_cad_manifest(
+    step_path: str | Path,
+    output_path: str | Path | None = None,
+) -> Path:
+    """Write the generated CAD facts beside the STEP assembly."""
+
+    step = _validated_step_path(step_path)
+    output = Path(output_path) if output_path else step.with_suffix(".cad.json")
+    manifest = extract_cad_manifest(step)
+    output.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    return output
+
+
+def write_kinematics_template(
+    manifest_path: str | Path,
+    output_path: str | Path | None = None,
+    *,
+    overwrite: bool = False,
+) -> Path:
+    """Write a compact review template that can later be compiled to SDF."""
+
+    manifest = Path(manifest_path)
+    output = (
+        Path(output_path)
+        if output_path
+        else manifest.with_name(manifest.name.removesuffix(".cad.json") + ".kinematics.yaml")
     )
+    if output.exists() and not overwrite:
+        raise FileExistsError(
+            f"Kinematics review already exists: {output}. "
+            "Use --force-template only if you intend to replace your assignments."
+        )
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    model_name = manifest.name.removesuffix(".cad.json")
+    catalog = "\n".join(
+        f"#   {item['ref']}  {'  ' * int(item['depth'])}{item['name']}"
+        for item in manifest_data["occurrences"]
+    )
+    text = f"""# STEP import succeeded. Use the short references below in rigid_groups.
+# Assemblies start with A; assign leaf parts (P references) to rigid groups.
+#
+{catalog}
+
+schema: slac-kinematics-review/v1
+cad_manifest: {manifest.as_posix()}
+model_name: {model_name}
+notes:
+  - This file contains human-reviewed intent; do not copy the full CAD tree here.
+  - Occurrence IDs come from the generated CAD manifest.
+  - All kinematic lengths are meters and angles are radians.
+
+rigid_groups:
+  base:
+    occurrences: []
+  x_carriage:
+    occurrences: []
+  y_carriage:
+    occurrences: []
+  z_carriage:
+    occurrences: []
+
+joints:
+  - name: x
+    type: prismatic
+    parent_group: base
+    child_group: x_carriage
+    axis_xyz: [1.0, 0.0, 0.0]
+    limits: [-0.05, 0.05]
+    home: 0.0
+    parent_to_joint:
+      translation_m: [0.0, 0.0, 0.0]
+      rotation_rpy_rad: [0.0, 0.0, 0.0]
+  - name: y
+    type: prismatic
+    parent_group: x_carriage
+    child_group: y_carriage
+    axis_xyz: [0.0, 1.0, 0.0]
+    limits: [-0.05, 0.05]
+    home: 0.0
+    parent_to_joint:
+      translation_m: [0.0, 0.0, 0.0]
+      rotation_rpy_rad: [0.0, 0.0, 0.0]
+  - name: z
+    type: prismatic
+    parent_group: y_carriage
+    child_group: z_carriage
+    axis_xyz: [0.0, 0.0, 1.0]
+    limits: [-0.05, 0.05]
+    home: 0.0
+    parent_to_joint:
+      translation_m: [0.0, 0.0, 0.0]
+      rotation_rpy_rad: [0.0, 0.0, 0.0]
+"""
+    output.write_text(text, encoding="utf-8")
+    return output
 
 
-def list_step_components(step_path: str | Path, recursive: bool = False) -> list[str]:
-    """Return component names from an assembly STEP file.
+def manifest_tree_lines(manifest: dict[str, Any]) -> list[str]:
+    """Render occurrence IDs as an indented review tree."""
 
-    When recursive is False, only first-level children under each free-shape root
-    are returned. When recursive is True, nested subcomponents are included.
-    """
-    path = Path(step_path)
-    if not path.exists():
-        raise FileNotFoundError(f"STEP file not found: {path}")
-    _ensure_supported_step_path(path)
-
-    doc = TDocStd_Document(TCollection_ExtendedString("slac-step-doc"))
-    reader = STEPCAFControl_Reader()
-    status = reader.ReadFile(str(path))
-    if str(status).endswith("RetDone") is False:
-        raise ValueError(f"Failed to read STEP file: {path} (status={status})")
-
-    transferred = reader.Transfer(doc)
-    if not transferred:
-        raise ValueError(f"Failed to transfer STEP data into document: {path}")
-
-    shape_tool = XCAFDoc_DocumentTool.ShapeTool_s(doc.Main())
-    roots = TDF_LabelSequence()
-    shape_tool.GetFreeShapes(roots)
-    if roots.Length() == 0:
-        return []
-
-    components: list[str] = []
-    for i in range(1, roots.Length() + 1):
-        root = roots.Value(i)
-        components.extend(_collect_components(root, recursive=recursive))
-
-    return components
+    return [
+        f"{'  ' * int(item['depth'])}- [{item['ref']}] {item['name']}"
+        for item in manifest["occurrences"]
+    ]
 
 
-def list_step_tree(step_path: str | Path) -> list[str]:
-    """Return a textual tree of assembly components."""
-    hierarchy = list_step_hierarchy(step_path)
-    lines: list[str] = []
-    for node in hierarchy:
-        lines.append(node["name"])
-        lines.extend(_hierarchy_to_lines(node["children"], depth=1))
+def write_step_preview(
+    step_path: str | Path,
+    output_path: str | Path | None = None,
+    *,
+    linear_deflection_mm: float = 0.5,
+) -> Path:
+    """Tessellate a STEP assembly to glTF for lightweight visual inspection."""
+
+    step = _validated_step_path(step_path)
+    document, _, roots = _read_step_document(step)
+    for index in range(1, roots.Length() + 1):
+        shape = XCAFDoc_ShapeTool.GetShape_s(roots.Value(index))
+        BRepMesh_IncrementalMesh(
+            shape,
+            linear_deflection_mm,
+            False,
+            0.5,
+            True,
+        ).Perform()
+
+    output = Path(output_path) if output_path else step.with_suffix(".preview.gltf")
+    writer = RWGltf_CafWriter(TCollection_AsciiString(str(output)), False)
+    writer.SetParallel(True)
+    succeeded = writer.Perform(
+        document,
+        TColStd_IndexedDataMapOfStringString(),
+        Message_ProgressRange(),
+    )
+    if not succeeded:
+        raise RuntimeError(f"Failed to write STEP preview: {output}")
+    return output
+
+
+def check_kinematics_review(review_path: str | Path) -> dict[str, Any]:
+    """Check group assignments and joint references without building a model."""
+
+    review_file = Path(review_path)
+    review = yaml.safe_load(review_file.read_text(encoding="utf-8"))
+    if not isinstance(review, dict):
+        raise ValueError("Kinematics review must contain a YAML object")
+
+    manifest_path = Path(str(review.get("cad_manifest", "")))
+    if not manifest_path.is_absolute() and not manifest_path.exists():
+        manifest_path = review_file.parent / manifest_path
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"CAD manifest referenced by review was not found: {manifest_path}")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    known_parts = {item["ref"]: item for item in manifest["occurrences"] if not item["is_assembly"]}
+
+    groups = review.get("rigid_groups", {})
+    if not isinstance(groups, dict) or not groups:
+        raise ValueError("rigid_groups must contain at least one group")
+    assigned_to: dict[str, list[str]] = {}
+    for group_name, group in groups.items():
+        if not isinstance(group, dict):
+            raise ValueError(f"Rigid group '{group_name}' must be an object")
+        references = group.get("occurrences", [])
+        if not isinstance(references, list):
+            raise ValueError(f"Rigid group '{group_name}' occurrences must be a list")
+        for reference in references:
+            assigned_to.setdefault(str(reference), []).append(str(group_name))
+
+    unknown = sorted(set(assigned_to) - set(known_parts))
+    duplicate = sorted(ref for ref, owners in assigned_to.items() if len(owners) > 1)
+    assigned = sorted(set(assigned_to) & set(known_parts))
+    unassigned = sorted(set(known_parts) - set(assigned_to))
+
+    group_names = set(groups)
+    joint_errors: list[str] = []
+    joints = review.get("joints", [])
+    if not isinstance(joints, list):
+        raise ValueError("joints must be a list")
+    for index, joint in enumerate(joints, start=1):
+        if not isinstance(joint, dict):
+            joint_errors.append(f"joint {index} is not an object")
+            continue
+        for field in ("parent_group", "child_group"):
+            group_name = joint.get(field)
+            if group_name not in group_names:
+                joint_errors.append(
+                    f"joint '{joint.get('name', index)}' references unknown {field} '{group_name}'"
+                )
+
+    return {
+        "manifest": manifest_path,
+        "part_count": len(known_parts),
+        "group_count": len(groups),
+        "joint_count": len(joints),
+        "assigned": assigned,
+        "unassigned": unassigned,
+        "unknown": unknown,
+        "duplicate": duplicate,
+        "joint_errors": joint_errors,
+        "part_names": {ref: item["name"] for ref, item in known_parts.items()},
+    }
+
+
+def status_lines(status: dict[str, Any]) -> list[str]:
+    """Render an actionable, user-facing review status."""
+
+    names = status["part_names"]
+    lines = [
+        "Kinematics review status",
+        f"  Parts assigned:   {len(status['assigned'])}/{status['part_count']}",
+        f"  Rigid groups:     {status['group_count']}",
+        f"  Joints described: {status['joint_count']}",
+    ]
+    for heading, key in (
+        ("Unassigned parts", "unassigned"),
+        ("Unknown references", "unknown"),
+        ("Assigned more than once", "duplicate"),
+    ):
+        references = status[key]
+        if references:
+            lines.append(f"{heading}:")
+            lines.extend(f"  - {ref}: {names.get(ref, '<not in manifest>')}" for ref in references)
+    if status["joint_errors"]:
+        lines.append("Joint errors:")
+        lines.extend(f"  - {error}" for error in status["joint_errors"])
+    if not status["unassigned"] and not any(
+        status[key] for key in ("unknown", "duplicate", "joint_errors")
+    ):
+        lines.append("Ready for SDF compilation.")
+    else:
+        lines.append("Next: assign each interference-significant P reference to one rigid group.")
     return lines
 
 
-def list_step_hierarchy(step_path: str | Path, recursive: bool = True) -> list[dict[str, Any]]:
-    """Return nested assembly hierarchy as JSON-serializable dicts."""
-    path = Path(step_path)
-    if not path.exists():
-        raise FileNotFoundError(f"STEP file not found: {path}")
-    _ensure_supported_step_path(path)
+def view_step_preview(preview_path: str | Path) -> None:
+    """Display the STEP-derived glTF in Meshcat until Enter is pressed."""
 
-    doc = TDocStd_Document(TCollection_ExtendedString("slac-step-doc"))
+    from pydrake.geometry import Mesh, Meshcat
+
+    preview = Path(preview_path).resolve()
+    meshcat = Meshcat()
+    # OCCT's glTF writer converts its millimetre working units to glTF metres.
+    meshcat.SetObject("/STEP assembly", Mesh(preview, 1.0))
+    # Start close enough for compact positioning hardware to be unmistakable.
+    meshcat.SetCameraPose([0.4, 0.4, 0.4], [0.0, 0.0, 0.0])
+    print(f"STEP preview: {meshcat.web_url()}")
+    input("Press Enter to close the preview... ")
+
+
+def _append_occurrences(
+    *,
+    shape_tool: Any,
+    parent: Any,
+    parent_id: str,
+    depth: int,
+    output: list[dict[str, Any]],
+) -> None:
+    children = TDF_LabelSequence()
+    XCAFDoc_ShapeTool.GetComponents_s(parent, children)
+
+    for child_index in range(1, children.Length() + 1):
+        child = children.Value(child_index)
+        name = _component_name(child)
+        occurrence_id = f"{parent_id}/{child_index}:{name}"
+        referred = _referred_label(child)
+        recurse_target = referred if referred is not None else child
+        location = XCAFDoc_ShapeTool.GetLocation_s(child)
+        output.append(
+            {
+                "id": occurrence_id,
+                "name": name,
+                "parent_id": parent_id,
+                "depth": depth,
+                "is_assembly": bool(XCAFDoc_ShapeTool.IsAssembly_s(recurse_target)),
+                "transform_to_parent": _transform_matrix(location.Transformation()),
+            }
+        )
+        if XCAFDoc_ShapeTool.IsAssembly_s(recurse_target):
+            _append_occurrences(
+                shape_tool=shape_tool,
+                parent=recurse_target,
+                parent_id=occurrence_id,
+                depth=depth + 1,
+                output=output,
+            )
+
+
+def _read_step_document(path: Path) -> tuple[Any, Any, Any]:
+    document = TDocStd_Document(TCollection_ExtendedString("slac-cad-manifest"))
     reader = STEPCAFControl_Reader()
     status = reader.ReadFile(str(path))
-    if str(status).endswith("RetDone") is False:
+    if not str(status).endswith("RetDone"):
         raise ValueError(f"Failed to read STEP file: {path} (status={status})")
+    if not reader.Transfer(document):
+        raise ValueError(f"Failed to transfer STEP assembly: {path}")
 
-    transferred = reader.Transfer(doc)
-    if not transferred:
-        raise ValueError(f"Failed to transfer STEP data into document: {path}")
-
-    shape_tool = XCAFDoc_DocumentTool.ShapeTool_s(doc.Main())
+    shape_tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
     roots = TDF_LabelSequence()
     shape_tool.GetFreeShapes(roots)
     if roots.Length() == 0:
-        return []
-
-    nodes: list[dict[str, Any]] = []
-    for i in range(1, roots.Length() + 1):
-        root = roots.Value(i)
-        nodes.append(
-            {
-                "name": _label_name(root),
-                "children": _collect_hierarchy_nodes(root, recursive=recursive),
-            }
-        )
-    return nodes
+        raise ValueError(f"STEP assembly contains no free shapes: {path}")
+    return document, shape_tool, roots
 
 
-def write_constraints_template(
-    step_path: str | Path,
-    output_path: str | Path | None = None,
-    recursive: bool = False,
-) -> Path:
-    """Write a JSON constraints template beside the STEP file."""
-    step = Path(step_path)
-    component_names = list_step_components(step, recursive=recursive)
-    hierarchy_rows = list_step_hierarchy_rows(step, recursive=recursive)
-    if not component_names:
-        raise ValueError("No assembly components were discovered in the STEP file")
-
-    template = {
-        "assembly_step": str(step),
-        "notes": [
-            "Set base_components to fixed structure that does not move.",
-            "Create one entry per motorized axis in joints.",
-            "Each joint components list should include all parts that move together on that axis.",
-            "Units: meters for limits_m and home_m.",
-        ],
-        "base_components": [],
-        "assembly_hierarchy": [row["name"] for row in hierarchy_rows],
-        "joints": [
-            {
-                "name": "linear_motor_1",
-                "type": "linear",
-                "axis_xyz": [1.0, 0.0, 0.0],
-                "limits_m": [0.0, 0.05],
-                "home_m": 0.0,
-                "components": [],
-            },
-            {
-                "name": "linear_motor_2",
-                "type": "linear",
-                "axis_xyz": [0.0, 1.0, 0.0],
-                "limits_m": [0.0, 0.05],
-                "home_m": 0.0,
-                "components": [],
-            },
-            {
-                "name": "linear_motor_3",
-                "type": "linear",
-                "axis_xyz": [0.0, 0.0, 1.0],
-                "limits_m": [0.0, 0.05],
-                "home_m": 0.0,
-                "components": [],
-            },
-        ],
-    }
-
-    out = Path(output_path) if output_path else step.with_suffix(".constraints.json")
-    out.write_text(_render_constraints_json(template, hierarchy_rows), encoding="utf-8")
-    return out
-
-
-def _render_constraints_json(template: dict[str, Any], hierarchy_rows: list[dict[str, Any]]) -> str:
-    """Render JSON with tab indentation and visually nested hierarchy lines."""
-    dumped = json.dumps(template, indent="\t", ensure_ascii=False)
-    return _replace_hierarchy_block(dumped, hierarchy_rows)
-
-
-def _replace_hierarchy_block(text: str, hierarchy_rows: list[dict[str, Any]]) -> str:
-    marker = '"assembly_hierarchy": ['
-    key_start = text.find(marker)
-    if key_start < 0:
-        return text
-
-    open_bracket = text.find("[", key_start)
-    if open_bracket < 0:
-        return text
-
-    close_bracket = _find_matching_bracket(text, open_bracket)
-    if close_bracket < 0:
-        return text
-
-    custom_lines = ["\t\"assembly_hierarchy\": ["]
-    for idx, row in enumerate(hierarchy_rows):
-        suffix = "," if idx < len(hierarchy_rows) - 1 else ""
-        depth = int(row.get("depth", 0))
-        name = str(row.get("name", ""))
-        custom_lines.append(f"\t\t{'\t' * depth}{json.dumps(name, ensure_ascii=False)}{suffix}")
-    custom_lines.append("\t]")
-    custom_block = "\n".join(custom_lines)
-
-    return text[:key_start] + custom_block + text[close_bracket + 1 :]
-
-
-def _find_matching_bracket(text: str, open_index: int) -> int:
-    depth = 0
-    in_string = False
-    escaped = False
-
-    for i in range(open_index, len(text)):
-        ch = text[i]
-        if in_string:
-            if escaped:
-                escaped = False
-            elif ch == "\\":
-                escaped = True
-            elif ch == '"':
-                in_string = False
-            continue
-
-        if ch == '"':
-            in_string = True
-            continue
-
-        if ch == "[":
-            depth += 1
-        elif ch == "]":
-            depth -= 1
-            if depth == 0:
-                return i
-
-    return -1
+def _component_name(label: Any) -> str:
+    name = _label_name(label)
+    if name != "<unnamed>":
+        return name
+    referred = _referred_label(label)
+    return _label_name(referred) if referred is not None else name
 
 
 def _label_name(label: Any) -> str:
-    name = TDataStd_Name()
-    if label.FindAttribute(TDataStd_Name.GetID_s(), name):
-        return name.Get().ToExtString()
+    attribute = TDataStd_Name()
+    if label.FindAttribute(TDataStd_Name.GetID_s(), attribute):
+        return attribute.Get().ToExtString()
     return "<unnamed>"
 
 
-def _dedupe_names(names: list[str]) -> list[str]:
-    counter = Counter(names)
-    used: dict[str, int] = {}
-    out: list[str] = []
-    for item in names:
-        if counter[item] == 1:
-            out.append(item)
-            continue
-
-        used[item] = used.get(item, 0) + 1
-        out.append(f"{item}#{used[item]}")
-    return out
+def _referred_label(label: Any) -> Any | None:
+    referred = TDF_Label()
+    if XCAFDoc_ShapeTool.GetReferredShape_s(label, referred):
+        return referred
+    return None
 
 
-def _print_parts(step_file: str, unique: bool, output: str | None, recursive: bool) -> None:
-    parts = list_step_components(step_file, recursive=recursive)
-    if unique:
-        parts = sorted(set(parts))
-
-    if output:
-        out = Path(output)
-        out.write_text("\n".join(parts) + "\n", encoding="utf-8")
-        print(f"Wrote {len(parts)} part names to: {out}")
-        return
-
-    for part in parts:
-        print(part)
-    print(f"Total parts: {len(parts)}")
+def _transform_matrix(transform: Any) -> list[list[float]]:
+    return [
+        [float(transform.Value(row, column)) for column in range(1, 5)] for row in range(1, 4)
+    ] + [[0.0, 0.0, 0.0, 1.0]]
 
 
-def _print_tree(step_file: str, output: str | None) -> None:
-    lines = list_step_tree(step_file)
-    text = "\n".join(lines) + "\n"
+def _identity_transform() -> list[list[float]]:
+    return [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
 
-    if output:
-        out = Path(output)
-        out.write_text(text, encoding="utf-8")
-        print(f"Wrote assembly tree ({len(lines)} lines) to: {out}")
-        return
 
-    print(text, end="")
-    print(f"Total tree lines: {len(lines)}")
+def _validated_step_path(step_path: str | Path) -> Path:
+    path = Path(step_path)
+    if not path.exists():
+        raise FileNotFoundError(f"STEP file not found: {path}")
+    if path.suffix.lower() not in SUPPORTED_STEP_SUFFIXES:
+        raise ValueError(f"Expected a STEP file ({sorted(SUPPORTED_STEP_SUFFIXES)}): {path}")
+    return path
 
 
 def main() -> None:
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="Generate constraints template or print STEP assembly part names"
-    )
-    parser.add_argument("step_file", nargs="?", help="Path to STEP assembly file")
+    parser = argparse.ArgumentParser(description="Generate a CAD manifest from STEP")
+    parser.add_argument("step_file")
+    parser.add_argument("--manifest-output")
+    parser.add_argument("--kinematics-output")
+    parser.add_argument("--manifest-only", action="store_true")
+    parser.add_argument("--show-tree", action="store_true")
     parser.add_argument(
-        "--output",
-        default=None,
-        help=(
-            "Output JSON path for template mode, or text file path for --list-parts mode "
-            "(default template output: <step_file>.constraints.json)"
-        ),
-    )
-    parser.add_argument(
-        "--list-parts",
+        "--no-preview",
         action="store_true",
-        help=(
-            "Print part names from assembly components (recursive by default) "
-            "instead of writing template"
-        ),
+        help="Skip creation of the browser-viewable glTF preview",
     )
     parser.add_argument(
-        "--unique",
+        "--view",
         action="store_true",
-        help="With --list-parts, print unique sorted names",
+        help="Open the generated STEP preview in Meshcat",
     )
     parser.add_argument(
-        "--recursive",
+        "--force-template",
         action="store_true",
-        help="Include nested subcomponents (default behavior for template and --list-parts)",
+        help="Replace an existing kinematics review template",
     )
     parser.add_argument(
-        "--show-tree",
+        "--check",
         action="store_true",
-        help="Print assembly hierarchy tree from STEP labels",
-    )
-    parser.add_argument(
-        "--top-level-only",
-        action="store_true",
-        help="Include only first-level components (disable nested subcomponent traversal)",
+        help="Check assignments in the kinematics review after generation",
     )
     args = parser.parse_args()
 
-    step_file = args.step_file or _resolve_default_step_file()
-    if not step_file:
-        parser.error(
-            "step_file is required. Either pass a path, or place exactly one .stp/.step file in step_files/."
-        )
+    manifest_path = write_cad_manifest(args.step_file, args.manifest_output)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assembly_count = sum(item["is_assembly"] for item in manifest["occurrences"])
+    part_count = len(manifest["occurrences"]) - assembly_count
+    print("STEP READ OK")
+    print(f"  Assemblies: {assembly_count}")
+    print(f"  Leaf parts: {part_count}")
+    print(f"  CAD manifest: {manifest_path}")
 
     if args.show_tree:
-        _print_tree(step_file, output=args.output)
-        return
+        print("\nAssembly tree")
+        print("\n".join(manifest_tree_lines(manifest)))
 
-    # Default traversal is recursive; --top-level-only forces shallow mode.
-    recursive_mode = args.recursive or (not args.top_level_only)
+    preview_path = None
+    if not args.no_preview:
+        preview_path = write_step_preview(args.step_file)
+        print(f"  STEP preview: {preview_path}")
 
-    if args.list_parts:
-        _print_parts(step_file, unique=args.unique, output=args.output, recursive=recursive_mode)
-        return
+    template_path = (
+        Path(args.kinematics_output)
+        if args.kinematics_output
+        else Path(str(manifest_path).removesuffix(".cad.json") + ".kinematics.yaml")
+    )
+    if not args.manifest_only:
+        try:
+            template_path = write_kinematics_template(
+                manifest_path,
+                args.kinematics_output,
+                overwrite=args.force_template,
+            )
+            print(f"  Kinematics review: {template_path}")
+        except FileExistsError:
+            print(f"  Kinematics review: {template_path} (kept existing assignments)")
 
-    out = write_constraints_template(step_file, args.output, recursive=recursive_mode)
-    print(f"Wrote constraints template: {out}")
+    if args.check:
+        if not template_path.exists():
+            parser.error(f"Cannot check missing kinematics review: {template_path}")
+        print()
+        print("\n".join(status_lines(check_kinematics_review(template_path))))
 
-
-def _collect_components(root: Any, recursive: bool) -> list[str]:
-    seq = TDF_LabelSequence()
-    XCAFDoc_ShapeTool.GetComponents_s(root, seq)
-
-    names: list[str] = []
-    for i in range(1, seq.Length() + 1):
-        child = seq.Value(i)
-        names.append(_component_name(child))
-        if recursive:
-            recurse_target = _recurse_label(child)
-            names.extend(_collect_components(recurse_target, recursive=True))
-    return names
-
-
-def _collect_tree_lines(root: Any, depth: int) -> list[str]:
-    seq = TDF_LabelSequence()
-    XCAFDoc_ShapeTool.GetComponents_s(root, seq)
-
-    lines: list[str] = []
-    for i in range(1, seq.Length() + 1):
-        child = seq.Value(i)
-        lines.append(f"{'  ' * depth}- {_component_name(child)}")
-        recurse_target = _recurse_label(child)
-        lines.extend(_collect_tree_lines(recurse_target, depth + 1))
-    return lines
-
-
-def _collect_hierarchy_nodes(root: Any, recursive: bool) -> list[dict[str, Any]]:
-    seq = TDF_LabelSequence()
-    XCAFDoc_ShapeTool.GetComponents_s(root, seq)
-
-    nodes: list[dict[str, Any]] = []
-    for i in range(1, seq.Length() + 1):
-        child = seq.Value(i)
-        child_node: dict[str, Any] = {"name": _component_name(child), "children": []}
-        if recursive:
-            recurse_target = _recurse_label(child)
-            child_node["children"] = _collect_hierarchy_nodes(recurse_target, recursive=True)
-        nodes.append(child_node)
-    return nodes
-
-
-def list_step_hierarchy_rows(step_path: str | Path, recursive: bool = True) -> list[dict[str, Any]]:
-    """Return hierarchy as flat rows: [{"depth": int, "name": str}, ...]."""
-    hierarchy = list_step_hierarchy(step_path, recursive=recursive)
-    rows: list[dict[str, Any]] = []
-    for node in hierarchy:
-        rows.append({"depth": 0, "name": node["name"]})
-        rows.extend(_hierarchy_to_rows(node["children"], depth=1))
-    return rows
-
-
-def _hierarchy_to_lines(nodes: list[dict[str, Any]], depth: int) -> list[str]:
-    lines: list[str] = []
-    for node in nodes:
-        lines.append(f"{'\t' * depth}{node['name']}")
-        lines.extend(_hierarchy_to_lines(node.get("children", []), depth + 1))
-    return lines
-
-
-def _hierarchy_to_rows(nodes: list[dict[str, Any]], depth: int) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for node in nodes:
-        rows.append({"depth": depth, "name": node["name"]})
-        rows.extend(_hierarchy_to_rows(node.get("children", []), depth + 1))
-    return rows
-
-
-def _component_name(component_label: Any) -> str:
-    """Prefer component instance name, falling back to referred shape name."""
-    comp_name = _label_name(component_label)
-    if comp_name != "<unnamed>":
-        return comp_name
-
-    referred = TDF_Label()
-    if XCAFDoc_ShapeTool.GetReferredShape_s(component_label, referred):
-        ref_name = _label_name(referred)
-        if ref_name != "<unnamed>":
-            return ref_name
-    return comp_name
-
-
-def _recurse_label(component_label: Any) -> Any:
-    """Recurse through referred assembly labels when available."""
-    referred = TDF_Label()
-    if XCAFDoc_ShapeTool.GetReferredShape_s(component_label, referred):
-        if XCAFDoc_ShapeTool.IsAssembly_s(referred):
-            return referred
-    return component_label
-
-
-def _resolve_default_step_file() -> str | None:
-    """Return a default STEP path when there is exactly one obvious candidate."""
-    candidates: list[Path] = []
-
-    for pattern in ("step_files/*.stp", "step_files/*.step", "*.stp", "*.step"):
-        candidates.extend(Path(".").glob(pattern))
-
-    # Deduplicate while preserving order.
-    unique: list[Path] = []
-    seen: set[Path] = set()
-    for item in candidates:
-        resolved = item.resolve()
-        if resolved not in seen:
-            seen.add(resolved)
-            unique.append(item)
-
-    if len(unique) == 1:
-        return str(unique[0])
-    return None
+    if args.view:
+        if preview_path is None:
+            parser.error("--view cannot be combined with --no-preview")
+        view_step_preview(preview_path)
+    else:
+        print("\nNext steps")
+        print(f"  1. View the STEP: slac-cad-manifest {args.step_file} --view")
+        print(f"  2. Edit rigid_groups in: {template_path}")
+        print(f"  3. Check progress: slac-cad-manifest {args.step_file} --check --no-preview")
 
 
 if __name__ == "__main__":

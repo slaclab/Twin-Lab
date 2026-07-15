@@ -26,22 +26,21 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0",
-    "pytest-cov>=4.0",
-    "black>=22.0",
-    "flake8>=5.0",
-    "mypy>=0.990",
+    "pytest>=8.0",
+    "ruff>=0.12",
 ]
 cad = [
-    "numpy>=2.0",
-    "trimesh>=4.4",
-    "scipy>=1.13",
-    "python-fcl>=0.7",
     "cadquery-ocp>=7.8",
+    "pyyaml>=6.0",
 ]
 drake = [
     "drake>=1.54",
 ]
+
+[project.scripts]
+slac-cad-manifest = "slac_robotics.constraints_wizard:main"
+slac-motion = "slac_robotics.cad_motion:main"
+slac-view = "slac_robotics.scene:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -49,12 +48,9 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 
-[tool.black]
+[tool.ruff]
 line-length = 100
-target-version = ["py310"]
+target-version = "py310"
 
-[tool.mypy]
-python_version = "3.10"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = false
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
