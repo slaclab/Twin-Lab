@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
 from OCP.BRepMesh import BRepMesh_IncrementalMesh
 from OCP.Message import Message_ProgressRange
 from OCP.RWGltf import RWGltf_CafWriter
@@ -21,6 +22,7 @@ from OCP.TColStd import TColStd_IndexedDataMapOfStringString
 from OCP.TDataStd import TDataStd_Name
 from OCP.TDF import TDF_Label, TDF_LabelSequence
 from OCP.TDocStd import TDocStd_Document
+from OCP.TopLoc import TopLoc_Location
 from OCP.XCAFDoc import XCAFDoc_DocumentTool, XCAFDoc_ShapeTool
 
 SUPPORTED_STEP_SUFFIXES = {".stp", ".step"}
@@ -187,11 +189,27 @@ def write_step_preview(
     output_path: str | Path | None = None,
     *,
     linear_deflection_mm: float = 0.5,
+    focus_ref: str | None = None,
+    focus_refs: list[str] | None = None,
 ) -> Path:
     """Tessellate a STEP assembly to glTF for lightweight visual inspection."""
 
     step = _validated_step_path(step_path)
     document, _, roots = _read_step_document(step)
+    if focus_ref is not None and focus_refs is not None:
+        raise ValueError("Use either focus_ref or focus_refs, not both")
+    selected_refs = focus_refs if focus_refs is not None else ([focus_ref] if focus_ref else [])
+    if selected_refs:
+        focused_document = TDocStd_Document(TCollection_ExtendedString("slac-focused-preview"))
+        focused_shape_tool = XCAFDoc_DocumentTool.ShapeTool_s(focused_document.Main())
+        for selected_ref in selected_refs:
+            shape, location = _occurrence_shape_by_ref(roots, selected_ref)
+            placed = BRepBuilderAPI_Transform(shape, location.Transformation(), True).Shape()
+            focused_shape_tool.AddShape(placed, True, True)
+        document = focused_document
+        roots = TDF_LabelSequence()
+        focused_shape_tool.GetFreeShapes(roots)
+
     for index in range(1, roots.Length() + 1):
         shape = XCAFDoc_ShapeTool.GetShape_s(roots.Value(index))
         BRepMesh_IncrementalMesh(
@@ -202,7 +220,13 @@ def write_step_preview(
             True,
         ).Perform()
 
-    output = Path(output_path) if output_path else step.with_suffix(".preview.gltf")
+    output = (
+        Path(output_path)
+        if output_path
+        else step.with_name(
+            f"{step.stem}.{focus_ref}.preview.gltf" if focus_ref else f"{step.stem}.preview.gltf"
+        )
+    )
     writer = RWGltf_CafWriter(TCollection_AsciiString(str(output)), False)
     writer.SetParallel(True)
     succeeded = writer.Perform(
@@ -380,6 +404,40 @@ def _read_step_document(path: Path) -> tuple[Any, Any, Any]:
     return document, shape_tool, roots
 
 
+def _occurrence_shape_by_ref(roots: Any, wanted_ref: str) -> tuple[Any, Any]:
+    """Find an assembled occurrence using the same refs as the CAD manifest."""
+
+    counters = {"assembly": 0, "part": 0}
+
+    def walk(label: Any, parent_location: Any, *, is_root: bool = False) -> tuple[Any, Any] | None:
+        referred = None if is_root else _referred_label(label)
+        target = label if referred is None else referred
+        is_assembly = bool(XCAFDoc_ShapeTool.IsAssembly_s(target))
+        key = "assembly" if is_assembly else "part"
+        counters[key] += 1
+        current_ref = f"{'A' if is_assembly else 'P'}{counters[key]:03d}"
+        local = TopLoc_Location() if is_root else XCAFDoc_ShapeTool.GetLocation_s(label)
+        global_location = parent_location.Multiplied(local)
+
+        if current_ref == wanted_ref:
+            return XCAFDoc_ShapeTool.GetShape_s(target), global_location
+        if is_assembly:
+            children = TDF_LabelSequence()
+            XCAFDoc_ShapeTool.GetComponents_s(target, children)
+            for index in range(1, children.Length() + 1):
+                found = walk(children.Value(index), global_location)
+                if found is not None:
+                    return found
+        return None
+
+    identity = TopLoc_Location()
+    for index in range(1, roots.Length() + 1):
+        found = walk(roots.Value(index), identity, is_root=True)
+        if found is not None:
+            return found
+    raise ValueError(f"Occurrence ref not found in STEP assembly: {wanted_ref}")
+
+
 def _component_name(label: Any) -> str:
     name = _label_name(label)
     if name != "<unnamed>":
@@ -426,6 +484,15 @@ def _validated_step_path(step_path: str | Path) -> Path:
     return path
 
 
+def _outputs_are_fresh(source: Path, outputs: list[Path]) -> bool:
+    """Return whether every generated output is at least as new as its source."""
+
+    return all(
+        output.exists() and output.stat().st_mtime_ns >= source.stat().st_mtime_ns
+        for output in outputs
+    )
+
+
 def main() -> None:
     import argparse
 
@@ -435,6 +502,31 @@ def main() -> None:
     parser.add_argument("--kinematics-output")
     parser.add_argument("--manifest-only", action="store_true")
     parser.add_argument("--show-tree", action="store_true")
+    preview_selection = parser.add_mutually_exclusive_group()
+    preview_selection.add_argument(
+        "--focus",
+        metavar="A_REF",
+        help="Preview only one assembly occurrence, for example A035",
+    )
+    preview_selection.add_argument(
+        "--stage-inventory",
+        help="Preview only stage occurrences listed in a stage inventory YAML",
+    )
+    parser.add_argument(
+        "--refresh-manifest",
+        action="store_true",
+        help="Re-read STEP hierarchy even when the generated manifest is current",
+    )
+    parser.add_argument(
+        "--refresh-preview",
+        action="store_true",
+        help="Retessellate the STEP even when the generated preview is current",
+    )
+    parser.add_argument(
+        "--preview-deflection-mm",
+        type=float,
+        help="Preview tessellation tolerance; defaults to 2 mm for STEP files over 50 MB",
+    )
     parser.add_argument(
         "--no-preview",
         action="store_true",
@@ -457,14 +549,20 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    manifest_path = write_cad_manifest(args.step_file, args.manifest_output)
+    step_path = _validated_step_path(args.step_file)
+    manifest_path = (
+        Path(args.manifest_output) if args.manifest_output else step_path.with_suffix(".cad.json")
+    )
+    manifest_cached = not args.refresh_manifest and _outputs_are_fresh(step_path, [manifest_path])
+    if not manifest_cached:
+        manifest_path = write_cad_manifest(step_path, manifest_path)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assembly_count = sum(item["is_assembly"] for item in manifest["occurrences"])
     part_count = len(manifest["occurrences"]) - assembly_count
     print("STEP READ OK")
     print(f"  Assemblies: {assembly_count}")
     print(f"  Leaf parts: {part_count}")
-    print(f"  CAD manifest: {manifest_path}")
+    print(f"  CAD manifest: {manifest_path}{' (cached)' if manifest_cached else ''}")
 
     if args.show_tree:
         print("\nAssembly tree")
@@ -472,8 +570,34 @@ def main() -> None:
 
     preview_path = None
     if not args.no_preview:
-        preview_path = write_step_preview(args.step_file)
-        print(f"  STEP preview: {preview_path}")
+        inventory_refs: list[str] | None = None
+        preview_tag = args.focus
+        if args.stage_inventory:
+            inventory = yaml.safe_load(Path(args.stage_inventory).read_text(encoding="utf-8"))
+            inventory_refs = [str(item["ref"]) for item in inventory["stage_instances"]]
+            preview_tag = f"{inventory['subassembly']['ref']}.stages"
+        preview_path = step_path.with_name(
+            f"{step_path.stem}.{preview_tag}.preview.gltf"
+            if preview_tag
+            else f"{step_path.stem}.preview.gltf"
+        )
+        preview_outputs = [preview_path, preview_path.with_suffix(".bin")]
+        preview_cached = not args.refresh_preview and _outputs_are_fresh(step_path, preview_outputs)
+        if not preview_cached:
+            deflection_mm = args.preview_deflection_mm
+            if deflection_mm is None:
+                deflection_mm = 2.0 if step_path.stat().st_size > 50_000_000 else 0.5
+            preview_path = write_step_preview(
+                step_path,
+                preview_path,
+                linear_deflection_mm=deflection_mm,
+                focus_ref=args.focus,
+                focus_refs=inventory_refs,
+            )
+            if inventory_refs is not None:
+                print(f"  Stage occurrences: {len(inventory_refs)}")
+            print(f"  Preview tolerance: {deflection_mm:g} mm")
+        print(f"  STEP preview: {preview_path}{' (cached)' if preview_cached else ''}")
 
     template_path = (
         Path(args.kinematics_output)
