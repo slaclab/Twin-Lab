@@ -43,6 +43,20 @@ This converts the STEP assembly to a temporary glTF preview and displays it in
 Meshcat. The preview verifies geometry and placement, but it does not move yet.
 The kinematics review is what tells Drake which pieces move together.
 
+The manifest and preview are cached until the STEP timestamp changes. Assemblies
+over 50 MB automatically use a 2 mm tessellation tolerance for a faster first
+view. Use `--refresh-preview --preview-deflection-mm 0.5` only when the coarse
+preview lacks detail needed for grouping.
+
+Use `--focus A035` to export and display only one assembly occurrence. Focused
+previews have their own cache file and preserve the selected occurrence's pose in
+the full assembly coordinate system.
+
+For interactive work on a large assembly, `--stage-inventory <file>` is usually
+better than a raw subtree preview. It includes only cataloged stage occurrences
+and excludes fasteners, cable chains, and payload detail that would otherwise
+make the browser viewer sluggish.
+
 Edit the much smaller `.kinematics.yaml` file. For each moving carriage, copy the
 short `P` references into one rigid group:
 
@@ -102,13 +116,33 @@ manifest does not overwrite the review file unless `--force-template` is passed.
 ## 4. Compile one reusable SDF model
 
 The reviewed groups and joints become one SDF mechanism containing links,
-joints, visual meshes, simplified collision meshes, and named mounting/tool
-frames. The current reference is:
+joints, and portable STL visual meshes. Compile the reviewed `*43841`
+assembly with:
+
+```bash
+slac-compile-sdf step_files/DSG-000040389.43841.inventory.yaml
+```
+
+The output under `exports/` includes the SDF package directory, a shareable ZIP,
+joint metadata, and a MATLAB Robotics System Toolbox loader. SDF joint coordinates
+are relative to the reviewed CAD home pose; nonzero logical display offsets are
+recorded separately in `joint_metadata.csv`. Detailed collision export remains
+experimental because aggregate rigid-group meshes must first be split into useful
+per-part convex pieces and filtered at mechanical interfaces.
+
+The simple reference model remains:
 
 - `models/stages/three_axis_stage.sdf`
 
 Define a stage or subassembly once, then instantiate it many times. Do not copy
 its component list into the top-level spectrometer scene.
+
+Reusable manufacturer/model facts and nominal travel limits live in
+`models/stages/catalog.yaml`. Assembly-specific occurrence matches belong in a
+small inventory such as `step_files/DSG-000040389.43841.inventory.yaml`. This
+keeps nineteen stage occurrences in the `*43841` assembly linked to ten reusable
+definitions without pretending that their joint frames or payload groups are
+identical.
 
 ## 5. Compose the instrument
 
@@ -146,6 +180,5 @@ hardware decision.
 
 ## Next implementation step
 
-The next code boundary is a compiler from the reviewed kinematics YAML and CAD
-manifest into an SDF model with per-rigid-group collision meshes. Until that
-compiler exists, the checked-in SDF proxy is the executable reference model.
+Add calibrated inertial properties, surveyed joint frames, and simplified or
+convex-decomposed collision meshes for faster large-scale clearance planning.

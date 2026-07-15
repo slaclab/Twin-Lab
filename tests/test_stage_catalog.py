@@ -1,0 +1,135 @@
+import json
+import math
+from pathlib import Path
+
+import yaml
+
+from slac_robotics.stage_cad_viewer import (
+    _is_fastener_name,
+    _reviewed_home,
+    _reviewed_limits,
+    _rotate_vector,
+    _transform_data,
+)
+
+
+def test_43841_inventory_uses_reusable_stage_catalog() -> None:
+    catalog = yaml.safe_load(Path("models/stages/catalog.yaml").read_text(encoding="utf-8"))
+    inventory = yaml.safe_load(
+        Path("step_files/DSG-000040389.43841.inventory.yaml").read_text(encoding="utf-8")
+    )
+    manifest = json.loads(Path("step_files/DSG-000040389.cad.json").read_text(encoding="utf-8"))
+
+    stages = catalog["stages"]
+    instances = inventory["stage_instances"]
+    references = [instance["ref"] for instance in instances]
+
+    assert inventory["subassembly"]["ref"] == "A035"
+    assert len(instances) == 19
+    assert len(references) == len(set(references))
+    assert all(instance["catalog"] in stages for instance in instances)
+
+    occurrences = {item["ref"]: item for item in manifest["occurrences"]}
+    root_id = occurrences[inventory["subassembly"]["ref"]]["id"]
+    assert all(occurrences[ref]["is_assembly"] for ref in references)
+    assert all(occurrences[ref]["id"].startswith(f"{root_id}/") for ref in references)
+
+    assert stages["kohzu_sxa0530_r01_bm"]["limits"] == [-0.015, 0.015]
+    assert stages["kohzu_sxa0750_r01_r_bm"]["limits"] == [-0.025, 0.025]
+    assert stages["kohzu_sxa0750_r01_r_bm"]["mirrored"] is True
+
+    assert inventory["hidden_occurrences"] == ["P772", "P773", "P774"]
+    assert inventory["attachment_overrides"]["fixed"] == [
+        "P849",
+        "P913",
+        "P915",
+        "P1021",
+        "P1022",
+        "P1023",
+        "P1024",
+        "P1073",
+    ]
+    assert inventory["attachment_overrides"]["moving"]["A056"] == [
+        "P1035",
+        "P1033",
+        "P1034",
+    ]
+    assert list(inventory["motion_chains"]) == [
+        "North Crystal",
+        "Middle Crystal",
+        "South Crystal",
+    ]
+    assert inventory["motion_chains"]["South Crystal"] == ["A053", "A052", "A051", "A050"]
+    assert inventory["attachment_overrides"]["moving"]["A051"] == ["P979"]
+
+    assert list(inventory["compound_motion_chains"]) == [
+        "North Polycap",
+        "Middle Polycap",
+        "South Polycap",
+    ]
+    bottom_tower = inventory["compound_motion_chains"]["South Polycap"]
+    assert [joint["key"] for joint in bottom_tower] == ["A057:z", "A056:y", "A056:x"]
+    assert [joint["moving_role"] for joint in bottom_tower] == ["moving", "y", "x"]
+    assert bottom_tower[1]["axis_local"] == [1, 0, 0]
+    assert bottom_tower[2]["axis_local"] == [0, 1, 0]
+    assert inventory["attachment_overrides"]["moving"]["A057"] == ["P1040"]
+    assert inventory["attachment_overrides"]["moving"]["A061"] == ["P1072"]
+    assert stages["kohzu_ya04a_r102_rrn_bm"]["component_roles"] == {
+        "fixed": [2],
+        "y": [3],
+        "x": [1],
+    }
+    assert inventory["joint_limit_overrides"]["A043"] == {
+        "unit": "degree",
+        "limits": [-30, 30],
+    }
+    assert inventory["joint_limit_overrides"]["A046"] == {
+        "unit": "degree",
+        "limits": [150, 210],
+        "home": 180,
+    }
+
+
+def test_converts_stage_occurrence_transform_to_meters() -> None:
+    class Transform:
+        def Value(self, row: int, column: int) -> float:
+            values = (
+                (1.0, 0.0, 0.0, 100.0),
+                (0.0, 0.0, -1.0, 200.0),
+                (0.0, 1.0, 0.0, 300.0),
+            )
+            return values[row - 1][column - 1]
+
+    data = _transform_data(Transform())
+    assert data["translation_m"] == [0.1, 0.2, 0.3]
+    assert data["rotation"] == [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]]
+
+
+def test_filters_screws_without_filtering_mounts() -> None:
+    assert _is_fastener_name("McMasterCarr__SHCS_M3x.5x8mmSST")
+    assert _is_fastener_name("0.25-20 SCREW, HEX SCH CAP")
+    assert not _is_fastener_name("Mounting Brackets for Cable and Hose Carrier")
+
+
+def test_rotates_catalog_axis_into_assembly_frame() -> None:
+    rotation = [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+    assert _rotate_vector(rotation, [1.0, 0.0, 0.0]) == [0.0, 1.0, 0.0]
+
+
+def test_reviewed_angular_limits_are_converted_to_radians() -> None:
+    inventory = {
+        "joint_limit_overrides": {
+            "A043": {"unit": "degree", "limits": [-30, 30]},
+        }
+    }
+    limits = _reviewed_limits(inventory, "A043", "A043", [-3.0, 3.0])
+    assert limits == [-math.pi / 6.0, math.pi / 6.0]
+
+
+def test_reviewed_angular_home_is_converted_to_radians() -> None:
+    inventory = {
+        "joint_limit_overrides": {
+            "A046": {"unit": "degree", "limits": [150, 210], "home": 180},
+        }
+    }
+    assert _reviewed_home(inventory, "A046", "A046") == math.pi
