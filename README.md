@@ -104,6 +104,10 @@ ruff format --check .
 ## Model status
 
 - Motion and rigid attachment ownership have been visually reviewed.
+- The enclosure, two camera assemblies, shield cone, chamber, long-jet assembly,
+  and detector stage 7948 are included as named world-fixed environment groups.
+- Viewer and SDF materials distinguish each stage model, adapters,
+  crystal/holder payloads, polycap/holder payloads, and transparent enclosure geometry.
 - SDF joint coordinates are zero at the reviewed CAD pose. North and South RA
   stages have a documented 180-degree logical display offset.
 - The normal SDF share package is visual/kinematic only, so it stays fast in

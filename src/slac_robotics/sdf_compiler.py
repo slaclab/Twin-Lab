@@ -22,7 +22,7 @@ class LinkSpec:
     """One SDF rigid body and the globally positioned meshes rigidly attached to it."""
 
     name: str
-    meshes: list[tuple[str, Path]] = field(default_factory=list)
+    meshes: list[tuple[str, Path, list[float] | None]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -125,9 +125,20 @@ def _build_tree(scene: dict[str, Any], scene_file: Path) -> tuple[list[LinkSpec]
                 (
                     f"{instance['ref']}_{instance['model']}",
                     _resolve_path(instance["mesh"], scene_file),
+                    [float(value) for value in instance.get("rgba", [0.62, 0.66, 0.72, 1.0])],
                 )
             )
 
+    for item in scene.get("static_geometry", []):
+        base.meshes.append(
+            (
+                f"environment_{item['source_ref']}_{item['name']}",
+                _resolve_path(item["mesh"], scene_file),
+                [float(value) for value in item.get("rgba", [0.62, 0.66, 0.72, 1.0])],
+            )
+        )
+
+    instance_by_ref = {str(item["ref"]): item for item in scene["instances"]}
     last_link_by_stage: dict[str, LinkSpec] = {}
     for chain in scene["motion_chains"]:
         parent = base
@@ -140,6 +151,12 @@ def _build_tree(scene: dict[str, Any], scene_file: Path) -> tuple[list[LinkSpec]
                     (
                         f"{reference}_{fixed_role}",
                         _resolve_path(motion_meshes[reference][fixed_role], scene_file),
+                        [
+                            float(value)
+                            for value in instance_by_ref.get(reference, {}).get(
+                                "rgba", [0.62, 0.66, 0.72, 1.0]
+                            )
+                        ],
                     )
                 )
 
@@ -150,6 +167,12 @@ def _build_tree(scene: dict[str, Any], scene_file: Path) -> tuple[list[LinkSpec]
                 (
                     f"{reference}_{moving_role}",
                     _resolve_path(motion_meshes[reference][moving_role], scene_file),
+                    [
+                        float(value)
+                        for value in instance_by_ref.get(reference, {}).get(
+                            "rgba", [0.62, 0.66, 0.72, 1.0]
+                        )
+                    ],
                 )
             )
             links.append(child)
@@ -179,7 +202,13 @@ def _build_tree(scene: dict[str, Any], scene_file: Path) -> tuple[list[LinkSpec]
         parent_ref = attachment["parent_stage_ref"]
         target = base if parent_ref is None else last_link_by_stage[str(parent_ref)]
         label = "fixed_attachment" if parent_ref is None else f"{parent_ref}_attachment"
-        target.meshes.append((label, _resolve_path(attachment["mesh"], scene_file)))
+        target.meshes.append(
+            (
+                f"{label}_{attachment.get('style', 'default')}",
+                _resolve_path(attachment["mesh"], scene_file),
+                [float(value) for value in attachment.get("rgba", [0.62, 0.66, 0.72, 1.0])],
+            )
+        )
 
     return links, joints
 
@@ -192,7 +221,7 @@ def _convert_meshes(
     include_collision_obj: bool,
 ) -> tuple[dict[Path, str], dict[Path, str]]:
     del scene_file  # Paths were resolved while constructing the rigid-body tree.
-    sources = {source for link in links for _, source in link.meshes}
+    sources = {source for link in links for _, source, _ in link.meshes}
     visual_result: dict[Path, str] = {}
     collision_result: dict[Path, str] = {}
     used_names: set[str] = set()
@@ -230,12 +259,12 @@ def _write_sdf(
 
     for link in links:
         link_element = ET.SubElement(model, "link", {"name": link.name})
-        for index, (label, source) in enumerate(link.meshes, start=1):
+        for index, (label, source, rgba) in enumerate(link.meshes, start=1):
             geometry_name = _safe_name(f"{label}_{index}")
             visual = ET.SubElement(link_element, "visual", {"name": f"{geometry_name}_visual"})
             _add_mesh_geometry(visual, visual_mesh_uris[source])
             material = ET.SubElement(visual, "material")
-            ET.SubElement(material, "diffuse").text = "0.62 0.66 0.72 1"
+            ET.SubElement(material, "diffuse").text = _numbers(rgba or [0.62, 0.66, 0.72, 1.0])
             if include_collisions:
                 collision = ET.SubElement(
                     link_element, "collision", {"name": f"{geometry_name}_collision"}

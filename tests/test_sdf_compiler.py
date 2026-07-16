@@ -20,15 +20,26 @@ def test_compiles_portable_sdf_with_home_relative_joint_limits(tmp_path: Path) -
     fixed = tmp_path / "fixed.obj"
     moving = tmp_path / "moving.obj"
     attachment = tmp_path / "attachment.obj"
+    environment = tmp_path / "environment.obj"
     _write_triangle_obj(fixed)
     _write_triangle_obj(moving, 0.02)
     _write_triangle_obj(attachment, 0.04)
+    _write_triangle_obj(environment, 0.06)
 
     scene = {
         "schema": "slac-stage-cad-scene/v6",
         "instances": [],
         "motion_stage_meshes": {"A001": {"fixed": str(fixed), "moving": str(moving)}},
         "attachments": [{"parent_stage_ref": "A001", "mesh": str(attachment), "part_count": 1}],
+        "static_geometry": [
+            {
+                "source_ref": "A100",
+                "name": "Enclosure",
+                "mesh": str(environment),
+                "part_count": 1,
+                "rgba": [0.95, 0.78, 0.12, 0.28],
+            }
+        ],
         "motion_chains": [
             {
                 "name": "North Crystal",
@@ -66,6 +77,15 @@ def test_compiles_portable_sdf_with_home_relative_joint_limits(tmp_path: Path) -
     assert root.attrib == {"version": "1.6"}
     assert root.find("model").attrib["name"] == "test_stack"
     assert len(root.findall("./model/link")) == 2
+    assert any(
+        "environment" in (visual.attrib.get("name") or "") for visual in root.findall(".//visual")
+    )
+    environment_visual = next(
+        visual
+        for visual in root.findall(".//visual")
+        if "environment" in (visual.attrib.get("name") or "")
+    )
+    assert environment_visual.findtext("material/diffuse") == "0.95 0.78 0.12 0.28"
     base_joint = root.find("./model/joint[@type='fixed']")
     assert base_joint.findtext("parent") == "world"
     assert base_joint.findtext("child") == "assembly_base"
