@@ -39,7 +39,6 @@ drake = [
 
 [project.scripts]
 slac-cad-manifest = "slac_robotics.constraints_wizard:main"
-slac-motion = "slac_robotics.cad_motion:main"
 slac-stage-cad = "slac_robotics.stage_cad_viewer:main"
 slac-compile-sdf = "slac_robotics.sdf_compiler:main"
 slac-view = "slac_robotics.scene:main"

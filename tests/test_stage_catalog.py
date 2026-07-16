@@ -14,11 +14,13 @@ from slac_robotics.stage_cad_viewer import (
 
 
 def test_43841_inventory_uses_reusable_stage_catalog() -> None:
-    catalog = yaml.safe_load(Path("models/stages/catalog.yaml").read_text(encoding="utf-8"))
+    catalog = yaml.safe_load(Path("config/stage-catalog.yaml").read_text(encoding="utf-8"))
     inventory = yaml.safe_load(
-        Path("step_files/DSG-000040389.43841.inventory.yaml").read_text(encoding="utf-8")
+        Path("cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml").read_text(
+            encoding="utf-8"
+        )
     )
-    manifest = json.loads(Path("step_files/DSG-000040389.cad.json").read_text(encoding="utf-8"))
+    manifest = json.loads(Path("cad/DSG-000040389/manifest.json").read_text(encoding="utf-8"))
 
     stages = catalog["stages"]
     instances = inventory["stage_instances"]

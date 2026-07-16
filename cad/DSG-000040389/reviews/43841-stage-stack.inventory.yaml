@@ -1,7 +1,7 @@
 schema: slac-stage-inventory/v1
-source_step: step_files/DSG-000040389.stp
-cad_manifest: step_files/DSG-000040389.cad.json
-stage_catalog: models/stages/catalog.yaml
+source_step: cad/DSG-000040389/source.stp
+cad_manifest: cad/DSG-000040389/manifest.json
+stage_catalog: config/stage-catalog.yaml
 subassembly:
   ref: A035
   name: DSG-000043841_oa_11
@@ -35,8 +35,7 @@ stage_instances:
   - {ref: A063, library_id: LIB-000014334, catalog: kohzu_za05a_w101_bm}
   - {ref: A065, library_id: LIB-000009109, catalog: kohzu_ya04a_r102_rrn_bm}
 
-# Provisional base-to-payload order for the three crystal stacks. These chains
-# drive the first motion test; internal carriage splitting comes next.
+# Reviewed base-to-payload order for the three crystal stacks.
 motion_chains:
   North Crystal: [A048, A047, A046, A045]
   Middle Crystal: [A041, A040, A043, A042]

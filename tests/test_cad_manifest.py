@@ -10,6 +10,9 @@ pytest.importorskip("OCP")
 
 from slac_robotics.cad_motion import prepare_motion_setup  # noqa: E402
 from slac_robotics.constraints_wizard import (  # noqa: E402
+    _default_kinematics_path,
+    _default_manifest_path,
+    _default_preview_path,
     _outputs_are_fresh,
     check_kinematics_review,
     extract_cad_manifest,
@@ -17,6 +20,19 @@ from slac_robotics.constraints_wizard import (  # noqa: E402
     write_kinematics_template,
     write_step_preview,
 )
+
+
+def test_cad_project_defaults_keep_generated_files_out_of_source_directories() -> None:
+    source = Path("cad/DSG-000040389/source.stp")
+    manifest = Path("cad/DSG-000040389/manifest.json")
+
+    assert _default_manifest_path(source) == manifest
+    assert _default_kinematics_path(manifest) == Path("cad/DSG-000040389/reviews/kinematics.yaml")
+    assert (
+        _default_preview_path(source, "A035")
+        .as_posix()
+        .endswith(".cache/slac_robotics/previews/DSG-000040389/preview.A035.gltf")
+    )
 
 
 def test_detects_fresh_cached_outputs(tmp_path: Path) -> None:
@@ -34,7 +50,7 @@ def test_detects_fresh_cached_outputs(tmp_path: Path) -> None:
 
 
 def test_extracts_stable_occurrence_manifest() -> None:
-    manifest = extract_cad_manifest("step_files/DSG-000046520.stp")
+    manifest = extract_cad_manifest("cad/DSG-000046520/source.stp")
     occurrences = manifest["occurrences"]
 
     assert manifest["schema"] == "slac-cad-manifest/v1"
@@ -79,7 +95,7 @@ def test_writes_small_human_review_template(tmp_path: Path) -> None:
 
 def test_writes_browser_preview(tmp_path: Path) -> None:
     output = write_step_preview(
-        "step_files/DSG-000046520.stp",
+        "cad/DSG-000046520/source.stp",
         tmp_path / "assembly.gltf",
         linear_deflection_mm=1.0,
         focus_refs=["A003", "A004"],
@@ -92,7 +108,7 @@ def test_writes_browser_preview(tmp_path: Path) -> None:
 
 def test_prepares_provisional_real_cad_motion_groups() -> None:
     setup = prepare_motion_setup(
-        "step_files/DSG-000046520.kinematics.yaml",
+        "cad/DSG-000046520/reviews/polycap-stack.kinematics.yaml",
         linear_deflection_mm=1.0,
     )
 

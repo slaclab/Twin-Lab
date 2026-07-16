@@ -9,28 +9,10 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from OCP.Bnd import Bnd_Box
-from OCP.BRep import BRep_Tool
-from OCP.BRepBndLib import BRepBndLib
-from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
-from OCP.BRepMesh import BRepMesh_IncrementalMesh
-from OCP.TopAbs import TopAbs_FACE, TopAbs_REVERSED
-from OCP.TopExp import TopExp_Explorer
-from OCP.TopLoc import TopLoc_Location
-from OCP.TopoDS import TopoDS
-from OCP.XCAFDoc import XCAFDoc_ShapeTool
 
+from .cad_geometry import leaf_occurrences, occurrence_center_m, write_group_obj
 from .constraints_wizard import _read_step_document, check_kinematics_review
-
-
-@dataclass(frozen=True)
-class OccurrenceShape:
-    """A STEP leaf shape and its assembled location."""
-
-    ref: str
-    name: str
-    label: Any
-    global_location: Any
+from .paths import CACHE_ROOT, resolve_repo_path, review_artifact_stem
 
 
 @dataclass(frozen=True)
@@ -60,7 +42,7 @@ def prepare_motion_setup(
 ) -> MotionSetup:
     """Export one assembled OBJ mesh per reviewed rigid group."""
 
-    review_file = Path(review_path)
+    review_file = resolve_repo_path(review_path).resolve()
     review = yaml.safe_load(review_file.read_text(encoding="utf-8"))
     status = check_kinematics_review(review_file)
     problems = status["unknown"] + status["duplicate"] + status["joint_errors"]
@@ -70,9 +52,9 @@ def prepare_motion_setup(
         raise ValueError("Kinematics review has unassigned parts; run slac-cad-manifest --check")
 
     manifest = yaml.safe_load(Path(status["manifest"]).read_text(encoding="utf-8"))
-    source_step = Path(manifest["source_step"])
-    if not source_step.is_absolute() and not source_step.exists():
-        source_step = Path(status["manifest"]).parent / source_step
+    source_step = resolve_repo_path(
+        manifest["source_step"], relative_to=Path(status["manifest"]).parent
+    )
 
     groups = {
         str(name): tuple(str(ref) for ref in value.get("occurrences", []))
@@ -82,7 +64,7 @@ def prepare_motion_setup(
 
     document, _, roots = _read_step_document(source_step)
     assert document is not None  # Keep XCAF labels alive during mesh export.
-    occurrences = _leaf_occurrences(roots)
+    occurrences = leaf_occurrences(roots)
     missing = sorted({ref for refs in groups.values() for ref in refs} - set(occurrences))
     if missing:
         raise ValueError(f"STEP traversal did not find reviewed parts: {', '.join(missing)}")
@@ -92,16 +74,16 @@ def prepare_motion_setup(
         model_origin_ref = str(model_origin_ref)
         if model_origin_ref not in occurrences:
             raise ValueError(f"model_origin_ref does not identify a STEP leaf: {model_origin_ref}")
-        model_origin_m = _occurrence_center_m(occurrences[model_origin_ref])
+        model_origin_m = occurrence_center_m(occurrences[model_origin_ref])
     else:
         model_origin_m = (0.0, 0.0, 0.0)
 
-    output_dir = source_step.with_suffix(".motion")
-    output_dir.mkdir(exist_ok=True)
+    output_dir = CACHE_ROOT / "motion" / review_artifact_stem(review_file)
+    output_dir.mkdir(parents=True, exist_ok=True)
     meshes: dict[str, Path] = {}
     for group_name, references in groups.items():
         output = output_dir / f"{group_name}.obj"
-        _write_group_obj(
+        write_group_obj(
             [occurrences[reference] for reference in references],
             output,
             linear_deflection_mm=linear_deflection_mm,
@@ -200,120 +182,6 @@ def _group_paths(setup: MotionSetup) -> dict[str, str]:
         return f"{path_for(parent, active | {group})}/{group}"
 
     return {group: path_for(group) for group in setup.groups}
-
-
-def _leaf_occurrences(roots: Any) -> dict[str, OccurrenceShape]:
-    result: dict[str, OccurrenceShape] = {}
-    counters = {"assembly": 0, "part": 0}
-    identity = TopLoc_Location()
-
-    def walk(label: Any, parent_location: Any, *, is_root: bool = False) -> None:
-        target = label if is_root else _referred_or_self(label)
-        is_assembly = bool(XCAFDoc_ShapeTool.IsAssembly_s(target))
-        key = "assembly" if is_assembly else "part"
-        counters[key] += 1
-        ref = f"{'A' if is_assembly else 'P'}{counters[key]:03d}"
-        local = TopLoc_Location() if is_root else XCAFDoc_ShapeTool.GetLocation_s(label)
-        global_location = parent_location.Multiplied(local)
-
-        if is_assembly:
-            children = _components(target)
-            for index in range(1, children.Length() + 1):
-                walk(children.Value(index), global_location)
-        else:
-            result[ref] = OccurrenceShape(
-                ref=ref,
-                name=ref,
-                label=target,
-                global_location=global_location,
-            )
-
-    for index in range(1, roots.Length() + 1):
-        walk(roots.Value(index), identity, is_root=True)
-    return result
-
-
-def _components(label: Any) -> Any:
-    from OCP.TDF import TDF_LabelSequence
-
-    children = TDF_LabelSequence()
-    XCAFDoc_ShapeTool.GetComponents_s(label, children)
-    return children
-
-
-def _referred_or_self(label: Any) -> Any:
-    from OCP.TDF import TDF_Label
-
-    referred = TDF_Label()
-    return referred if XCAFDoc_ShapeTool.GetReferredShape_s(label, referred) else label
-
-
-def _write_group_obj(
-    occurrences: list[OccurrenceShape],
-    output: Path,
-    *,
-    linear_deflection_mm: float,
-    model_origin_m: tuple[float, float, float] = (0.0, 0.0, 0.0),
-) -> None:
-    vertices: list[tuple[float, float, float]] = []
-    triangles: list[tuple[int, int, int]] = []
-
-    for occurrence in occurrences:
-        placed = _placed_shape(occurrence)
-        BRepMesh_IncrementalMesh(placed, linear_deflection_mm, False, 0.5, True).Perform()
-
-        explorer = TopExp_Explorer(placed, TopAbs_FACE)
-        while explorer.More():
-            face = TopoDS.Face_s(explorer.Current())
-            face_location = TopLoc_Location()
-            triangulation = BRep_Tool.Triangulation_s(face, face_location)
-            if triangulation is not None:
-                offset = len(vertices)
-                transform = face_location.Transformation()
-                for index in range(1, triangulation.NbNodes() + 1):
-                    point = triangulation.Node(index).Transformed(transform)
-                    vertices.append(
-                        (
-                            point.X() * 0.001 - model_origin_m[0],
-                            point.Y() * 0.001 - model_origin_m[1],
-                            point.Z() * 0.001 - model_origin_m[2],
-                        )
-                    )
-                for index in range(1, triangulation.NbTriangles() + 1):
-                    triangle = triangulation.Triangle(index)
-                    n1, n2, n3 = (triangle.Value(i) for i in (1, 2, 3))
-                    if face.Orientation() == TopAbs_REVERSED:
-                        n1, n2, n3 = n3, n2, n1
-                    triangles.append((offset + n1, offset + n2, offset + n3))
-            explorer.Next()
-
-    if not vertices or not triangles:
-        raise ValueError(f"Rigid group produced no mesh triangles: {output.stem}")
-    lines = [f"v {x:.9g} {y:.9g} {z:.9g}" for x, y, z in vertices]
-    lines.extend(f"f {a} {b} {c}" for a, b, c in triangles)
-    output.write_text("\n".join(lines) + "\n", encoding="ascii")
-
-
-def _placed_shape(occurrence: OccurrenceShape) -> Any:
-    shape = XCAFDoc_ShapeTool.GetShape_s(occurrence.label)
-    return BRepBuilderAPI_Transform(
-        shape,
-        occurrence.global_location.Transformation(),
-        True,
-    ).Shape()
-
-
-def _occurrence_center_m(occurrence: OccurrenceShape) -> tuple[float, float, float]:
-    """Return the assembled bounding-box center for a provisional display datum."""
-
-    bounds = Bnd_Box()
-    BRepBndLib.Add_s(_placed_shape(occurrence), bounds, False)
-    x_min, y_min, z_min, x_max, y_max, z_max = bounds.Get()
-    return (
-        (x_min + x_max) * 0.0005,
-        (y_min + y_max) * 0.0005,
-        (z_min + z_max) * 0.0005,
-    )
 
 
 def main() -> None:

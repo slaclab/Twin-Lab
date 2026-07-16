@@ -15,7 +15,8 @@ from pydrake.all import (
     SceneGraph,
 )
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+from .paths import REPOSITORY_ROOT
+
 PACKAGE_XML = REPOSITORY_ROOT / "package.xml"
 
 

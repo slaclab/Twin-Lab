@@ -21,8 +21,9 @@ from OCP.TopExp import TopExp_Explorer
 from OCP.TopLoc import TopLoc_Location
 from OCP.TopoDS import TopoDS
 
-from .cad_motion import _leaf_occurrences, _placed_shape, _write_group_obj
+from .cad_geometry import leaf_occurrences, placed_shape, write_group_obj
 from .constraints_wizard import _occurrence_shape_by_ref, _read_step_document
+from .paths import CACHE_ROOT, resolve_repo_path, review_artifact_stem
 
 
 def prepare_stage_cad(
@@ -33,15 +34,13 @@ def prepare_stage_cad(
 ) -> Path:
     """Cache one real CAD mesh per reusable model plus occurrence transforms."""
 
-    inventory_file = Path(inventory_path)
+    inventory_file = resolve_repo_path(inventory_path).resolve()
     inventory = yaml.safe_load(inventory_file.read_text(encoding="utf-8"))
-    step_path = Path(inventory["source_step"])
-    catalog_path = Path(inventory["stage_catalog"])
+    step_path = resolve_repo_path(inventory["source_step"], relative_to=inventory_file.parent)
+    catalog_path = resolve_repo_path(inventory["stage_catalog"], relative_to=inventory_file.parent)
     catalog = yaml.safe_load(catalog_path.read_text(encoding="utf-8"))["stages"]
-    manifest_path = Path(inventory["cad_manifest"])
-    output_dir = inventory_file.with_name(
-        inventory_file.name.removesuffix(".inventory.yaml") + ".stage-cad"
-    )
+    manifest_path = resolve_repo_path(inventory["cad_manifest"], relative_to=inventory_file.parent)
+    output_dir = CACHE_ROOT / "stage-cad" / review_artifact_stem(inventory_file)
     scene_path = output_dir / "scene.yaml"
     sources = [inventory_file, step_path, catalog_path, manifest_path]
     if not rebuild and scene_path.exists():
@@ -56,7 +55,7 @@ def prepare_stage_cad(
             if cached_meshes and _is_current([scene_path, *cached_meshes], sources):
                 return scene_path
 
-    output_dir.mkdir(exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
     document, _, roots = _read_step_document(step_path)
     assert document is not None
     geometries: dict[str, list[tuple[str, Any, Path]]] = {}
@@ -105,7 +104,7 @@ def prepare_stage_cad(
         and not _is_fastener_name(str(item["name"]))
         and item["ref"] not in hidden_refs
     ]
-    leaf_occurrences = _leaf_occurrences(roots)
+    leaves = leaf_occurrences(roots)
     instance_by_ref = {item["ref"]: item for item in instances}
     motion_stage_meshes: dict[str, dict[str, str]] = {}
     motion_stage_roles: dict[str, set[str]] = {}
@@ -126,8 +125,8 @@ def prepare_stage_cad(
         for role in sorted(requested_roles):
             references = [children[index - 1]["ref"] for index in roles[role]]
             mesh_path = output_dir / f"{stage_ref}_{role}.obj"
-            _write_group_obj(
-                [leaf_occurrences[ref] for ref in references],
+            write_group_obj(
+                [leaves[ref] for ref in references],
                 mesh_path,
                 linear_deflection_mm=linear_deflection_mm,
             )
@@ -165,7 +164,7 @@ def prepare_stage_cad(
         if chain_refs is None:
             attachment_groups[None].append(reference)
             continue
-        center_m = _shape_center_m(_placed_shape(leaf_occurrences[reference]))
+        center_m = _shape_center_m(placed_shape(leaves[reference]))
         parent_ref = min(
             chain_refs,
             key=lambda ref: math.dist(center_m, instance_by_ref[ref]["translation_m"]),
@@ -178,8 +177,8 @@ def prepare_stage_cad(
             continue
         name = "fixed" if parent_ref is None else parent_ref
         mesh_path = output_dir / f"attached_{name}.obj"
-        _write_group_obj(
-            [leaf_occurrences[ref] for ref in references],
+        write_group_obj(
+            [leaves[ref] for ref in references],
             mesh_path,
             linear_deflection_mm=linear_deflection_mm,
         )
