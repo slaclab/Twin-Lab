@@ -14,6 +14,8 @@ from typing import Any
 
 import yaml
 
+from .paths import EXPORT_ROOT, resolve_repo_path, review_artifact_stem
+
 
 @dataclass
 class LinkSpec:
@@ -423,7 +425,8 @@ def _resolve_path(value: str, scene_file: Path) -> Path:
 
 def _default_model_name(scene_file: Path) -> str:
     name = scene_file.parent.name.removesuffix(".stage-cad")
-    return f"{name}_stage_stack"
+    normalized = name.replace("-", "_").lower()
+    return name if normalized.endswith("stage_stack") else f"{name}_stage_stack"
 
 
 def _safe_name(value: str) -> str:
@@ -456,17 +459,17 @@ def main() -> None:
     parser.add_argument("--no-zip", action="store_true", help="Do not create a shareable ZIP")
     args = parser.parse_args()
 
-    source = Path(args.source)
+    source = resolve_repo_path(args.source).resolve()
     source_data = yaml.safe_load(source.read_text(encoding="utf-8"))
     if str(source_data.get("schema", "")).startswith("slac-stage-inventory/"):
         from .stage_cad_viewer import prepare_stage_cad
 
         scene_path = prepare_stage_cad(source)
-        package_stem = source.name.removesuffix(".inventory.yaml")
+        package_stem = review_artifact_stem(source)
     else:
         scene_path = source
         package_stem = source.parent.name.removesuffix(".stage-cad")
-    output_dir = args.output_dir or Path("exports") / f"{package_stem}.sdf-package"
+    output_dir = args.output_dir or EXPORT_ROOT / f"{package_stem}.sdf-package"
     sdf_path, archive_path = compile_sdf_package(
         scene_path,
         output_dir,

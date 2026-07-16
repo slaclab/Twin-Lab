@@ -1,7 +1,7 @@
 directives:
 - add_model:
     name: stage_left
-    file: package://slac_robotics/models/stages/three_axis_stage.sdf
+    file: package://slac_robotics/tests/fixtures/three-axis-stage.sdf
 - add_weld:
     parent: world
     child: stage_left::base
@@ -9,13 +9,13 @@ directives:
       translation: [-0.32, 0.0, 0.0]
 - add_model:
     name: stage_center
-    file: package://slac_robotics/models/stages/three_axis_stage.sdf
+    file: package://slac_robotics/tests/fixtures/three-axis-stage.sdf
 - add_weld:
     parent: world
     child: stage_center::base
 - add_model:
     name: stage_right
-    file: package://slac_robotics/models/stages/three_axis_stage.sdf
+    file: package://slac_robotics/tests/fixtures/three-axis-stage.sdf
 - add_weld:
     parent: world
     child: stage_right::base

@@ -25,6 +25,8 @@ from OCP.TDocStd import TDocStd_Document
 from OCP.TopLoc import TopLoc_Location
 from OCP.XCAFDoc import XCAFDoc_DocumentTool, XCAFDoc_ShapeTool
 
+from .paths import CACHE_ROOT, resolve_repo_path
+
 SUPPORTED_STEP_SUFFIXES = {".stp", ".step"}
 
 
@@ -85,7 +87,7 @@ def write_cad_manifest(
     """Write the generated CAD facts beside the STEP assembly."""
 
     step = _validated_step_path(step_path)
-    output = Path(output_path) if output_path else step.with_suffix(".cad.json")
+    output = Path(output_path) if output_path else _default_manifest_path(step)
     manifest = extract_cad_manifest(step)
     output.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return output
@@ -100,18 +102,18 @@ def write_kinematics_template(
     """Write a compact review template that can later be compiled to SDF."""
 
     manifest = Path(manifest_path)
-    output = (
-        Path(output_path)
-        if output_path
-        else manifest.with_name(manifest.name.removesuffix(".cad.json") + ".kinematics.yaml")
-    )
+    output = Path(output_path) if output_path else _default_kinematics_path(manifest)
     if output.exists() and not overwrite:
         raise FileExistsError(
             f"Kinematics review already exists: {output}. "
             "Use --force-template only if you intend to replace your assignments."
         )
     manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
-    model_name = manifest.name.removesuffix(".cad.json")
+    model_name = (
+        manifest.parent.name
+        if manifest.name == "manifest.json"
+        else manifest.name.removesuffix(".cad.json")
+    )
     catalog = "\n".join(
         f"#   {item['ref']}  {'  ' * int(item['depth'])}{item['name']}"
         for item in manifest_data["occurrences"]
@@ -171,6 +173,7 @@ joints:
       translation_m: [0.0, 0.0, 0.0]
       rotation_rpy_rad: [0.0, 0.0, 0.0]
 """
+    output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(text, encoding="utf-8")
     return output
 
@@ -247,9 +250,9 @@ def check_kinematics_review(review_path: str | Path) -> dict[str, Any]:
     if not isinstance(review, dict):
         raise ValueError("Kinematics review must contain a YAML object")
 
-    manifest_path = Path(str(review.get("cad_manifest", "")))
-    if not manifest_path.is_absolute() and not manifest_path.exists():
-        manifest_path = review_file.parent / manifest_path
+    manifest_path = resolve_repo_path(
+        str(review.get("cad_manifest", "")), relative_to=review_file.parent
+    )
     if not manifest_path.exists():
         raise FileNotFoundError(f"CAD manifest referenced by review was not found: {manifest_path}")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -484,6 +487,26 @@ def _validated_step_path(step_path: str | Path) -> Path:
     return path
 
 
+def _default_manifest_path(step_path: Path) -> Path:
+    if step_path.name == "source.stp" and step_path.parent.parent.name == "cad":
+        return step_path.parent / "manifest.json"
+    return step_path.with_suffix(".cad.json")
+
+
+def _default_kinematics_path(manifest_path: Path) -> Path:
+    if manifest_path.name == "manifest.json" and manifest_path.parent.parent.name == "cad":
+        return manifest_path.parent / "reviews" / "kinematics.yaml"
+    return manifest_path.with_name(
+        manifest_path.name.removesuffix(".cad.json") + ".kinematics.yaml"
+    )
+
+
+def _default_preview_path(step_path: Path, preview_tag: str | None) -> Path:
+    project = step_path.parent.name if step_path.name == "source.stp" else step_path.stem
+    suffix = f".{preview_tag}" if preview_tag else ""
+    return CACHE_ROOT / "previews" / project / f"preview{suffix}.gltf"
+
+
 def _outputs_are_fresh(source: Path, outputs: list[Path]) -> bool:
     """Return whether every generated output is at least as new as its source."""
 
@@ -551,7 +574,7 @@ def main() -> None:
 
     step_path = _validated_step_path(args.step_file)
     manifest_path = (
-        Path(args.manifest_output) if args.manifest_output else step_path.with_suffix(".cad.json")
+        Path(args.manifest_output) if args.manifest_output else _default_manifest_path(step_path)
     )
     manifest_cached = not args.refresh_manifest and _outputs_are_fresh(step_path, [manifest_path])
     if not manifest_cached:
@@ -573,14 +596,12 @@ def main() -> None:
         inventory_refs: list[str] | None = None
         preview_tag = args.focus
         if args.stage_inventory:
-            inventory = yaml.safe_load(Path(args.stage_inventory).read_text(encoding="utf-8"))
+            inventory_path = resolve_repo_path(args.stage_inventory)
+            inventory = yaml.safe_load(inventory_path.read_text(encoding="utf-8"))
             inventory_refs = [str(item["ref"]) for item in inventory["stage_instances"]]
             preview_tag = f"{inventory['subassembly']['ref']}.stages"
-        preview_path = step_path.with_name(
-            f"{step_path.stem}.{preview_tag}.preview.gltf"
-            if preview_tag
-            else f"{step_path.stem}.preview.gltf"
-        )
+        preview_path = _default_preview_path(step_path, preview_tag)
+        preview_path.parent.mkdir(parents=True, exist_ok=True)
         preview_outputs = [preview_path, preview_path.with_suffix(".bin")]
         preview_cached = not args.refresh_preview and _outputs_are_fresh(step_path, preview_outputs)
         if not preview_cached:
@@ -602,7 +623,7 @@ def main() -> None:
     template_path = (
         Path(args.kinematics_output)
         if args.kinematics_output
-        else Path(str(manifest_path).removesuffix(".cad.json") + ".kinematics.yaml")
+        else _default_kinematics_path(manifest_path)
     )
     if not args.manifest_only:
         try:
@@ -628,8 +649,9 @@ def main() -> None:
     else:
         print("\nNext steps")
         print(f"  1. View the STEP: slac-cad-manifest {args.step_file} --view")
-        print(f"  2. Edit rigid_groups in: {template_path}")
-        print(f"  3. Check progress: slac-cad-manifest {args.step_file} --check --no-preview")
+        if not args.manifest_only:
+            print(f"  2. Edit rigid_groups in: {template_path}")
+            print(f"  3. Check progress: slac-cad-manifest {args.step_file} --check --no-preview")
 
 
 if __name__ == "__main__":

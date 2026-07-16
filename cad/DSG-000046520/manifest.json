@@ -1,6 +1,6 @@
 {
   "schema": "slac-cad-manifest/v1",
-  "source_step": "step_files/DSG-000046520.stp",
+  "source_step": "cad/DSG-000046520/source.stp",
   "transform_convention": "4x4 row-major transform from occurrence to parent",
   "length_unit": "millimeter",
   "occurrences": [

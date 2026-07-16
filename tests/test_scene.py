@@ -6,7 +6,7 @@ pytest.importorskip("pydrake")
 
 from slac_robotics.scene import load_scene  # noqa: E402
 
-SCENE = "models/scenes/three_stage_demo.dmd.yaml"
+SCENE = "tests/fixtures/three-stage-demo.dmd.yaml"
 
 
 def test_model_directives_compose_three_reusable_stages() -> None:

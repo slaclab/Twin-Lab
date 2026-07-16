@@ -17,7 +17,7 @@
 #   P010      Upload_01
 
 schema: slac-kinematics-review/v1
-cad_manifest: step_files/DSG-000046520.cad.json
+cad_manifest: cad/DSG-000046520/manifest.json
 model_name: DSG-000046520
 # Put the provisional display datum on the large fixed block at the left.
 # This uses its bounding-box center until a real mounting datum is identified.
