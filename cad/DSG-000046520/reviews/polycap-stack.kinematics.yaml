@@ -1,0 +1,86 @@
+# STEP import succeeded. Use the short references below in rigid_groups.
+# Assemblies start with A; assign leaf parts (P references) to rigid groups.
+#
+#   A001  DSG-000046520
+#   A002    REF-000221283
+#   P001      REF-000221282
+#   P002      REF-000221284
+#   P003    DSG-000040767
+#   A003    LIB-000007591
+#   P004      UPLOAD_03
+#   P005      Upload_02
+#   P006      REF-000172693
+#   P007    DSG-000046522
+#   P008    DSG-000046523
+#   A004    LIB-000014334
+#   P009      REF-000222635
+#   P010      Upload_01
+
+schema: slac-kinematics-review/v1
+cad_manifest: cad/DSG-000046520/manifest.json
+model_name: DSG-000046520
+# Put the provisional display datum on the large fixed block at the left.
+# This uses its bounding-box center until a real mounting datum is identified.
+model_origin_ref: P007
+notes:
+  - This file contains human-reviewed intent; do not copy the full CAD tree here.
+  - Occurrence IDs come from the generated CAD manifest.
+  - All kinematic lengths are meters and angles are radians.
+  - PROVISIONAL TEST: assignments below were inferred from assembly placement and KOHZU model families.
+  - Physical order is provisionally inferred from the left fixed block toward the polycap tip: Z, Y, X, payload.
+  - Confirm the P004/P005/P006 and P009/P010 moving order against Solid Edge before hardware use.
+
+rigid_groups:
+  base:
+    occurrences:
+      - P007  # large fixed block at the left
+      - P010  # guessed fixed body of KOHZU ZA05A Z stage
+  z_carriage:
+    occurrences:
+      - P009  # guessed moving body of KOHZU ZA05A
+      - P008  # adapter between Z and XY stages
+      - P004  # guessed fixed/lower body of KOHZU YA04A XY stage
+  y_carriage:
+    occurrences:
+      - P005  # guessed lower Y carriage of KOHZU YA04A
+  x_carriage:
+    occurrences:
+      - P006  # guessed upper X carriage of KOHZU YA04A
+      - P003  # adapter immediately after the XY stage
+      - P001  # polycap-side assembly part
+      - P002  # polycap-side assembly part
+
+joints:
+  - name: z
+    type: prismatic
+    parent_group: base
+    child_group: z_carriage
+    # Inferred ZA05A local Z axis expressed in the STEP assembly frame.
+    axis_xyz: [0.629222, 0.714286, 0.306391]
+    limits: [-0.004, 0.004]
+    home: 0.0
+    parent_to_joint:
+      translation_m: [0.0, 0.0, 0.0]
+      rotation_rpy_rad: [0.0, 0.0, 0.0]
+  - name: y
+    type: prismatic
+    parent_group: z_carriage
+    child_group: y_carriage
+    # Corrected from the motion-viewer check: lower-carriage Y direction.
+    axis_xyz: [-0.770998, 0.623438, 0.129951]
+    limits: [-0.005, 0.005]
+    home: 0.0
+    parent_to_joint:
+      translation_m: [0.0, 0.0, 0.0]
+      rotation_rpy_rad: [0.0, 0.0, 0.0]
+  - name: x
+    type: prismatic
+    parent_group: y_carriage
+    child_group: x_carriage
+    # Corrected from the motion-viewer check: upper-carriage X direction.
+    axis_xyz: [-0.098194, -0.317995, 0.942994]
+    limits: [-0.005, 0.005]
+    home: 0.0
+    parent_to_joint:
+      translation_m: [0.0, 0.0, 0.0]
+      rotation_rpy_rad: [0.0, 0.0, 0.0]

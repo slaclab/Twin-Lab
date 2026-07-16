@@ -218,3 +218,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Generated STEP browser previews (regenerate with slac-cad-manifest).
+*.preview.gltf
+*.preview.bin
+*.motion/
+*.stage-cad/
+exports/

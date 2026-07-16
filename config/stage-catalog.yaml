@@ -1,0 +1,104 @@
+schema: slac-stage-catalog/v1
+units:
+  linear: meter
+  angular: radian
+
+# These are reusable mechanism facts. Joint frames, positive directions, home
+# positions, and payload attachment groups remain assembly-specific review data.
+stages:
+  newport_vt_50l_400:
+    manufacturer: Newport
+    model: VT-50L
+    joint_type: prismatic
+    axis_local: [1.0, 0.0, 0.0]
+    component_roles: {fixed: [1], moving: [2]}
+    travel: 0.400
+    limits: null
+    notes:
+      - The STEP occurrence identifies the 400 mm open-loop variant.
+      - Defer endpoint and home conventions until the detector stack is reviewed.
+
+  kohzu_sa04b_rt02_bm:
+    manufacturer: KOHZU
+    model: SA04B-RT02-BM
+    joint_type: revolute
+    axis_local: [0.0, 1.0, 0.0]  # provisional; verify against the pivot marker
+    component_roles: {fixed: [3], moving: [1], reference: [2]}
+    limits: [-0.1745329252, 0.1745329252]
+    work_distance: 0.040
+    source: https://www.kohzu.co.jp/products/positioning-stages/item/sa04b-rt02/
+
+  kohzu_sa04b_rt02_r_bm:
+    manufacturer: KOHZU
+    model: SA04B-RT02-R-BM
+    joint_type: revolute
+    axis_local: [0.0, 1.0, 0.0]  # provisional; verify against the pivot marker
+    component_roles: {fixed: [3], moving: [1], reference: [2]}
+    limits: [-0.1745329252, 0.1745329252]
+    work_distance: 0.040
+    mirrored: true
+    source: https://www.kohzu.co.jp/products/positioning-stages/item/sa04b-rt02/
+
+  kohzu_ra04a_w01:
+    manufacturer: KOHZU
+    model: RA04A-W01
+    joint_type: revolute
+    axis_local: [0.0, 0.0, 1.0]
+    component_roles: {fixed: [1], moving: [2]}
+    limits: [-3.089232776, 3.089232776]
+    source: https://www.kohzu.co.jp/products/positioning-stages/item/ra04a-w01/
+
+  kohzu_sxa0530_r01_bm:
+    manufacturer: KOHZU
+    model: SXA0530-R01-BM
+    joint_type: prismatic
+    axis_local: [1.0, 0.0, 0.0]
+    component_roles: {fixed: [2], moving: [1]}
+    limits: [-0.015, 0.015]
+    source: https://www.kohzu.co.jp/products/positioning-stages/category/auto-x-xy-stage/
+
+  kohzu_sxa0750_r01_bm:
+    manufacturer: KOHZU
+    model: SXA0750-R01-BM
+    joint_type: prismatic
+    axis_local: [1.0, 0.0, 0.0]
+    component_roles: {fixed: [1], moving: [2]}
+    limits: [-0.025, 0.025]
+    source: https://www.kohzu.co.jp/products/positioning-stages/item/sxa0750-r01/
+
+  kohzu_sxa0750_r01_r_bm:
+    manufacturer: KOHZU
+    model: SXA0750-R01-R-BM
+    joint_type: prismatic
+    axis_local: [1.0, 0.0, 0.0]
+    component_roles: {fixed: [2], moving: [1]}
+    limits: [-0.025, 0.025]
+    mirrored: true
+    source: https://www.kohzu.co.jp/products/positioning-stages/item/sxa0750-r01/
+
+  kohzu_ya04a_r102_nnr_bm:
+    manufacturer: KOHZU
+    model: YA04A-R102-NNR-BM
+    joint_type: planar_xy
+    component_roles: {fixed: [1], y: [2], x: [3]}
+    limits:
+      x: [-0.005, 0.005]
+      y: [-0.005, 0.005]
+
+  kohzu_ya04a_r102_rrn_bm:
+    manufacturer: KOHZU
+    model: YA04A-R102-RRN-BM
+    joint_type: planar_xy
+    # This RRN definition orders the intermediate carriage before the named
+    # BOTTOM and TOP plates, unlike the NNR definition above.
+    component_roles: {fixed: [2], y: [3], x: [1]}
+    limits:
+      x: [-0.005, 0.005]
+      y: [-0.005, 0.005]
+
+  kohzu_za05a_w101_bm:
+    manufacturer: KOHZU
+    model: ZA05A-W101-BM
+    joint_type: prismatic
+    component_roles: {fixed: [2], moving: [1]}
+    limits: [-0.004, 0.004]
