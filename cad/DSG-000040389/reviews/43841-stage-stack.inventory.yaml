@@ -9,6 +9,45 @@ subassembly:
   assembly_count: 31
   leaf_part_count: 372
 
+# World-fixed geometry outside the focused stage-stack subtree. Keep these as
+# separate named groups so they can become independently reviewed collision
+# groups later. Fasteners are omitted by default.
+static_geometry:
+  - {ref: A034, name: Enclosure assembly, cad_id: DSG-000043161, rgba: [0.95, 0.78, 0.12, 0.28]}
+  - {ref: A026, name: Camera assembly 1, cad_id: DSG-000042902}
+  - {ref: A027, name: Camera assembly 2, cad_id: DSG-000042902}
+  - {ref: P1173, name: Shield cone, cad_id: REF-000226146, rgba: [0.20, 0.65, 0.95, 0.35]}
+  - {ref: A020, name: Chamber, cad_id: DSG-000044253}
+  - {ref: A004, name: Long jet assembly, cad_id: LCL5009-010086}
+  - {ref: A003, name: Detector stage 7948 (static), cad_id: DSG-000007948}
+
+# Semantic colors are assembly-review data: catalog stages are colored by model,
+# while attached geometry is split into separately colored rigid meshes.
+visual_styles:
+  stage_models:
+    newport_vt_50l_400: [0.55, 0.24, 0.22, 1.0]
+    kohzu_sa04b_rt02_bm: [0.95, 0.58, 0.16, 1.0]
+    kohzu_sa04b_rt02_r_bm: [0.96, 0.72, 0.20, 1.0]
+    kohzu_ra04a_w01: [0.56, 0.35, 0.78, 1.0]
+    kohzu_sxa0530_r01_bm: [0.18, 0.48, 0.82, 1.0]
+    kohzu_sxa0750_r01_bm: [0.12, 0.34, 0.68, 1.0]
+    kohzu_sxa0750_r01_r_bm: [0.28, 0.58, 0.88, 1.0]
+    kohzu_ya04a_r102_nnr_bm: [0.24, 0.68, 0.38, 1.0]
+    kohzu_ya04a_r102_rrn_bm: [0.34, 0.78, 0.52, 1.0]
+    kohzu_za05a_w101_bm: [0.82, 0.34, 0.48, 1.0]
+  attachment_groups:
+    adapter:
+      rgba: [0.92, 0.42, 0.10, 1.0]
+      refs: [P849, P913, P915, P1021, P1022, P1023, P1024, P1073,
+             P870, P844, P843, P896, P910, P907, P904, P899, P1006,
+             P989, P979, P962, P1040, P1035, P1072, P1071, P1119, P1114]
+    crystal_and_holder:
+      rgba: [0.78, 0.22, 0.82, 1.0]
+      refs: [P895, P914, P1017]
+    polycap_and_holder:
+      rgba: [0.05, 0.78, 0.76, 1.0]
+      refs: [P1033, P1034, P1077, P1078, P1112, P1113]
+
 # Occurrence refs belong to this STEP revision. Catalog IDs remain reusable.
 stage_instances:
   - {ref: A038, library_id: LIB-000013552, catalog: newport_vt_50l_400}

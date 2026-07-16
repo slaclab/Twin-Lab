@@ -36,6 +36,45 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
     assert all(occurrences[ref]["is_assembly"] for ref in references)
     assert all(occurrences[ref]["id"].startswith(f"{root_id}/") for ref in references)
 
+    static_geometry = inventory["static_geometry"]
+    assert [item["ref"] for item in static_geometry] == [
+        "A034",
+        "A026",
+        "A027",
+        "P1173",
+        "A020",
+        "A004",
+        "A003",
+    ]
+    assert all(item["ref"] in occurrences for item in static_geometry)
+    assert static_geometry[0]["rgba"] == [0.95, 0.78, 0.12, 0.28]
+    assert static_geometry[3]["rgba"] == [0.20, 0.65, 0.95, 0.35]
+
+    visual_styles = inventory["visual_styles"]
+    stage_catalogs = {instance["catalog"] for instance in instances}
+    assert set(visual_styles["stage_models"]) == stage_catalogs
+    styled_attachment_refs = {
+        ref for style in visual_styles["attachment_groups"].values() for ref in style["refs"]
+    }
+    reviewed_attachment_refs = set(inventory["attachment_overrides"]["fixed"])
+    reviewed_attachment_refs.update(
+        ref for refs in inventory["attachment_overrides"]["moving"].values() for ref in refs
+    )
+    assert styled_attachment_refs == reviewed_attachment_refs
+    assert visual_styles["attachment_groups"]["crystal_and_holder"]["refs"] == [
+        "P895",
+        "P914",
+        "P1017",
+    ]
+    assert visual_styles["attachment_groups"]["polycap_and_holder"]["refs"] == [
+        "P1033",
+        "P1034",
+        "P1077",
+        "P1078",
+        "P1112",
+        "P1113",
+    ]
+
     assert stages["kohzu_sxa0530_r01_bm"]["limits"] == [-0.015, 0.015]
     assert stages["kohzu_sxa0750_r01_r_bm"]["limits"] == [-0.025, 0.025]
     assert stages["kohzu_sxa0750_r01_r_bm"]["mirrored"] is True
@@ -110,6 +149,7 @@ def test_converts_stage_occurrence_transform_to_meters() -> None:
 def test_filters_screws_without_filtering_mounts() -> None:
     assert _is_fastener_name("McMasterCarr__SHCS_M3x.5x8mmSST")
     assert _is_fastener_name("0.25-20 SCREW, HEX SCH CAP")
+    assert _is_fastener_name("97163A130_NO THREADS_Tapered Heat-Set Inserts for Plastic")
     assert not _is_fastener_name("Mounting Brackets for Cable and Hose Carrier")
 
 

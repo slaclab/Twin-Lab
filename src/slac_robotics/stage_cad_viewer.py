@@ -39,6 +39,8 @@ def prepare_stage_cad(
     step_path = resolve_repo_path(inventory["source_step"], relative_to=inventory_file.parent)
     catalog_path = resolve_repo_path(inventory["stage_catalog"], relative_to=inventory_file.parent)
     catalog = yaml.safe_load(catalog_path.read_text(encoding="utf-8"))["stages"]
+    visual_styles = inventory.get("visual_styles", {})
+    stage_colors = visual_styles.get("stage_models", {})
     manifest_path = resolve_repo_path(inventory["cad_manifest"], relative_to=inventory_file.parent)
     output_dir = CACHE_ROOT / "stage-cad" / review_artifact_stem(inventory_file)
     scene_path = output_dir / "scene.yaml"
@@ -46,10 +48,13 @@ def prepare_stage_cad(
     if not rebuild and scene_path.exists():
         cached_scene = yaml.safe_load(scene_path.read_text(encoding="utf-8"))
         cached_meshes = {Path(item["mesh"]) for item in cached_scene.get("instances", [])}
-        if cached_scene.get("schema") == "slac-stage-cad-scene/v6" and cached_scene.get(
+        if cached_scene.get("schema") == "slac-stage-cad-scene/v8" and cached_scene.get(
             "attachments"
         ):
             cached_meshes.update(Path(item["mesh"]) for item in cached_scene["attachments"])
+            cached_meshes.update(
+                Path(item["mesh"]) for item in cached_scene.get("static_geometry", [])
+            )
             for stage_meshes in cached_scene.get("motion_stage_meshes", {}).values():
                 cached_meshes.update(Path(path) for path in stage_meshes.values())
             if cached_meshes and _is_current([scene_path, *cached_meshes], sources):
@@ -80,6 +85,9 @@ def prepare_stage_cad(
                 "geometry_id": geometry_id,
                 "model": str(catalog[model_id]["model"]),
                 "joint_type": str(catalog[model_id]["joint_type"]),
+                "rgba": [
+                    float(value) for value in stage_colors.get(model_id, [0.6, 0.6, 0.6, 1.0])
+                ],
                 "mesh": mesh_path.as_posix(),
                 **_transform_data(location.Transformation()),
             }
@@ -105,6 +113,47 @@ def prepare_stage_cad(
         and item["ref"] not in hidden_refs
     ]
     leaves = leaf_occurrences(roots)
+
+    static_geometry = []
+    used_static_refs: set[str] = set()
+    for spec in inventory.get("static_geometry", []):
+        source_ref = str(spec["ref"])
+        source = by_ref[source_ref]
+        source_id = str(source["id"])
+        references = [
+            str(item["ref"])
+            for item in manifest_items
+            if not item["is_assembly"]
+            and (item["id"] == source_id or item["id"].startswith(f"{source_id}/"))
+            and not _is_fastener_name(str(item["name"]))
+            and item["ref"] not in hidden_refs
+        ]
+        duplicate_refs = used_static_refs.intersection(references)
+        if duplicate_refs:
+            raise ValueError(
+                f"Static geometry {source_ref} overlaps another selected group: "
+                f"{sorted(duplicate_refs)}"
+            )
+        if not references:
+            raise ValueError(f"Static geometry {source_ref} contains no non-fastener parts")
+        used_static_refs.update(references)
+        mesh_path = output_dir / f"static_{source_ref}.obj"
+        write_group_obj(
+            [leaves[ref] for ref in references],
+            mesh_path,
+            linear_deflection_mm=linear_deflection_mm,
+        )
+        static_geometry.append(
+            {
+                "source_ref": source_ref,
+                "name": str(spec["name"]),
+                "cad_id": str(spec.get("cad_id", source["name"])),
+                "mesh": mesh_path.as_posix(),
+                "part_count": len(references),
+                "rgba": [float(value) for value in spec.get("rgba", [0.48, 0.52, 0.58, 1.0])],
+            }
+        )
+
     instance_by_ref = {item["ref"]: item for item in instances}
     motion_stage_meshes: dict[str, dict[str, str]] = {}
     motion_stage_roles: dict[str, set[str]] = {}
@@ -133,7 +182,18 @@ def prepare_stage_cad(
             role_meshes[role] = mesh_path.as_posix()
         motion_stage_meshes[stage_ref] = role_meshes
 
-    attachment_groups: dict[str | None, list[str]] = {None: []}
+    attachment_styles = visual_styles.get("attachment_groups", {})
+    attachment_style_by_ref: dict[str, str] = {}
+    attachment_rgba_by_style: dict[str, list[float]] = {}
+    for style, spec in attachment_styles.items():
+        attachment_rgba_by_style[str(style)] = [float(value) for value in spec["rgba"]]
+        for ref in spec["refs"]:
+            reference = str(ref)
+            if reference in attachment_style_by_ref:
+                raise ValueError(f"Attachment {reference} has more than one visual style")
+            attachment_style_by_ref[reference] = str(style)
+
+    attachment_groups: dict[tuple[str | None, str], list[str]] = {}
     overrides = inventory.get("attachment_overrides", {})
     forced_fixed = {str(ref) for ref in overrides.get("fixed", [])}
     forced_parent = {
@@ -147,10 +207,12 @@ def prepare_stage_cad(
     }
     for reference in attached_refs:
         if reference in forced_fixed:
-            attachment_groups[None].append(reference)
+            style = attachment_style_by_ref.get(reference, "default")
+            attachment_groups.setdefault((None, style), []).append(reference)
             continue
         if reference in forced_parent:
-            attachment_groups.setdefault(forced_parent[reference], []).append(reference)
+            style = attachment_style_by_ref.get(reference, "default")
+            attachment_groups.setdefault((forced_parent[reference], style), []).append(reference)
             continue
         occurrence_id = by_ref[reference]["id"]
         chain_refs = next(
@@ -162,21 +224,23 @@ def prepare_stage_cad(
             None,
         )
         if chain_refs is None:
-            attachment_groups[None].append(reference)
+            style = attachment_style_by_ref.get(reference, "default")
+            attachment_groups.setdefault((None, style), []).append(reference)
             continue
         center_m = _shape_center_m(placed_shape(leaves[reference]))
         parent_ref = min(
             chain_refs,
             key=lambda ref: math.dist(center_m, instance_by_ref[ref]["translation_m"]),
         )
-        attachment_groups.setdefault(parent_ref, []).append(reference)
+        style = attachment_style_by_ref.get(reference, "default")
+        attachment_groups.setdefault((parent_ref, style), []).append(reference)
 
     attachments = []
-    for parent_ref, references in attachment_groups.items():
+    for (parent_ref, style), references in attachment_groups.items():
         if not references:
             continue
         name = "fixed" if parent_ref is None else parent_ref
-        mesh_path = output_dir / f"attached_{name}.obj"
+        mesh_path = output_dir / f"attached_{name}_{style}.obj"
         write_group_obj(
             [leaves[ref] for ref in references],
             mesh_path,
@@ -187,6 +251,11 @@ def prepare_stage_cad(
                 "parent_stage_ref": parent_ref,
                 "mesh": mesh_path.as_posix(),
                 "part_count": len(references),
+                "style": style,
+                "rgba": attachment_rgba_by_style.get(
+                    style,
+                    [0.45, 0.68, 0.78, 1.0] if parent_ref is not None else [0.68, 0.68, 0.70, 1.0],
+                ),
             }
         )
 
@@ -244,10 +313,11 @@ def prepare_stage_cad(
         motion_chains.append({"name": str(chain_name), "joints": joints})
 
     scene = {
-        "schema": "slac-stage-cad-scene/v6",
+        "schema": "slac-stage-cad-scene/v8",
         "source_inventory": inventory_file.as_posix(),
         "linear_deflection_mm": linear_deflection_mm,
         "instances": instances,
+        "static_geometry": static_geometry,
         "attached_part_count": len(attached_refs),
         "attachments": attachments,
         "motion_stage_meshes": motion_stage_meshes,
@@ -270,11 +340,6 @@ def view_stage_cad(scene_path: str | Path) -> None:
     if wsl_address is not None:
         params.web_url_pattern = f"http://{wsl_address}:{{port}}"
     meshcat = Meshcat(params)
-    colors = {
-        "prismatic": Rgba(0.52, 0.56, 0.62, 1.0),
-        "revolute": Rgba(0.72, 0.55, 0.25, 1.0),
-        "planar_xy": Rgba(0.35, 0.60, 0.42, 1.0),
-    }
     role_paths: dict[tuple[str, str], str] = {}
     joint_paths: dict[str, str] = {}
     last_joint_path_by_stage: dict[str, str] = {}
@@ -301,14 +366,14 @@ def view_stage_cad(scene_path: str | Path) -> None:
                 meshcat.SetObject(
                     role_paths[(item["ref"], role)],
                     Mesh(Path(mesh_path), 1.0),
-                    colors.get(item["joint_type"], Rgba(0.6, 0.6, 0.6, 1.0)),
+                    Rgba(*item["rgba"]),
                 )
             continue
         path = f"/stages/{item['ref']} {item['model']}"
         meshcat.SetObject(
             path,
             Mesh(Path(item["mesh"]), 1.0),
-            colors.get(item["joint_type"], Rgba(0.6, 0.6, 0.6, 1.0)),
+            Rgba(*item["rgba"]),
         )
         meshcat.SetTransform(
             path,
@@ -317,16 +382,26 @@ def view_stage_cad(scene_path: str | Path) -> None:
 
     for attachment in scene["attachments"]:
         parent_ref = attachment["parent_stage_ref"]
+        style = attachment.get("style", "default")
         if parent_ref in last_joint_path_by_stage:
-            path = f"{last_joint_path_by_stage[parent_ref]}/attached geometry"
+            path = f"{last_joint_path_by_stage[parent_ref]}/{style} geometry"
         elif parent_ref is not None:
-            path = f"/pending motion/{parent_ref}/attached geometry"
+            path = f"/pending motion/{parent_ref}/{style} geometry"
         else:
-            path = "/attached geometry/fixed"
+            path = f"/attached geometry/fixed/{style}"
         meshcat.SetObject(
             path,
             Mesh(Path(attachment["mesh"]), 1.0),
-            Rgba(0.45, 0.68, 0.78, 1.0) if parent_ref is not None else Rgba(0.68, 0.68, 0.70, 1.0),
+            Rgba(*attachment["rgba"]),
+        )
+
+    for item in scene.get("static_geometry", []):
+        path = f"/environment/{item['source_ref']} {item['name']}"
+        rgba = item.get("rgba", [0.48, 0.52, 0.58, 1.0])
+        meshcat.SetObject(
+            path,
+            Mesh(Path(item["mesh"]), 1.0),
+            Rgba(*rgba),
         )
 
     joints = [joint for chain in scene.get("motion_chains", []) for joint in chain["joints"]]
@@ -425,7 +500,7 @@ def _transform_data(transform: Any) -> dict[str, list[Any]]:
 
 
 def _is_fastener_name(name: str) -> bool:
-    return re.search(r"screw|shcs|fhcs|setscr", name, re.IGNORECASE) is not None
+    return re.search(r"screw|shcs|fhcs|setscr|heat-set insert", name, re.IGNORECASE) is not None
 
 
 def _rotate_vector(rotation: list[list[float]], vector: list[float]) -> list[float]:
