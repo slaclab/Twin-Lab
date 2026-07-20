@@ -8,7 +8,7 @@ The current reviewed model is subassembly `*43841` from drawing
 `DSG-000040389`. It contains three crystal stacks and three polycapillary stacks
 with 21 controllable joints.
 
-## Quick start
+## Linux
 
 Create the environment once:
 
@@ -44,6 +44,43 @@ exports/DSG-000040389.43841-stage-stack.sdf-package.zip
 
 Unzip it in MATLAB and run `load_in_matlab`. See
 [SDF sharing](docs/sdf-sharing.md) for details.
+
+## Windows (WSL)
+
+Run the framework in WSL 2 rather than directly in Windows. From an
+administrator PowerShell prompt, install Ubuntu if WSL is not already set up:
+
+```powershell
+wsl --install -d Ubuntu
+```
+
+After the requested restart, open Ubuntu and install the system prerequisites:
+
+```bash
+sudo apt update
+sudo apt install -y git python3 python3-pip python3-venv
+```
+
+Clone the repository inside the WSL filesystem (for example, under `~/src`)
+instead of under `/mnt/c`; file access and Python environments are generally
+faster there. Then create the environment and run the viewer as usual:
+
+```bash
+mkdir -p ~/src
+cd ~/src
+git clone <repository-url> slac-robotics-framework
+cd slac-robotics-framework
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m slac_robotics.stage_cad_viewer \
+  cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
+```
+
+Open the Meshcat URL printed by the viewer in a Windows browser. WSL 2 normally
+forwards `localhost` automatically, so no Linux desktop or X server is needed.
+The environment is Linux-based: activate it with `source .venv/bin/activate`
+each time you open a new Ubuntu shell.
 
 ## What to edit
 
