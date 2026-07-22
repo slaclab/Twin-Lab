@@ -225,3 +225,4 @@ __marimo__/
 *.motion/
 *.stage-cad/
 exports/
+cad/*/manifest.previous.json

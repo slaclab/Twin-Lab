@@ -42,6 +42,7 @@ slac-cad-manifest = "slac_robotics.constraints_wizard:main"
 slac-stage-cad = "slac_robotics.stage_cad_viewer:main"
 slac-compile-sdf = "slac_robotics.sdf_compiler:main"
 slac-view = "slac_robotics.scene:main"
+slac-refresh-43841 = "slac_robotics.update_43841_step:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

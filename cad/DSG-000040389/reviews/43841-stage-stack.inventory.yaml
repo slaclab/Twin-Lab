@@ -5,9 +5,9 @@ stage_catalog: config/stage-catalog.yaml
 subassembly:
   ref: A035
   name: DSG-000043841_oa_11
-  occurrence_count: 403
-  assembly_count: 31
-  leaf_part_count: 372
+  occurrence_count: 392
+  assembly_count: 28
+  leaf_part_count: 364
 
 # World-fixed geometry outside the focused stage-stack subtree. Keep these as
 # separate named groups so they can become independently reviewed collision
@@ -68,11 +68,11 @@ stage_instances:
   - {ref: A053, library_id: LIB-000008990, catalog: kohzu_sxa0750_r01_bm}
 
   - {ref: A056, library_id: LIB-000007591, catalog: kohzu_ya04a_r102_nnr_bm}
-  - {ref: A057, library_id: LIB-000014334, catalog: kohzu_za05a_w101_bm}
-  - {ref: A059, library_id: LIB-000007591, catalog: kohzu_ya04a_r102_nnr_bm}
+  - {ref: A055, library_id: LIB-000014334, catalog: kohzu_za05a_w101_bm}
+  - {ref: A058, library_id: LIB-000007591, catalog: kohzu_ya04a_r102_nnr_bm}
+  - {ref: A059, library_id: LIB-000014334, catalog: kohzu_za05a_w101_bm}
   - {ref: A061, library_id: LIB-000014334, catalog: kohzu_za05a_w101_bm}
-  - {ref: A063, library_id: LIB-000014334, catalog: kohzu_za05a_w101_bm}
-  - {ref: A065, library_id: LIB-000009109, catalog: kohzu_ya04a_r102_rrn_bm}
+  - {ref: A062, library_id: LIB-000009109, catalog: kohzu_ya04a_r102_rrn_bm}
 
 # Reviewed base-to-payload order for the three crystal stacks.
 motion_chains:
@@ -82,15 +82,15 @@ motion_chains:
 
 compound_motion_chains:
   North Polycap:
-    - {key: A063:z, stage_ref: A063, fixed_role: fixed, moving_role: moving, name: z, axis_local: [0, 0, 1], limits: [-0.004, 0.004]}
-    - {key: A065:y, stage_ref: A065, fixed_role: fixed, moving_role: y, name: y, axis_local: [1, 0, 0], limits: [-0.005, 0.005]}
-    - {key: A065:x, stage_ref: A065, moving_role: x, name: x, axis_local: [0, 1, 0], limits: [-0.005, 0.005]}
-  Middle Polycap:
     - {key: A061:z, stage_ref: A061, fixed_role: fixed, moving_role: moving, name: z, axis_local: [0, 0, 1], limits: [-0.004, 0.004]}
-    - {key: A059:y, stage_ref: A059, fixed_role: fixed, moving_role: y, name: y, axis_local: [1, 0, 0], limits: [-0.005, 0.005]}
-    - {key: A059:x, stage_ref: A059, moving_role: x, name: x, axis_local: [0, 1, 0], limits: [-0.005, 0.005]}
+    - {key: A062:y, stage_ref: A062, fixed_role: fixed, moving_role: y, name: y, axis_local: [1, 0, 0], limits: [-0.005, 0.005]}
+    - {key: A062:x, stage_ref: A062, moving_role: x, name: x, axis_local: [0, 1, 0], limits: [-0.005, 0.005]}
+  Middle Polycap:
+    - {key: A059:z, stage_ref: A059, fixed_role: fixed, moving_role: moving, name: z, axis_local: [0, 0, 1], limits: [-0.004, 0.004]}
+    - {key: A058:y, stage_ref: A058, fixed_role: fixed, moving_role: y, name: y, axis_local: [1, 0, 0], limits: [-0.005, 0.005]}
+    - {key: A058:x, stage_ref: A058, moving_role: x, name: x, axis_local: [0, 1, 0], limits: [-0.005, 0.005]}
   South Polycap:
-    - {key: A057:z, stage_ref: A057, fixed_role: fixed, moving_role: moving, name: z, axis_local: [0, 0, 1], limits: [-0.004, 0.004]}
+    - {key: A055:z, stage_ref: A055, fixed_role: fixed, moving_role: moving, name: z, axis_local: [0, 0, 1], limits: [-0.004, 0.004]}
     - {key: A056:y, stage_ref: A056, fixed_role: fixed, moving_role: y, name: y, axis_local: [1, 0, 0], limits: [-0.005, 0.005]}
     - {key: A056:x, stage_ref: A056, moving_role: x, name: x, axis_local: [0, 1, 0], limits: [-0.005, 0.005]}
 
@@ -133,12 +133,12 @@ attachment_overrides:
     A052: [P989]        # 41276: lower-linear table to RA base
     A051: [P979]        # 28455: 220755 RA table to A050 SA04B base
     A050: [P962, P1017] # 42294: 197604 SA table to 27647 payload
-    A057: [P1040]         # 46523: ZA 222635 carriage to 7591 fixed base
+    A055: [P1040]         # 46523: ZA 222635 carriage to 7591 fixed base
     A056: [P1035, P1033, P1034]  # 40767: 7591 X carriage to polycap payload
-    A061: [P1072]         # 46527: middle-stack 14334 carriage to 7591 fixed base
-    A059: [P1071, P1077, P1078]  # 40909: middle-stack 7591 X carriage to payload
-    A063: [P1119]         # 46523: ZA 222635 carriage to 7591 fixed base
-    A065: [P1114, P1112, P1113]  # 40767: 7591 X carriage to polycap payload
+    A059: [P1072]         # 46527: middle-stack 14334 carriage to 7591 fixed base
+    A058: [P1071, P1077, P1078]  # 40909: middle-stack 7591 X carriage to payload
+    A061: [P1119]         # 46523: ZA 222635 carriage to 7591 fixed base
+    A062: [P1114, P1112, P1113]  # 40767: 7591 X carriage to polycap payload
 
 reviewed_connections:
   - [P849, P778]   # 41331 rigidly attached to fixed 43035
@@ -151,5 +151,5 @@ reviewed_connections:
   - [P1073, P1023, P1024]  # 46528 fixed to 43737/43743, Middle Polycap
   - [P1072, P1079, P1074]  # 46527: 14334 carriage to 7591 base, Middle Polycap
   - [P1071, P1076, P1077, P1078]  # 40909 equivalent, Middle Polycap
-  - [P1119, P1110, P1116]  # 46523: 222635 to A065 BOTTOM plate, North Polycap
-  - [P1114, P1115, P1112, P1113]  # 40767: A065 X carrier to polycap, North
+  - [P1119, P1110, P1116]  # 46523: 222635 to A062 BOTTOM plate, North Polycap
+  - [P1114, P1115, P1112, P1113]  # 40767: A062 X carrier to polycap, North

@@ -29,6 +29,47 @@ The first run builds meshes under `.cache/slac_robotics/stage-cad/`. Later runs
 reuse that cache. Use the North/Middle/South Crystal and Polycap controls in
 Meshcat; **Reset to home** restores every reviewed home position.
 
+## Updating The 43841 STEP
+
+For this reviewed polycap assembly, use the dedicated helper instead of running
+manifest refresh, remap, and cache rebuild manually.
+
+If the new STEP is already copied into
+`cad/DSG-000040389/source.stp`:
+
+```bash
+source .venv/bin/activate
+python -m slac_robotics.update_43841_step --rebuild-viewer-cache
+```
+
+If the new STEP is still somewhere else on disk, pass that file path and let
+the helper copy it into the repo first:
+
+```bash
+source .venv/bin/activate
+python -m slac_robotics.update_43841_step \
+  /mnt/c/Users/koashen/Downloads/DSG-000040389.stp \
+  --rebuild-viewer-cache
+```
+
+If you install the package as a console script entry point, the equivalent
+command is `slac-refresh-43841`.
+
+What this command does:
+
+1. Copies the replacement STEP into `cad/DSG-000040389/source.stp` when you pass a path.
+2. Backs up the previous manifest to `cad/DSG-000040389/manifest.previous.json`.
+3. Regenerates `cad/DSG-000040389/manifest.json` from the new STEP.
+4. Remaps `cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml` using `cad/DSG-000040389/reviews/43841-stage-stack.aliases.yaml`.
+5. Optionally rebuilds the cached viewer scene.
+
+After it finishes, verify the result with:
+
+```bash
+python -m slac_robotics.stage_cad_viewer \
+  cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
+```
+
 Build the portable SDF package:
 
 ```bash
@@ -128,6 +169,16 @@ Inspect a STEP tree or generate a focused preview:
 ```bash
 slac-cad-manifest cad/DSG-000040389/source.stp --show-tree --manifest-only
 slac-cad-manifest cad/DSG-000040389/source.stp --view --focus A035 --manifest-only
+```
+
+The low-level remap command is still available if you need to debug the helper:
+
+```bash
+slac-cad-manifest cad/DSG-000040389/source.stp \
+  --refresh-manifest --manifest-only --no-preview \
+  --remap-stage-inventory cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
+  --previous-manifest cad/DSG-000040389/manifest.previous.json \
+  --alias-map cad/DSG-000040389/reviews/43841-stage-stack.aliases.yaml
 ```
 
 Validate the code and reviewed data:
