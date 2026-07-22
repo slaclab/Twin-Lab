@@ -10,12 +10,13 @@ stages:
     manufacturer: MICRONIX USA
     model: VT-50L-C0014
     joint_type: prismatic
-    axis_local: [1.0, 0.0, 0.0]
-    component_roles: {fixed: [1], moving: [2]}
+    axis_local: [0.0, 1.0, 0.0]
+    component_roles: {fixed: [2], moving: [1]}
     travel: 0.400
     limits: [-0.200, 0.200]
     notes:
       - The STEP occurrence is SLAC library part LIB-000032416.
+      - The moving component is REF-000225050, the 430250 carriage.
       - Limits are centered on the reviewed CAD pose.
 
   kohzu_sa04b_rt02_bm:
@@ -100,5 +101,5 @@ stages:
     manufacturer: KOHZU
     model: ZA05A-W101-BM
     joint_type: prismatic
-    component_roles: {fixed: [2], moving: [1]}
+    component_roles: {fixed: [1], moving: [2]}
     limits: [-0.004, 0.004]

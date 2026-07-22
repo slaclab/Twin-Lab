@@ -80,6 +80,8 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
     detector_stage = stages["micronix_vt_50l_c0014"]
     assert detector_stage["manufacturer"] == "MICRONIX USA"
     assert detector_stage["model"] == "VT-50L-C0014"
+    assert detector_stage["axis_local"] == [0.0, 1.0, 0.0]
+    assert detector_stage["component_roles"] == {"fixed": [2], "moving": [1]}
     assert detector_stage["limits"] == [-0.2, 0.2]
 
     assert stages["kohzu_sxa0530_r01_bm"]["limits"] == [-0.015, 0.015]
@@ -98,7 +100,6 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
         "P1073",
     ]
     assert inventory["attachment_overrides"]["moving"]["A056"] == [
-        "P1035",
         "P1033",
         "P1034",
     ]
@@ -119,12 +120,17 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
         "South Polycap",
     ]
     bottom_tower = inventory["compound_motion_chains"]["South Polycap"]
-    assert [joint["key"] for joint in bottom_tower] == ["A055:z", "A056:y", "A056:x"]
+    assert [joint["key"] for joint in bottom_tower] == ["A057:z", "A056:y", "A056:x"]
     assert [joint["moving_role"] for joint in bottom_tower] == ["moving", "y", "x"]
     assert bottom_tower[1]["axis_local"] == [1, 0, 0]
     assert bottom_tower[2]["axis_local"] == [0, 1, 0]
-    assert inventory["attachment_overrides"]["moving"]["A055"] == ["P1040"]
-    assert inventory["attachment_overrides"]["moving"]["A059"] == ["P1072"]
+    assert inventory["attachment_overrides"]["moving"]["A057"] == ["P1035"]
+    assert inventory["attachment_overrides"]["moving"]["A061"] == ["P1067"]
+    assert inventory["attachment_overrides"]["moving"]["A063"] == ["P1114"]
+    assert stages["kohzu_za05a_w101_bm"]["component_roles"] == {
+        "fixed": [1],
+        "moving": [2],
+    }
     assert stages["kohzu_ya04a_r102_rrn_bm"]["component_roles"] == {
         "fixed": [2],
         "y": [3],
