@@ -5,8 +5,8 @@ spectrometer stage stacks. Open Cascade reads the CAD hierarchy and Drake handle
 motion, visualization, and eventually collision queries.
 
 The current reviewed model is subassembly `*43841` from drawing
-`DSG-000040389`. It contains three crystal stacks and three polycapillary stacks
-with 21 controllable joints.
+`DSG-000040389`. It contains an EPIX detector stage, three crystal stacks, and
+three polycapillary stacks with 22 controllable joints.
 
 ## Linux
 

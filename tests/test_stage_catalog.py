@@ -74,6 +74,13 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
         "P1112",
         "P1113",
     ]
+    assert visual_styles["attachment_groups"]["detector_adapter"]["refs"] == ["P803"]
+    assert visual_styles["attachment_groups"]["detector"]["refs"] == ["P802"]
+
+    detector_stage = stages["micronix_vt_50l_c0014"]
+    assert detector_stage["manufacturer"] == "MICRONIX USA"
+    assert detector_stage["model"] == "VT-50L-C0014"
+    assert detector_stage["limits"] == [-0.2, 0.2]
 
     assert stages["kohzu_sxa0530_r01_bm"]["limits"] == [-0.015, 0.015]
     assert stages["kohzu_sxa0750_r01_r_bm"]["limits"] == [-0.025, 0.025]
@@ -96,10 +103,13 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
         "P1034",
     ]
     assert list(inventory["motion_chains"]) == [
+        "Detector",
         "North Crystal",
         "Middle Crystal",
         "South Crystal",
     ]
+    assert inventory["motion_chains"]["Detector"] == ["A038"]
+    assert inventory["attachment_overrides"]["moving"]["A038"] == ["P803", "P802"]
     assert inventory["motion_chains"]["South Crystal"] == ["A053", "A052", "A051", "A050"]
     assert inventory["attachment_overrides"]["moving"]["A051"] == ["P979"]
 
@@ -109,12 +119,12 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
         "South Polycap",
     ]
     bottom_tower = inventory["compound_motion_chains"]["South Polycap"]
-    assert [joint["key"] for joint in bottom_tower] == ["A057:z", "A056:y", "A056:x"]
+    assert [joint["key"] for joint in bottom_tower] == ["A055:z", "A056:y", "A056:x"]
     assert [joint["moving_role"] for joint in bottom_tower] == ["moving", "y", "x"]
     assert bottom_tower[1]["axis_local"] == [1, 0, 0]
     assert bottom_tower[2]["axis_local"] == [0, 1, 0]
-    assert inventory["attachment_overrides"]["moving"]["A057"] == ["P1040"]
-    assert inventory["attachment_overrides"]["moving"]["A061"] == ["P1072"]
+    assert inventory["attachment_overrides"]["moving"]["A055"] == ["P1040"]
+    assert inventory["attachment_overrides"]["moving"]["A059"] == ["P1072"]
     assert stages["kohzu_ya04a_r102_rrn_bm"]["component_roles"] == {
         "fixed": [2],
         "y": [3],

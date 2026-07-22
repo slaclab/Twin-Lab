@@ -6,17 +6,17 @@ units:
 # These are reusable mechanism facts. Joint frames, positive directions, home
 # positions, and payload attachment groups remain assembly-specific review data.
 stages:
-  newport_vt_50l_400:
-    manufacturer: Newport
-    model: VT-50L
+  micronix_vt_50l_c0014:
+    manufacturer: MICRONIX USA
+    model: VT-50L-C0014
     joint_type: prismatic
     axis_local: [1.0, 0.0, 0.0]
     component_roles: {fixed: [1], moving: [2]}
     travel: 0.400
-    limits: null
+    limits: [-0.200, 0.200]
     notes:
-      - The STEP occurrence identifies the 400 mm open-loop variant.
-      - Defer endpoint and home conventions until the detector stack is reviewed.
+      - The STEP occurrence is SLAC library part LIB-000032416.
+      - Limits are centered on the reviewed CAD pose.
 
   kohzu_sa04b_rt02_bm:
     manufacturer: KOHZU
