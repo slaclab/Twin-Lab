@@ -178,7 +178,8 @@ def _build_tree(scene: dict[str, Any], scene_file: Path) -> tuple[list[LinkSpec]
             links.append(child)
 
             home = float(item.get("home", 0.0))
-            limits = [float(value) - home for value in item["limits"]]
+            cad_position = float(item.get("cad_position", home))
+            limits = [float(value) - cad_position for value in item["limits"]]
             joint_name = _safe_name(f"{stack_slug}_{reference}_{axis_name}")
             joints.append(
                 JointSpec(
@@ -192,7 +193,7 @@ def _build_tree(scene: dict[str, Any], scene_file: Path) -> tuple[list[LinkSpec]
                     origin=[float(value) for value in item["origin_m"]],
                     lower=limits[0],
                     upper=limits[1],
-                    logical_home=home,
+                    logical_home=cad_position,
                 )
             )
             parent = child

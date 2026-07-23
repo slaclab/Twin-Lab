@@ -38,15 +38,18 @@ visual_styles:
   attachment_groups:
     adapter:
       rgba: [0.92, 0.42, 0.10, 1.0]
-      refs: [P849, P913, P915, P1021, P1022, P1023, P1024, P1073,
-             P870, P844, P843, P896, P910, P907, P904, P899, P1006,
-             P989, P979, P962, P1035, P1067, P1071, P1114]
+      refs: [P844, P908, P910, P1016, P1017,
+             P865, P839, P838, P905, P902, P899, P1001, P984, P974,
+             P1030, P1034, P1035, P1066, P1067, P1068,
+             P1076, P1077, P1078, P1079, P1109, P1113, P1114]
     crystal_and_holder:
       rgba: [0.78, 0.22, 0.82, 1.0]
-      refs: [P895, P914, P1017]
+      refs: [P886, P889, P890, P891,
+             P893, P894, P895, P909,
+             P955, P956, P957, P1012]
     polycap_and_holder:
       rgba: [0.05, 0.78, 0.76, 1.0]
-      refs: [P1033, P1034, P1077, P1078, P1112, P1113]
+      refs: [P1028, P1029, P1072, P1073, P1107, P1108]
     detector_adapter:
       rgba: [0.92, 0.42, 0.10, 1.0]
       refs: [P803]
@@ -89,21 +92,22 @@ motion_chains:
 
 compound_motion_chains:
   North Polycap:
-    - {key: A063:z, stage_ref: A063, fixed_role: fixed, moving_role: moving, name: z, axis_local: [0, 0, 1], limits: [-0.004, 0.004]}
+    - {key: A063:z, stage_ref: A063, fixed_role: fixed, moving_role: moving, name: z, axis_local: [0, 0, 1], limits: [-0.004, 0.004], cad_position: -0.003105455}
     - {key: A065:y, stage_ref: A065, fixed_role: fixed, moving_role: y, name: y, axis_local: [1, 0, 0], limits: [-0.005, 0.005]}
     - {key: A065:x, stage_ref: A065, moving_role: x, name: x, axis_local: [0, 1, 0], limits: [-0.005, 0.005]}
   Middle Polycap:
-    - {key: A061:z, stage_ref: A061, fixed_role: fixed, moving_role: moving, name: z, axis_local: [0, 0, 1], limits: [-0.004, 0.004]}
+    - {key: A061:z, stage_ref: A061, fixed_role: fixed, moving_role: moving, name: z, axis_local: [0, 0, 1], limits: [-0.004, 0.004], cad_position: -0.003105455}
     - {key: A059:y, stage_ref: A059, fixed_role: fixed, moving_role: y, name: y, axis_local: [1, 0, 0], limits: [-0.005, 0.005]}
     - {key: A059:x, stage_ref: A059, moving_role: x, name: x, axis_local: [0, 1, 0], limits: [-0.005, 0.005]}
   South Polycap:
-    - {key: A057:z, stage_ref: A057, fixed_role: fixed, moving_role: moving, name: z, axis_local: [0, 0, 1], limits: [-0.004, 0.004]}
+    - {key: A057:z, stage_ref: A057, fixed_role: fixed, moving_role: moving, name: z, axis_local: [0, 0, 1], limits: [-0.004, 0.004], cad_position: -0.003105455}
     - {key: A056:y, stage_ref: A056, fixed_role: fixed, moving_role: y, name: y, axis_local: [1, 0, 0], limits: [-0.005, 0.005]}
     - {key: A056:x, stage_ref: A056, moving_role: x, name: x, axis_local: [0, 1, 0], limits: [-0.005, 0.005]}
 
 # Editable logical operating limits and home positions. Angular values here are
 # degrees; A046/A051 use the assembly's 180-degree mounting orientation as home.
 joint_limit_overrides:
+  A038: {unit: meter, limits: [-0.400, 0.0], home: 0.0}  # EPIX CAD pose is upper endpoint
   A042: {unit: degree, limits: [-10, 10]}
   A043: {unit: degree, limits: [-30, 30]}
   A045: {unit: degree, limits: [-10, 10]}
@@ -119,34 +123,38 @@ hidden_occurrences:
 
 attachment_overrides:
   fixed:
-    - P849   # DSG-000041331; rigidly attached to fixed DSG-000043035
-    - P913   # DSG-000043036; fixed north-tower geometry, not attached to P778/43035
-    - P915   # DSG-000041169; fixed north-tower geometry
-    - P1021  # DSG-000043037; attached to P1022 and fixed
-    - P1022  # DSG-000041293; attached to P1021 and fixed
-    - P1023  # DSG-000043737; fixed middle-polycap support
-    - P1024  # DSG-000043743; fixed middle-polycap support
-    - P1073  # DSG-000046528; rigid with P1023/P1024, equivalent to fixed 46522
+    - P844   # DSG-000041331; Middle Crystal base mount
+    - P908   # DSG-000043036; North Crystal base mount
+    - P910   # DSG-000041169; North Crystal base support
+    - P1016  # DSG-000043037; South Crystal base mount
+    - P1017  # DSG-000041293; South Crystal base support
+    - P1034  # DSG-000046522; South Polycap angled Z-stage bracket fixed to breadboard
+    - P1068  # DSG-000046528; Middle Polycap angled Z-stage bracket fixed to breadboard
+    - P1076  # LIB-000004373; Middle Polycap base fastener
+    - P1077  # LIB-000004373; Middle Polycap base fastener
+    - P1078  # LIB-000004373; Middle Polycap base fastener
+    - P1079  # LIB-000004373; Middle Polycap base fastener
+    - P1113  # DSG-000046530; North Polycap angled Z-stage bracket fixed to breadboard
   moving:
     A038: [P803, P802]  # 41969 adapter and REF-000226045 EPIX 100P detector
-    A041: [P870]        # 34586: 191475 table to SXA0530 base
-    A040: [P844]        # 41329: 225448 table to 220756 RA base
-    A043: [P843]        # 28455: 220755 RA table to SA04B base
-    A042: [P896, P895]  # 42294: 197604 SA table to 27647 payload
-    A048: [P910]        # mirrored 34586-equivalent top-linear adapter
-    A047: [P907]        # 41276: lower-linear table to RA base
-    A046: [P904]        # 28455: RA table to SA04B base
-    A045: [P899, P914]  # 42294 to 27647 payload
-    A053: [P1006]       # 35628: 191475 table to SXA0530 base
-    A052: [P989]        # 41276: lower-linear table to RA base
-    A051: [P979]        # 28455: 220755 RA table to A050 SA04B base
-    A050: [P962, P1017] # 42294: 197604 SA table to 27647 payload
+    A041: [P865]        # 34586: first linear carriage to second linear base
+    A040: [P839]        # 41329: second linear carriage to rotation base
+    A043: [P838]        # 28455: rotation carriage to tilt base
+    A042: [P889, P890, P891, P886]  # final adapter, holder, and Middle Crystal
+    A048: [P905]        # mirrored first-linear to second-linear adapter
+    A047: [P902]        # 41276: second linear carriage to rotation base
+    A046: [P899]        # 28455: rotation carriage to tilt base
+    A045: [P893, P894, P909, P895]  # final adapter, holder, and North Crystal
+    A053: [P1001]       # 35628: first linear carriage to second linear base
+    A052: [P984]        # 41276: second linear carriage to rotation base
+    A051: [P974]        # 28455: rotation carriage to tilt base
+    A050: [P955, P957, P1012, P956]  # final adapter, holder, and South Crystal
     A057: [P1035]         # 46523: ZA carriage to 7591 fixed base, South Polycap
-    A056: [P1033, P1034]  # 40767: 7591 X carriage to polycap payload
+    A056: [P1030, P1028, P1029]  # 40767 adapter and South collimating optic
     A061: [P1067]         # 46527: ZA carriage to 7591 fixed base, Middle Polycap
-    A059: [P1071, P1077, P1078]  # 40909: middle-stack 7591 X carriage to payload
+    A059: [P1066, P1072, P1073]  # 40909 adapter and Middle collimating optic
     A063: [P1114]         # 46523: ZA carriage to 7591 fixed base, North Polycap
-    A065: [P1112, P1113]  # 40767: 7591 X carriage to polycap payload
+    A065: [P1109, P1107, P1108]  # 40767 adapter and North collimating optic
 
 reviewed_connections:
   - [P825, P803, P802]  # VT-50L carriage to 41969 adapter and EPIX 100P

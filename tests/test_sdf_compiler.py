@@ -16,7 +16,7 @@ def _write_triangle_obj(path: Path, x_offset: float = 0.0) -> None:
     )
 
 
-def test_compiles_portable_sdf_with_home_relative_joint_limits(tmp_path: Path) -> None:
+def test_compiles_portable_sdf_with_cad_relative_joint_limits(tmp_path: Path) -> None:
     fixed = tmp_path / "fixed.obj"
     moving = tmp_path / "moving.obj"
     attachment = tmp_path / "attachment.obj"
@@ -56,6 +56,7 @@ def test_compiles_portable_sdf_with_home_relative_joint_limits(tmp_path: Path) -
                         "origin_m": [0.1, 0.2, 0.3],
                         "limits": [math.radians(150.0), math.radians(210.0)],
                         "home": math.pi,
+                        "cad_position": math.radians(170.0),
                     }
                 ],
             }
@@ -92,8 +93,8 @@ def test_compiles_portable_sdf_with_home_relative_joint_limits(tmp_path: Path) -
     joint = root.find("./model/joint[@type='revolute']")
     assert joint.findtext("parent") == "assembly_base"
     assert joint.findtext("pose") == "0.1 0.2 0.3 0 0 0"
-    assert math.isclose(float(joint.findtext("axis/limit/lower")), -math.pi / 6.0)
-    assert math.isclose(float(joint.findtext("axis/limit/upper")), math.pi / 6.0)
+    assert math.isclose(float(joint.findtext("axis/limit/lower")), -math.pi / 9.0)
+    assert math.isclose(float(joint.findtext("axis/limit/upper")), 2.0 * math.pi / 9.0)
 
     visual_uris = [element.text for element in root.findall(".//visual/geometry/mesh/uri")]
     collision_uris = [element.text for element in root.findall(".//collision/geometry/mesh/uri")]
@@ -114,7 +115,7 @@ def test_compiles_portable_sdf_with_home_relative_joint_limits(tmp_path: Path) -
 
     with (sdf_path.parent / "joint_metadata.csv").open(encoding="utf-8") as stream:
         metadata = next(csv.DictReader(stream))
-    assert math.isclose(float(metadata["logical_home_offset"]), math.pi)
+    assert math.isclose(float(metadata["logical_home_offset"]), math.radians(170.0))
     assert (sdf_path.parent / "load_in_matlab.m").exists()
 
 

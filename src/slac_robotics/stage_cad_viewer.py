@@ -280,11 +280,12 @@ def prepare_stage_cad(
                     "fixed_role": "fixed",
                     "moving_role": "moving",
                     "axis_world": axis_world,
-                    "origin_m": item["translation_m"],
+                    "origin_m": _joint_origin_m(item, stage),
                     "limits": _reviewed_limits(
                         inventory, item["ref"], item["ref"], stage["limits"]
                     ),
                     "home": _reviewed_home(inventory, item["ref"], item["ref"]),
+                    "cad_position": _reviewed_home(inventory, item["ref"], item["ref"]),
                 }
             )
         motion_chains.append({"name": str(chain_name), "joints": joints})
@@ -308,6 +309,7 @@ def prepare_stage_cad(
                     "origin_m": item["translation_m"],
                     "limits": _reviewed_limits(inventory, key, item["ref"], spec["limits"]),
                     "home": _reviewed_home(inventory, key, item["ref"]),
+                    "cad_position": float(spec.get("cad_position", 0.0)),
                 }
             )
         motion_chains.append({"name": str(chain_name), "joints": joints})
@@ -444,7 +446,9 @@ def view_stage_cad(scene_path: str | Path) -> None:
         for joint in joints:
             scale = 1000.0 if joint["joint_type"] == "prismatic" else 180.0 / math.pi
             unit = "mm" if joint["joint_type"] == "prismatic" else "deg"
-            value = meshcat.GetSliderValue(_slider_label(joint, unit)) / scale - joint["home"]
+            value = _joint_displacement(
+                joint, meshcat.GetSliderValue(_slider_label(joint, unit)) / scale
+            )
             if joint["joint_type"] == "prismatic":
                 transform = RigidTransform([component * value for component in joint["axis_world"]])
             else:
@@ -511,6 +515,15 @@ def _rotate_vector(rotation: list[list[float]], vector: list[float]) -> list[flo
     return [value / norm for value in result]
 
 
+def _joint_origin_m(instance: dict[str, Any], stage: dict[str, Any]) -> list[float]:
+    offset = [float(value) for value in stage.get("pivot_offset_local", [0.0, 0.0, 0.0])]
+    return [
+        float(instance["translation_m"][row])
+        + sum(float(instance["rotation"][row][column]) * offset[column] for column in range(3))
+        for row in range(3)
+    ]
+
+
 def _reviewed_limits(
     inventory: dict[str, Any], key: str, stage_ref: str, default: list[float]
 ) -> list[float]:
@@ -534,6 +547,10 @@ def _reviewed_home(inventory: dict[str, Any], key: str, stage_ref: str) -> float
 def _slider_label(joint: dict[str, Any], unit: str) -> str:
     axis_name = "" if joint["name"] == "motion" else f" {joint['name']}"
     return f"{joint['stack']} / {joint['ref']}{axis_name} {joint['model']} ({unit})"
+
+
+def _joint_displacement(joint: dict[str, Any], slider_value: float) -> float:
+    return slider_value - float(joint.get("cad_position", joint["home"]))
 
 
 def _shape_center_m(shape: Any) -> list[float]:

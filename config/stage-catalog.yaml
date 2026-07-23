@@ -17,13 +17,14 @@ stages:
     notes:
       - The STEP occurrence is SLAC library part LIB-000032416.
       - The moving component is REF-000225050, the 430250 carriage.
-      - Limits are centered on the reviewed CAD pose.
+      - Catalog limits are centered defaults; assembly reviews define the CAD home offset.
 
   kohzu_sa04b_rt02_bm:
     manufacturer: KOHZU
     model: SA04B-RT02-BM
     joint_type: revolute
-    axis_local: [0.0, 1.0, 0.0]  # provisional; verify against the pivot marker
+    axis_local: [0.0, 1.0, 0.0]
+    pivot_offset_local: [0.0, 0.0, 0.057]
     component_roles: {fixed: [3], moving: [1], reference: [2]}
     limits: [-0.1745329252, 0.1745329252]
     work_distance: 0.040
@@ -33,7 +34,8 @@ stages:
     manufacturer: KOHZU
     model: SA04B-RT02-R-BM
     joint_type: revolute
-    axis_local: [0.0, 1.0, 0.0]  # provisional; verify against the pivot marker
+    axis_local: [0.0, 1.0, 0.0]
+    pivot_offset_local: [0.0, 0.0, 0.057]
     component_roles: {fixed: [3], moving: [1], reference: [2]}
     limits: [-0.1745329252, 0.1745329252]
     work_distance: 0.040

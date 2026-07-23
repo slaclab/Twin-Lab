@@ -6,6 +6,8 @@ import yaml
 
 from slac_robotics.stage_cad_viewer import (
     _is_fastener_name,
+    _joint_displacement,
+    _joint_origin_m,
     _reviewed_home,
     _reviewed_limits,
     _rotate_vector,
@@ -62,17 +64,26 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
     )
     assert styled_attachment_refs == reviewed_attachment_refs
     assert visual_styles["attachment_groups"]["crystal_and_holder"]["refs"] == [
+        "P886",
+        "P889",
+        "P890",
+        "P891",
+        "P893",
+        "P894",
         "P895",
-        "P914",
-        "P1017",
+        "P909",
+        "P955",
+        "P956",
+        "P957",
+        "P1012",
     ]
     assert visual_styles["attachment_groups"]["polycap_and_holder"]["refs"] == [
-        "P1033",
-        "P1034",
-        "P1077",
-        "P1078",
-        "P1112",
-        "P1113",
+        "P1028",
+        "P1029",
+        "P1072",
+        "P1073",
+        "P1107",
+        "P1108",
     ]
     assert visual_styles["attachment_groups"]["detector_adapter"]["refs"] == ["P803"]
     assert visual_styles["attachment_groups"]["detector"]["refs"] == ["P802"]
@@ -87,21 +98,38 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
     assert stages["kohzu_sxa0530_r01_bm"]["limits"] == [-0.015, 0.015]
     assert stages["kohzu_sxa0750_r01_r_bm"]["limits"] == [-0.025, 0.025]
     assert stages["kohzu_sxa0750_r01_r_bm"]["mirrored"] is True
+    assert stages["kohzu_sa04b_rt02_bm"]["pivot_offset_local"] == [0.0, 0.0, 0.057]
+    assert stages["kohzu_sa04b_rt02_r_bm"]["pivot_offset_local"] == [0.0, 0.0, 0.057]
 
     assert inventory["hidden_occurrences"] == ["P772", "P773", "P774"]
     assert inventory["attachment_overrides"]["fixed"] == [
-        "P849",
-        "P913",
-        "P915",
-        "P1021",
-        "P1022",
-        "P1023",
-        "P1024",
-        "P1073",
+        "P844",
+        "P908",
+        "P910",
+        "P1016",
+        "P1017",
+        "P1034",
+        "P1068",
+        "P1076",
+        "P1077",
+        "P1078",
+        "P1079",
+        "P1113",
     ]
     assert inventory["attachment_overrides"]["moving"]["A056"] == [
-        "P1033",
-        "P1034",
+        "P1030",
+        "P1028",
+        "P1029",
+    ]
+    assert inventory["attachment_overrides"]["moving"]["A059"] == [
+        "P1066",
+        "P1072",
+        "P1073",
+    ]
+    assert inventory["attachment_overrides"]["moving"]["A065"] == [
+        "P1109",
+        "P1107",
+        "P1108",
     ]
     assert list(inventory["motion_chains"]) == [
         "Detector",
@@ -112,13 +140,19 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
     assert inventory["motion_chains"]["Detector"] == ["A038"]
     assert inventory["attachment_overrides"]["moving"]["A038"] == ["P803", "P802"]
     assert inventory["motion_chains"]["South Crystal"] == ["A053", "A052", "A051", "A050"]
-    assert inventory["attachment_overrides"]["moving"]["A051"] == ["P979"]
+    assert inventory["attachment_overrides"]["moving"]["A051"] == ["P974"]
 
     assert list(inventory["compound_motion_chains"]) == [
         "North Polycap",
         "Middle Polycap",
         "South Polycap",
     ]
+    z_limits = [joints[0]["limits"] for joints in inventory["compound_motion_chains"].values()]
+    assert z_limits == [[-0.004, 0.004]] * 3
+    assert all(math.isclose(upper - lower, 0.008) for lower, upper in z_limits)
+    assert [
+        joints[0]["cad_position"] for joints in inventory["compound_motion_chains"].values()
+    ] == [-0.003105455] * 3
     bottom_tower = inventory["compound_motion_chains"]["South Polycap"]
     assert [joint["key"] for joint in bottom_tower] == ["A057:z", "A056:y", "A056:x"]
     assert [joint["moving_role"] for joint in bottom_tower] == ["moving", "y", "x"]
@@ -140,6 +174,16 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
         "unit": "degree",
         "limits": [-30, 30],
     }
+    assert inventory["joint_limit_overrides"]["A038"] == {
+        "unit": "meter",
+        "limits": [-0.4, 0.0],
+        "home": 0.0,
+    }
+    assert _reviewed_limits(inventory, "A038", "A038", detector_stage["limits"]) == [
+        -0.4,
+        0.0,
+    ]
+    assert _reviewed_home(inventory, "A038", "A038") == 0.0
     assert inventory["joint_limit_overrides"]["A046"] == {
         "unit": "degree",
         "limits": [150, 210],
@@ -174,6 +218,16 @@ def test_rotates_catalog_axis_into_assembly_frame() -> None:
     assert _rotate_vector(rotation, [1.0, 0.0, 0.0]) == [0.0, 1.0, 0.0]
 
 
+def test_transforms_revolute_pivot_offset_into_assembly_frame() -> None:
+    instance = {
+        "translation_m": [1.0, 2.0, 3.0],
+        "rotation": [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]],
+    }
+    stage = {"pivot_offset_local": [0.0, 0.0, 0.057]}
+
+    assert _joint_origin_m(instance, stage) == [1.057, 2.0, 3.0]
+
+
 def test_reviewed_angular_limits_are_converted_to_radians() -> None:
     inventory = {
         "joint_limit_overrides": {
@@ -191,3 +245,11 @@ def test_reviewed_angular_home_is_converted_to_radians() -> None:
         }
     }
     assert _reviewed_home(inventory, "A046", "A046") == math.pi
+
+
+def test_joint_displacement_separates_home_from_imported_cad_position() -> None:
+    joint = {"home": 0.0, "cad_position": -0.003105455}
+
+    assert math.isclose(_joint_displacement(joint, 0.0), 0.003105455)
+    assert math.isclose(_joint_displacement(joint, -0.004), -0.000894545)
+    assert math.isclose(_joint_displacement(joint, 0.004), 0.007105455)
