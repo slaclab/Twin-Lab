@@ -28,7 +28,7 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
     instances = inventory["stage_instances"]
     references = [instance["ref"] for instance in instances]
 
-    assert inventory["subassembly"]["ref"] == "A035"
+    assert inventory["subassembly"]["ref"] == "A038"
     assert len(instances) == 19
     assert len(references) == len(set(references))
     assert all(instance["catalog"] in stages for instance in instances)
@@ -40,12 +40,12 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
 
     static_geometry = inventory["static_geometry"]
     assert [item["ref"] for item in static_geometry] == [
-        "A034",
-        "A026",
-        "A027",
-        "P1173",
-        "A020",
-        "A004",
+        "A037",
+        "A029",
+        "A030",
+        "P1170",
+        "A023",
+        "A007",
         "A003",
     ]
     assert all(item["ref"] in occurrences for item in static_geometry)
@@ -64,29 +64,29 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
     )
     assert styled_attachment_refs == reviewed_attachment_refs
     assert visual_styles["attachment_groups"]["crystal_and_holder"]["refs"] == [
-        "P886",
         "P889",
-        "P890",
-        "P891",
+        "P892",
         "P893",
         "P894",
-        "P895",
-        "P909",
-        "P955",
-        "P956",
-        "P957",
-        "P1012",
+        "P896",
+        "P897",
+        "P898",
+        "P912",
+        "P958",
+        "P959",
+        "P960",
+        "P1015",
     ]
     assert visual_styles["attachment_groups"]["polycap_and_holder"]["refs"] == [
-        "P1028",
-        "P1029",
-        "P1072",
-        "P1073",
-        "P1107",
-        "P1108",
+        "P1031",
+        "P1032",
+        "P1075",
+        "P1076",
+        "P1110",
+        "P1111",
     ]
-    assert visual_styles["attachment_groups"]["detector_adapter"]["refs"] == ["P803"]
-    assert visual_styles["attachment_groups"]["detector"]["refs"] == ["P802"]
+    assert visual_styles["attachment_groups"]["detector_adapter"]["refs"] == ["P805"]
+    assert visual_styles["attachment_groups"]["detector"]["refs"] == ["P804"]
 
     detector_stage = stages["micronix_vt_50l_c0014"]
     assert detector_stage["manufacturer"] == "MICRONIX USA"
@@ -101,35 +101,35 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
     assert stages["kohzu_sa04b_rt02_bm"]["pivot_offset_local"] == [0.0, 0.0, 0.057]
     assert stages["kohzu_sa04b_rt02_r_bm"]["pivot_offset_local"] == [0.0, 0.0, 0.057]
 
-    assert inventory["hidden_occurrences"] == ["P772", "P773", "P774"]
+    assert inventory["hidden_occurrences"] == ["P775", "P776", "P777"]
     assert inventory["attachment_overrides"]["fixed"] == [
-        "P844",
-        "P908",
-        "P910",
-        "P1016",
-        "P1017",
-        "P1034",
-        "P1068",
-        "P1076",
-        "P1077",
-        "P1078",
+        "P847",
+        "P911",
+        "P913",
+        "P1019",
+        "P1020",
+        "P1037",
+        "P1071",
         "P1079",
-        "P1113",
-    ]
-    assert inventory["attachment_overrides"]["moving"]["A056"] == [
-        "P1030",
-        "P1028",
-        "P1029",
+        "P1080",
+        "P1081",
+        "P1082",
+        "P1116",
     ]
     assert inventory["attachment_overrides"]["moving"]["A059"] == [
-        "P1066",
-        "P1072",
-        "P1073",
+        "P1033",
+        "P1031",
+        "P1032",
     ]
-    assert inventory["attachment_overrides"]["moving"]["A065"] == [
-        "P1109",
-        "P1107",
-        "P1108",
+    assert inventory["attachment_overrides"]["moving"]["A062"] == [
+        "P1069",
+        "P1075",
+        "P1076",
+    ]
+    assert inventory["attachment_overrides"]["moving"]["A068"] == [
+        "P1112",
+        "P1110",
+        "P1111",
     ]
     assert list(inventory["motion_chains"]) == [
         "Detector",
@@ -137,10 +137,16 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
         "Middle Crystal",
         "South Crystal",
     ]
-    assert inventory["motion_chains"]["Detector"] == ["A038"]
-    assert inventory["attachment_overrides"]["moving"]["A038"] == ["P803", "P802"]
-    assert inventory["motion_chains"]["South Crystal"] == ["A053", "A052", "A051", "A050"]
-    assert inventory["attachment_overrides"]["moving"]["A051"] == ["P974"]
+    assert inventory["motion_chains"]["Detector"] == ["A041"]
+    assert inventory["attachment_overrides"]["moving"]["A041"] == ["P805", "P804"]
+    assert occurrences["A041"]["name"] == "LIB-000032416_oa_14"
+    assert occurrences["P827"]["name"] == "430250 Carriage 55mm S14_car"
+    assert occurrences["P827"]["parent_id"] == occurrences["A041"]["id"]
+    assert occurrences["P805"]["name"] == "DSG-000041969"
+    assert occurrences["P804"]["name"] == "EPIX DETECTOR 100P"
+    assert inventory["reviewed_connections"][0] == ["P827", "P805", "P804"]
+    assert inventory["motion_chains"]["South Crystal"] == ["A056", "A055", "A054", "A053"]
+    assert inventory["attachment_overrides"]["moving"]["A054"] == ["P977"]
 
     assert list(inventory["compound_motion_chains"]) == [
         "North Polycap",
@@ -154,13 +160,13 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
         joints[0]["cad_position"] for joints in inventory["compound_motion_chains"].values()
     ] == [-0.003105455] * 3
     bottom_tower = inventory["compound_motion_chains"]["South Polycap"]
-    assert [joint["key"] for joint in bottom_tower] == ["A057:z", "A056:y", "A056:x"]
+    assert [joint["key"] for joint in bottom_tower] == ["A060:z", "A059:y", "A059:x"]
     assert [joint["moving_role"] for joint in bottom_tower] == ["moving", "y", "x"]
     assert bottom_tower[1]["axis_local"] == [1, 0, 0]
     assert bottom_tower[2]["axis_local"] == [0, 1, 0]
-    assert inventory["attachment_overrides"]["moving"]["A057"] == ["P1035"]
-    assert inventory["attachment_overrides"]["moving"]["A061"] == ["P1067"]
-    assert inventory["attachment_overrides"]["moving"]["A063"] == ["P1114"]
+    assert inventory["attachment_overrides"]["moving"]["A060"] == ["P1038"]
+    assert inventory["attachment_overrides"]["moving"]["A064"] == ["P1070"]
+    assert inventory["attachment_overrides"]["moving"]["A066"] == ["P1117"]
     assert stages["kohzu_za05a_w101_bm"]["component_roles"] == {
         "fixed": [1],
         "moving": [2],
@@ -170,21 +176,21 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
         "y": [3],
         "x": [1],
     }
-    assert inventory["joint_limit_overrides"]["A043"] == {
+    assert inventory["joint_limit_overrides"]["A046"] == {
         "unit": "degree",
         "limits": [-30, 30],
     }
-    assert inventory["joint_limit_overrides"]["A038"] == {
+    assert inventory["joint_limit_overrides"]["A041"] == {
         "unit": "meter",
         "limits": [-0.4, 0.0],
         "home": 0.0,
     }
-    assert _reviewed_limits(inventory, "A038", "A038", detector_stage["limits"]) == [
+    assert _reviewed_limits(inventory, "A041", "A041", detector_stage["limits"]) == [
         -0.4,
         0.0,
     ]
-    assert _reviewed_home(inventory, "A038", "A038") == 0.0
-    assert inventory["joint_limit_overrides"]["A046"] == {
+    assert _reviewed_home(inventory, "A041", "A041") == 0.0
+    assert inventory["joint_limit_overrides"]["A049"] == {
         "unit": "degree",
         "limits": [150, 210],
         "home": 180,
