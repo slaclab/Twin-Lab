@@ -52,7 +52,7 @@ visual_styles:
       refs: [P1031, P1032, P1075, P1076, P1110, P1111]
     detector_adapter:
       rgba: [0.92, 0.42, 0.10, 1.0]
-      refs: [P805]
+      refs: [P805, P830, P831]
     detector:
       rgba: [0.18, 0.72, 0.62, 1.0]
       refs: [P804]
@@ -136,7 +136,7 @@ attachment_overrides:
     - P1082  # LIB-000004373; Middle Polycap base fastener
     - P1116  # DSG-000046530; North Polycap angled Z-stage bracket fixed to breadboard
   moving:
-    A041: [P805, P804]  # 41969 adapter and REF-000226045 EPIX 100P detector
+    A041: [P805, P804, P830, P831]  # 41969 adapter, REF-000226045 EPIX 100P detector, and two Newport locating pegs
     A044: [P868]        # 34586: first linear carriage to second linear base
     A043: [P842]        # 41329: second linear carriage to rotation base
     A046: [P841]        # 28455: rotation carriage to tilt base

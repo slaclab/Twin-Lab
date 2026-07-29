@@ -77,6 +77,18 @@ The viewer splits each stage into reviewed rigid roles, nests downstream links,
 and attaches adapter/payload meshes to the selected carriage. Slider units are
 millimetres or degrees. The original assembled CAD pose is home.
 
+Three extra sliders drive a cyclic demo motion:
+
+- `Auto motion (0 manual / 1 cycle)` toggles between manual sliders and the
+  automatic cycle. Switching back to `0` hands control back at the current pose.
+- `Auto motion range (% of travel)` scales the excursion. Each joint swings
+  symmetrically about its home by that percentage of the smaller side of its
+  reviewed limits, so a low value keeps the motion well clear of interference.
+- `Auto motion period (s)` sets the cycle time. Joints are phase-staggered so
+  the stack does not move as one block.
+
+`Reset to home` also switches the toggle back to manual.
+
 If the STEP, manifest, inventory, or catalog changes, the cache is rebuilt. Use
 `--rebuild` only when forcing a fresh tessellation is useful.
 

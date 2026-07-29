@@ -5,6 +5,7 @@ from pathlib import Path
 import yaml
 
 from slac_robotics.stage_cad_viewer import (
+    _auto_amplitude,
     _is_fastener_name,
     _joint_displacement,
     _joint_origin_m,
@@ -85,7 +86,11 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
         "P1110",
         "P1111",
     ]
-    assert visual_styles["attachment_groups"]["detector_adapter"]["refs"] == ["P805"]
+    assert visual_styles["attachment_groups"]["detector_adapter"]["refs"] == [
+        "P805",
+        "P830",
+        "P831",
+    ]
     assert visual_styles["attachment_groups"]["detector"]["refs"] == ["P804"]
 
     detector_stage = stages["micronix_vt_50l_c0014"]
@@ -138,7 +143,12 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
         "South Crystal",
     ]
     assert inventory["motion_chains"]["Detector"] == ["A041"]
-    assert inventory["attachment_overrides"]["moving"]["A041"] == ["P805", "P804"]
+    assert inventory["attachment_overrides"]["moving"]["A041"] == [
+        "P805",
+        "P804",
+        "P830",
+        "P831",
+    ]
     assert occurrences["A041"]["name"] == "LIB-000032416_oa_14"
     assert occurrences["P827"]["name"] == "430250 Carriage 55mm S14_car"
     assert occurrences["P827"]["parent_id"] == occurrences["A041"]["id"]
@@ -259,3 +269,21 @@ def test_joint_displacement_separates_home_from_imported_cad_position() -> None:
     assert math.isclose(_joint_displacement(joint, 0.0), 0.003105455)
     assert math.isclose(_joint_displacement(joint, -0.004), -0.000894545)
     assert math.isclose(_joint_displacement(joint, 0.004), 0.007105455)
+
+
+def test_auto_amplitude_stays_inside_the_shorter_side_of_reviewed_limits() -> None:
+    off_center = {"limits": [-0.2, 0.2], "home": 0.15}
+
+    assert math.isclose(_auto_amplitude(off_center, 1.0), 0.05)
+    assert math.isclose(_auto_amplitude(off_center, 0.25), 0.0125)
+    assert _auto_amplitude(off_center, 0.0) == 0.0
+
+    for fraction in (0.0, 0.25, 0.6, 1.0):
+        amplitude = _auto_amplitude(off_center, fraction)
+        assert off_center["limits"][0] <= off_center["home"] - amplitude
+        assert off_center["home"] + amplitude <= off_center["limits"][1]
+
+
+def test_auto_amplitude_is_zero_when_home_sits_on_a_limit() -> None:
+    assert _auto_amplitude({"limits": [0.0, 0.4], "home": 0.0}, 1.0) == 0.0
+    assert _auto_amplitude({"limits": [0.0, 0.4], "home": -0.01}, 1.0) == 0.0
