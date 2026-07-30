@@ -171,8 +171,68 @@ skip remapping and treat the import as a new review:
 3. Add any new stage model facts to `config/stage-catalog.yaml`.
 4. Review stage ownership, motion chains, attachment overrides, and limits.
 
+## Clearance review
+
+`slac-collision` compiles the reviewed inventory into an SDF package with collision
+geometry, loads it into a Drake plant, and drives it from the same sliders you use
+for manual manipulation. Every slider change re-runs a signed-distance query, so the
+geometry on screen is the geometry being checked.
+
+```bash
+slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
+```
+
+`Clearance warning band (mm)` sets the distance below which a pair is reported.
+`Log clearance report` prints the full sorted table to the terminal for a design
+review; the live status line only reports the worst pair.
+
+Collision geometry is built one of two ways, selected by `--collision-mode`:
+
+- `hull` wraps each merged mesh in a single convex hull. It compiles in seconds but
+  inflates part volume by 1.65x-2.93x, and a hollow part such as the `A037` enclosure
+  becomes solid. At the home pose this mode reports 112 touching pairs that are
+  entirely artefacts of hull inflation, so it is not usable for clearance review.
+- `convex` (the default for `slac-collision`) runs CoACD on each part and emits one
+  `<collision>` per convex piece, each tagged `<drake:declare_convex/>`. Volume error
+  drops to roughly 1.4x-1.5x, and the residual is mostly filled bolt holes rather than
+  spanned external concavity.
+
+Decomposition costs about 88 triangles per second per worker and is cached under
+`.cache/slac_robotics/convex-collision/` keyed by source mtime, size, and settings, so
+the full assembly is a one-time cost and milliseconds thereafter. Hull count barely
+affects that runtime: CoACD's search dominates, so `max_hulls` trades query cost and
+package size, not build time.
+
+Work is dispatched per sub-part rather than per file, longest first, so one large mesh
+cannot set the makespan. Each finished sub-part writes a resume marker, so a build that
+is interrupted picks up where it stopped instead of starting over.
+
+Budget memory before raising `--decomposition-workers`. Each CoACD worker peaks around
+2.5 GB on the larger meshes, and because the longest parts start first, the biggest
+meshes decompose concurrently. On a 15 GB machine 8 workers exhausts RAM; 4 is safe.
+
+Drake filters collision pairs automatically at `Finalize()` for bodies joined by a
+joint and for bodies welded into the same subgraph, so each stage's own fixed and
+moving halves need no manual filter. Pairs that touch by design belong in the
+`ignored_pairs` block of the stage inventory, which the viewer reads by default:
+
+```yaml
+ignored_pairs:
+  - pair: [A050, A037]
+    reason: cable tray passes through the reviewed envelope
+```
+
+Use `--ignore-file` only to try an alternative list without editing the review.
+
+Reports are engineer-facing. They are meant to drive design changes and travel-limit
+decisions, not to gate motion at runtime.
+
 ## Accuracy boundary
 
 The current model is suitable for kinematic review and visualization. Hardware
 safety decisions still require surveyed joint frames, calibrated encoder zeros,
 tolerances, cable envelopes, and reviewed collision geometry.
+
+Clearance numbers inherit the tessellation deflection (2 mm) and the convex
+decomposition error, so treat small positive clearances as "needs a closer look"
+rather than as a measurement.

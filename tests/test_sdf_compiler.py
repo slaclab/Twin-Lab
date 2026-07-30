@@ -99,14 +99,20 @@ def test_compiles_portable_sdf_with_cad_relative_joint_limits(tmp_path: Path) ->
     visual_uris = [element.text for element in root.findall(".//visual/geometry/mesh/uri")]
     collision_uris = [element.text for element in root.findall(".//collision/geometry/mesh/uri")]
     assert visual_uris and collision_uris
-    assert all(not Path(uri).is_absolute() and uri.endswith(".stl") for uri in visual_uris)
+    # Drake's Meshcat cannot render STL, so the canonical SDF must use OBJ visuals.
+    assert all(not Path(uri).is_absolute() and uri.endswith(".obj") for uri in visual_uris)
     assert all(uri.endswith(".obj") for uri in collision_uris)
-    stl_path = sdf_path.parent / visual_uris[0]
+
+    matlab_root = ET.parse(sdf_path.with_name(f"{sdf_path.stem}_matlab.sdf")).getroot()
+    matlab_visual_uris = [
+        element.text for element in matlab_root.findall(".//visual/geometry/mesh/uri")
+    ]
+    assert all(uri.endswith(".stl") for uri in matlab_visual_uris)
+    stl_path = sdf_path.parent / matlab_visual_uris[0]
     with stl_path.open("rb") as stream:
         stream.seek(80)
         assert struct.unpack("<I", stream.read(4))[0] == 1
 
-    matlab_root = ET.parse(sdf_path.with_name(f"{sdf_path.stem}_matlab.sdf")).getroot()
     matlab_collision_uris = [
         element.text for element in matlab_root.findall(".//collision/geometry/mesh/uri")
     ]
@@ -119,7 +125,7 @@ def test_compiles_portable_sdf_with_cad_relative_joint_limits(tmp_path: Path) ->
     assert (sdf_path.parent / "load_in_matlab.m").exists()
 
 
-def test_default_package_is_one_portable_visual_only_sdf(tmp_path: Path) -> None:
+def test_default_package_is_a_visual_only_drake_and_matlab_pair(tmp_path: Path) -> None:
     mesh = tmp_path / "fixed.obj"
     _write_triangle_obj(mesh)
     scene_path = tmp_path / "scene.yaml"
@@ -140,8 +146,21 @@ def test_default_package_is_one_portable_visual_only_sdf(tmp_path: Path) -> None
     root = ET.parse(sdf_path).getroot()
     assert root.findall(".//visual")
     assert not root.findall(".//collision")
-    assert not sdf_path.with_name(f"{sdf_path.stem}_matlab.sdf").exists()
-    assert "sdfFile" in (sdf_path.parent / "load_in_matlab.m").read_text(encoding="utf-8")
+    # Drake needs OBJ visuals and MATLAB needs STL, so the default package is a matched pair
+    # of visual-only SDFs rather than a single portable file.
+    assert all(
+        element.text.endswith(".obj") for element in root.findall(".//visual/geometry/mesh/uri")
+    )
+    matlab_path = sdf_path.with_name(f"{sdf_path.stem}_matlab.sdf")
+    matlab_root = ET.parse(matlab_path).getroot()
+    assert not matlab_root.findall(".//collision")
+    assert all(
+        element.text.endswith(".stl")
+        for element in matlab_root.findall(".//visual/geometry/mesh/uri")
+    )
+    loader = (sdf_path.parent / "load_in_matlab.m").read_text(encoding="utf-8")
+    assert "sdfFile" in loader
+    assert matlab_path.name in loader
 
 
 def test_refuses_to_replace_an_unmanaged_output_directory(tmp_path: Path) -> None:
@@ -169,3 +188,27 @@ def test_refuses_to_replace_an_unmanaged_output_directory(tmp_path: Path) -> Non
     else:
         raise AssertionError("Expected unmanaged output-directory protection")
     assert (output / "user-file.txt").read_text(encoding="utf-8") == "keep"
+
+
+def test_add_mesh_geometry_declares_convex_only_when_requested():
+    import xml.etree.ElementTree as ET
+
+    from slac_robotics.sdf_compiler import _add_mesh_geometry
+
+    plain = ET.Element("collision")
+    _add_mesh_geometry(plain, "meshes/a048.obj")
+    assert plain.find("geometry/mesh/uri").text == "meshes/a048.obj"
+    assert [child.tag for child in plain.find("geometry/mesh")] == ["uri", "scale"]
+
+    convex = ET.Element("collision")
+    _add_mesh_geometry(convex, "meshes/a048_p901_003.obj", declare_convex=True)
+    assert "drake:declare_convex" in [child.tag for child in convex.find("geometry/mesh")]
+
+
+def test_compile_sdf_package_rejects_an_unknown_collision_mode(tmp_path):
+    import pytest
+
+    from slac_robotics.sdf_compiler import compile_sdf_package
+
+    with pytest.raises(ValueError, match="collision_mode"):
+        compile_sdf_package(tmp_path / "scene.yaml", tmp_path / "out", collision_mode="vhacd")

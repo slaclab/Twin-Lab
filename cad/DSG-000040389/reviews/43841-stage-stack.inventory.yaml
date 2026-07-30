@@ -121,6 +121,14 @@ hidden_occurrences:
   - P776  # REF-000168820 beam path
   - P777  # REF-000168820 beam path
 
+# Part pairs that clearance reports should not flag. Drake already filters bodies
+# joined by a joint and bodies welded into one subgraph, so this is only for parts
+# that touch by design across otherwise independent bodies. Populate from a review
+# of the home-pose report; every entry needs a reason.
+ignored_pairs: []
+#  - pair: [A050, A037]
+#    reason: cable tray passes through the reviewed envelope
+
 attachment_overrides:
   fixed:
     - P847   # DSG-000041331; Middle Crystal base mount

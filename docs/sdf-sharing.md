@@ -15,8 +15,10 @@ Outputs:
 ```text
 exports/DSG-000040389.43841-stage-stack.sdf-package/
   dsg_000040389_43841_stage_stack.sdf
+  dsg_000040389_43841_stage_stack_matlab.sdf
   joint_metadata.csv
   load_in_matlab.m
+  meshes/*.obj
   meshes/*.stl
   README.md
 exports/DSG-000040389.43841-stage-stack.sdf-package.zip
@@ -56,8 +58,10 @@ python -m slac_robotics.scene \
 ```
 
 The package has a welded assembly base and 21 scalar joint positions. The normal
-export contains STL visual geometry but no collision geometry, so it remains
-fast and works in both Drake and MATLAB.
+export carries visual geometry but no collision geometry, so it stays fast. It
+ships two matched SDFs: the canonical one references OBJ meshes because Drake's
+Meshcat cannot render STL, and `_matlab.sdf` references the same geometry as
+binary STL for MATLAB. `load_in_matlab.m` already points at the right one.
 
 ## Collision export status
 

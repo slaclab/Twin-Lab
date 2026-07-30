@@ -14,7 +14,10 @@ from typing import Any
 
 import yaml
 
-from .paths import EXPORT_ROOT, resolve_repo_path, review_artifact_stem
+from .convex_collision import DEFAULT_SETTINGS, decompose_sources
+from .paths import CACHE_ROOT, EXPORT_ROOT, resolve_repo_path, review_artifact_stem
+
+COLLISION_MODES = ("hull", "convex")
 
 
 @dataclass
@@ -48,10 +51,14 @@ def compile_sdf_package(
     *,
     model_name: str | None = None,
     include_collisions: bool = False,
+    collision_mode: str = "hull",
+    decomposition_workers: int | None = None,
     archive: bool = True,
 ) -> tuple[Path, Path | None]:
     """Compile one cached stage-CAD scene into SDF, binary STL, and MATLAB helpers."""
 
+    if collision_mode not in COLLISION_MODES:
+        raise ValueError(f"collision_mode must be one of {COLLISION_MODES}, got {collision_mode!r}")
     scene_file = Path(scene_path).resolve()
     scene = yaml.safe_load(scene_file.read_text(encoding="utf-8"))
     if not str(scene.get("schema", "")).startswith("slac-stage-cad-scene/"):
@@ -72,8 +79,16 @@ def compile_sdf_package(
 
     resolved_model_name = _safe_name(model_name or _default_model_name(scene_file))
     links, joints = _build_tree(scene, scene_file)
-    visual_mesh_uris, drake_collision_uris = _convert_meshes(
-        links, meshes_dir, scene_file, include_collision_obj=include_collisions
+    # The canonical SDF is Drake-first and must use OBJ visuals, because Drake's Meshcat
+    # cannot render STL. MATLAB gets its own STL variant so both toolchains stay supported.
+    matlab_collisions = include_collisions and collision_mode == "hull"
+    visual_mesh_uris, stl_mesh_uris, drake_collision_uris = _convert_meshes(
+        links,
+        meshes_dir,
+        scene_file,
+        include_collision_obj=include_collisions,
+        collision_mode=collision_mode,
+        decomposition_workers=decomposition_workers,
     )
     sdf_path = package_dir / f"{resolved_model_name}.sdf"
     _write_sdf(
@@ -84,19 +99,20 @@ def compile_sdf_package(
         visual_mesh_uris,
         collision_mesh_uris=drake_collision_uris,
         include_collisions=include_collisions,
+        declare_convex=collision_mode == "convex",
     )
-    if include_collisions:
-        _write_sdf(
-            package_dir / f"{resolved_model_name}_matlab.sdf",
-            resolved_model_name,
-            links,
-            joints,
-            visual_mesh_uris,
-            collision_mesh_uris=visual_mesh_uris,
-            include_collisions=True,
-        )
+    matlab_sdf_name = f"{resolved_model_name}_matlab.sdf"
+    _write_sdf(
+        package_dir / matlab_sdf_name,
+        resolved_model_name,
+        links,
+        joints,
+        stl_mesh_uris,
+        collision_mesh_uris={source: [("", uri)] for source, uri in stl_mesh_uris.items()},
+        include_collisions=matlab_collisions,
+        declare_convex=False,
+    )
     _write_joint_metadata(package_dir / "joint_metadata.csv", joints)
-    matlab_sdf_name = f"{resolved_model_name}_matlab.sdf" if include_collisions else sdf_path.name
     _write_matlab_loader(package_dir / "load_in_matlab.m", matlab_sdf_name)
     _write_package_readme(package_dir / "README.md", sdf_path.name, joints, include_collisions)
 
@@ -220,12 +236,23 @@ def _convert_meshes(
     scene_file: Path,
     *,
     include_collision_obj: bool,
-) -> tuple[dict[Path, str], dict[Path, str]]:
-    del scene_file  # Paths were resolved while constructing the rigid-body tree.
+    collision_mode: str = "hull",
+    decomposition_workers: int | None = None,
+) -> tuple[dict[Path, str], dict[Path, str], dict[Path, list[tuple[str, str]]]]:
     sources = {source for link in links for _, source, _ in link.meshes}
     visual_result: dict[Path, str] = {}
-    collision_result: dict[Path, str] = {}
+    stl_result: dict[Path, str] = {}
+    collision_result: dict[Path, list[tuple[str, str]]] = {}
     used_names: set[str] = set()
+    decomposed = {}
+    if include_collision_obj and collision_mode == "convex":
+        decomposed = decompose_sources(
+            sources,
+            CACHE_ROOT / "convex-collision" / scene_file.parent.name,
+            DEFAULT_SETTINGS,
+            workers=decomposition_workers,
+            progress=True,
+        )
     for source in sorted(sources):
         base_name = _safe_name(source.stem)
         name = base_name
@@ -234,14 +261,27 @@ def _convert_meshes(
             name = f"{base_name}_{number}"
             number += 1
         used_names.add(name)
-        target = meshes_dir / f"{name}.stl"
-        _obj_to_binary_stl(source, target)
-        visual_result[source] = f"meshes/{target.name}"
-        if include_collision_obj:
-            collision_target = meshes_dir / f"{name}.obj"
-            shutil.copy2(source, collision_target)
-            collision_result[source] = f"meshes/{collision_target.name}"
-    return visual_result, collision_result
+        # Drake's Meshcat cannot render STL, so the canonical SDF points at OBJ visuals.
+        visual_target = meshes_dir / f"{name}.obj"
+        shutil.copy2(source, visual_target)
+        visual_result[source] = f"meshes/{visual_target.name}"
+        stl_target = meshes_dir / f"{name}.stl"
+        _obj_to_binary_stl(source, stl_target)
+        stl_result[source] = f"meshes/{stl_target.name}"
+        if not include_collision_obj:
+            continue
+        if collision_mode == "convex":
+            pieces = []
+            for part in decomposed.get(source, []):
+                part_slug = _safe_name(part.part_ref)
+                for index, hull in enumerate(part.hulls):
+                    hull_target = meshes_dir / f"{name}_{part_slug}_{index:03d}.obj"
+                    shutil.copy2(hull, hull_target)
+                    pieces.append((f"{part_slug}_{index:03d}", f"meshes/{hull_target.name}"))
+            collision_result[source] = pieces
+        else:
+            collision_result[source] = [("", visual_result[source])]
+    return visual_result, stl_result, collision_result
 
 
 def _write_sdf(
@@ -251,8 +291,9 @@ def _write_sdf(
     joints: list[JointSpec],
     visual_mesh_uris: dict[Path, str],
     *,
-    collision_mesh_uris: dict[Path, str],
+    collision_mesh_uris: dict[Path, list[tuple[str, str]]],
     include_collisions: bool,
+    declare_convex: bool,
 ) -> None:
     sdf = ET.Element("sdf", {"version": "1.6"})
     model = ET.SubElement(sdf, "model", {"name": model_name})
@@ -266,11 +307,16 @@ def _write_sdf(
             _add_mesh_geometry(visual, visual_mesh_uris[source])
             material = ET.SubElement(visual, "material")
             ET.SubElement(material, "diffuse").text = _numbers(rgba or [0.62, 0.66, 0.72, 1.0])
-            if include_collisions:
+            if not include_collisions:
+                continue
+            for suffix, uri in collision_mesh_uris[source]:
+                piece_name = f"{geometry_name}_{suffix}" if suffix else geometry_name
                 collision = ET.SubElement(
-                    link_element, "collision", {"name": f"{geometry_name}_collision"}
+                    link_element,
+                    "collision",
+                    {"name": f"{piece_name}_collision"},
                 )
-                _add_mesh_geometry(collision, collision_mesh_uris[source])
+                _add_mesh_geometry(collision, uri, declare_convex=declare_convex)
 
     model.append(
         ET.Comment(
@@ -297,11 +343,13 @@ def _write_sdf(
     tree.write(output, encoding="utf-8", xml_declaration=True)
 
 
-def _add_mesh_geometry(parent: ET.Element, uri: str) -> None:
+def _add_mesh_geometry(parent: ET.Element, uri: str, *, declare_convex: bool = False) -> None:
     geometry = ET.SubElement(parent, "geometry")
     mesh = ET.SubElement(geometry, "mesh")
     ET.SubElement(mesh, "uri").text = uri
     ET.SubElement(mesh, "scale").text = "1 1 1"
+    if declare_convex:
+        ET.SubElement(mesh, "drake:declare_convex")
 
 
 def _obj_to_binary_stl(source: Path, output: Path) -> None:
@@ -417,14 +465,16 @@ def _write_package_readme(
         )
     else:
         compatibility_text = (
-            f"The canonical `{sdf_name}` uses portable STL visuals and deliberately contains no "
-            "collision geometry, so the same file loads efficiently in Drake and MATLAB.\n\n"
+            f"The canonical `{sdf_name}` deliberately contains no collision geometry, so it "
+            "loads efficiently in Drake. The matching `_matlab.sdf` carries the same visuals "
+            "as STL for MATLAB.\n\n"
         )
     output.write_text(
         "# SLAC stage-stack SDF package\n\n"
-        "This is a kinematic model compiled from the reviewed STEP assembly. Meshes are binary "
-        "STL files in metres, and all mesh paths are relative so the entire directory can be "
-        "moved.\n\n"
+        "This is a kinematic model compiled from the reviewed STEP assembly. Meshes are in "
+        "metres: the canonical SDF references OBJ because Drake's Meshcat cannot render STL, "
+        "and the `_matlab.sdf` variant references binary STL. All mesh paths are relative so "
+        "the entire directory can be moved.\n\n"
         "## MATLAB Robotics System Toolbox\n\n"
         "Open this directory in MATLAB and run:\n\n"
         "```matlab\n"
@@ -486,7 +536,19 @@ def main() -> None:
         action="store_true",
         help="Export experimental detailed collision meshes (slower and convex-hulled in Drake)",
     )
+    parser.add_argument(
+        "--collision-mode",
+        choices=COLLISION_MODES,
+        default="hull",
+        help="hull copies each part mesh; convex runs CoACD so Drake sees true concavity",
+    )
     parser.add_argument("--no-zip", action="store_true", help="Do not create a shareable ZIP")
+    parser.add_argument(
+        "--decomposition-workers",
+        type=int,
+        default=None,
+        help="Parallel CoACD workers for --collision-mode convex",
+    )
     args = parser.parse_args()
 
     source = resolve_repo_path(args.source).resolve()
@@ -505,6 +567,8 @@ def main() -> None:
         output_dir,
         model_name=args.model_name,
         include_collisions=args.with_collisions,
+        collision_mode=args.collision_mode,
+        decomposition_workers=args.decomposition_workers,
         archive=not args.no_zip,
     )
     print(f"SDF package: {sdf_path.parent}")
