@@ -17,6 +17,8 @@ from .collision import CollisionModel
 from .paths import EXPORT_ROOT, resolve_repo_path, review_artifact_stem
 
 WARN_LABEL = "Clearance warning band (mm)"
+CLEAR_RGB = [0.13, 0.42, 0.18]
+INTERFERENCE_RGB = [0.60, 0.08, 0.08]
 
 
 @dataclass(frozen=True)
@@ -96,9 +98,16 @@ def run_collision_viewer(
         params.web_url_pattern = f"http://{wsl_address}:{{port}}"
     meshcat = Meshcat(params)
 
+    print(f"Collision viewer: {meshcat.web_url()}")
+    print(f"Model: {sdf_path}")
+    print("Loading collision geometry into Drake; the viewer stays blank until this finishes.")
+    load_start = time.monotonic()
     scene = load_scene(sdf_path, meshcat=meshcat)
     model = CollisionModel(scene, _read_ignored(ignore_file))
-    candidates = _candidate_pair_count(model)
+    print(
+        f"Loaded {_proximity_geometry_count(model)} collision geometries "
+        f"in {time.monotonic() - load_start:.0f} s"
+    )
 
     for joint in joints:
         lower, upper, home = joint.slider_bounds()
@@ -108,14 +117,14 @@ def run_collision_viewer(
     meshcat.AddButton("Log clearance report")
     meshcat.AddButton("Stop viewer", "Escape")
 
-    print(f"Collision viewer: {meshcat.web_url()}")
-    print(f"Model: {sdf_path}")
-    print(f"{len(joints)} joints, {candidates} unfiltered geometry pairs")
+    print(f"{len(joints)} joints")
+    print("Background is GREEN when clear and RED when any pair is touching.")
     print("Press Escape in Meshcat or Ctrl-C here to stop.")
 
     reset_clicks = 0
     log_clicks = 0
-    previous_values: list[float] | None = None
+    previous_pose: tuple[list[float], float] | None = None
+    previous_interference: bool | None = None
     previous_summary = ""
     while meshcat.GetButtonClicks("Stop viewer") == 0:
         new_reset = meshcat.GetButtonClicks("Reset to home")
@@ -127,8 +136,9 @@ def run_collision_viewer(
         values = [meshcat.GetSliderValue(joint.label) for joint in joints]
         warn_m = max(meshcat.GetSliderValue(WARN_LABEL), 0.0) / 1000.0
         new_log = meshcat.GetButtonClicks("Log clearance report")
-        if values != previous_values or new_log != log_clicks:
-            previous_values = values
+        pose = (values, warn_m)
+        if pose != previous_pose or new_log != log_clicks:
+            previous_pose = pose
             model.set_positions(
                 {
                     joint.joint_name: joint.to_sdf(value)
@@ -137,6 +147,9 @@ def run_collision_viewer(
             )
             scene.diagram.ForcedPublish(model.context)
             report = model.report(warn_m=warn_m)
+            if report.interference != previous_interference:
+                previous_interference = report.interference
+                _set_status(meshcat, report.interference)
             if new_log != log_clicks:
                 log_clicks = new_log
                 _print_report(report)
@@ -144,6 +157,15 @@ def run_collision_viewer(
                 previous_summary = report.summary()
                 print(report.summary())
         time.sleep(0.1)
+
+
+def _set_status(meshcat, interfering: bool) -> None:
+    """Paint the whole viewport red for interference or green for clearance."""
+
+    color = INTERFERENCE_RGB if interfering else CLEAR_RGB
+    meshcat.SetProperty("/Background", "top_color", color)
+    meshcat.SetProperty("/Background", "bottom_color", color)
+    print("INTERFERENCE" if interfering else "CLEAR")
 
 
 def _read_ignored(ignore_file: str | Path | None) -> frozenset[tuple[str, str]]:
@@ -154,10 +176,24 @@ def _read_ignored(ignore_file: str | Path | None) -> frozenset[tuple[str, str]]:
     return read_ignored_pairs(ignore_file)
 
 
-def _candidate_pair_count(model: CollisionModel) -> int:
+def _needs_recompile(package_dir: Path) -> bool:
+    """Rebuild packages predating the OBJ-visual fix; Meshcat silently skips STL visuals."""
+
+    if not (package_dir / "joint_metadata.csv").exists():
+        return True
+    sdf_path = next(
+        (path for path in sorted(package_dir.glob("*.sdf")) if not path.stem.endswith("_matlab")),
+        None,
+    )
+    return sdf_path is None or ".stl</uri>" in sdf_path.read_text(encoding="utf-8")
+
+
+def _proximity_geometry_count(model: CollisionModel) -> int:
+    from pydrake.geometry import Role
+
     scene_context = model.scene.scene_graph.GetMyContextFromRoot(model.context)
     query = model.scene.scene_graph.get_query_output_port().Eval(scene_context)
-    return len(query.inspector().GetCollisionCandidates())
+    return query.inspector().NumGeometriesWithRole(Role.kProximity)
 
 
 def _print_report(report) -> None:
@@ -207,7 +243,8 @@ def main() -> None:
     inventory = resolve_repo_path(args.stage_inventory).resolve()
     scene_path = prepare_stage_cad(inventory, rebuild=args.rebuild)
     package_dir = args.package_dir or EXPORT_ROOT / f"{review_artifact_stem(inventory)}.collision"
-    if args.rebuild or not (package_dir / "joint_metadata.csv").exists():
+    if args.rebuild or _needs_recompile(package_dir):
+        print(f"Compiling collision package into {package_dir}")
         compile_sdf_package(
             scene_path,
             package_dir,

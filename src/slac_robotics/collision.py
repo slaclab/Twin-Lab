@@ -54,6 +54,12 @@ class ClearanceReport:
         return tuple(item for item in self.clearances if 0.0 < item.distance_m <= self.warn_m)
 
     @property
+    def interference(self) -> bool:
+        """True when any reviewed pair is in contact or penetrating at this pose."""
+
+        return bool(self.touching)
+
+    @property
     def worst_m(self) -> float | None:
         return self.clearances[0].distance_m if self.clearances else None
 
@@ -79,9 +85,7 @@ class CollisionModel:
         self.context = scene.create_context()
 
     @classmethod
-    def load(
-        cls, sdf_path: str | Path, *, ignore_file: str | Path | None = None
-    ) -> CollisionModel:
+    def load(cls, sdf_path: str | Path, *, ignore_file: str | Path | None = None) -> CollisionModel:
         scene = load_scene(sdf_path)
         ignored = read_ignored_pairs(ignore_file) if ignore_file is not None else frozenset()
         return cls(scene, ignored)
