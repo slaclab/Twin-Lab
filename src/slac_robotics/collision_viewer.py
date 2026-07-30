@@ -17,8 +17,12 @@ from .collision import CollisionModel
 from .paths import EXPORT_ROOT, resolve_repo_path, review_artifact_stem
 
 WARN_LABEL = "Clearance warning band (mm)"
+AUTO_RANGE_LABEL = "Auto motion range (% of travel)"
+AUTO_PERIOD_LABEL = "Auto motion period (s)"
 COLLISION_ON = "Collision detection: ON (click to disable)"
 COLLISION_OFF = "Collision detection: OFF (click to enable)"
+ANIMATION_ON = "Animation: ON (click to stop)"
+ANIMATION_OFF = "Animation: OFF (click to start)"
 STATUS_RGB = {
     "clear": [0.13, 0.42, 0.18],
     "close": [0.72, 0.60, 0.05],
@@ -122,48 +126,74 @@ def run_collision_viewer(
         lower, upper, home = joint.slider_bounds()
         meshcat.AddSlider(joint.label, lower, upper, 0.05, home)
     meshcat.AddSlider(WARN_LABEL, 0.0, 50.0, 0.5, warn_mm)
+    meshcat.AddSlider(AUTO_RANGE_LABEL, 0.0, 100.0, 1.0, 25.0)
+    meshcat.AddSlider(AUTO_PERIOD_LABEL, 2.0, 60.0, 0.5, 12.0)
     meshcat.AddButton("Reset to home")
     meshcat.AddButton("Log clearance report")
     meshcat.AddButton("Stop viewer", "Escape")
-    # Added after the fixed buttons so the offender readout always stays below it.
-    collision_label = _set_collision_button(meshcat, None, True)
+    # Added after the fixed buttons so the offender readout always stays below them.
+    toggles = _set_toggles(meshcat, [], collision_on=True, animating=False)
 
     print(f"{len(joints)} joints")
     print("Background: GREEN clear, YELLOW inside the warning band, RED touching.")
     print("Click 'Collision detection' to turn checking off and use this as a plain viewer.")
+    print("Click 'Animation' to cycle every joint about its reviewed home.")
     print("Press Escape in Meshcat or Ctrl-C here to stop.")
 
     reset_clicks = 0
     log_clicks = 0
     collision_clicks = 0
+    animation_clicks = 0
     collision_on = True
+    animating = False
+    phase = 0.0
+    previous_tick = time.monotonic()
     previous_pose: tuple[list[float], float] | None = None
     previous_status: str | None = None
     readout: list[str] = []
     previous_summary = ""
     while meshcat.GetButtonClicks("Stop viewer") == 0:
-        new_collision = meshcat.GetButtonClicks(collision_label)
-        if new_collision != collision_clicks:
-            collision_on = not collision_on
-            for name in readout:
-                meshcat.DeleteButton(name)
+        tick = time.monotonic()
+        elapsed = tick - previous_tick
+        previous_tick = tick
+
+        new_collision = meshcat.GetButtonClicks(toggles[0])
+        new_animation = meshcat.GetButtonClicks(toggles[1])
+        new_reset = meshcat.GetButtonClicks("Reset to home")
+        wanted_collision = collision_on ^ (new_collision != collision_clicks)
+        wanted_animating = animating ^ (new_animation != animation_clicks)
+        if new_reset != reset_clicks:
+            reset_clicks = new_reset
+            wanted_animating = False
+            phase = 0.0
+            for joint in joints:
+                meshcat.SetSliderValue(joint.label, joint.slider_bounds()[2])
+
+        if (wanted_collision, wanted_animating) != (collision_on, animating):
+            if wanted_collision != collision_on:
+                print(f"Collision detection {'ON' if wanted_collision else 'OFF'}.")
+            if not wanted_collision:
+                _reset_status(meshcat)
+            collision_on, animating = wanted_collision, wanted_animating
+            toggles = _set_toggles(
+                meshcat, toggles + readout, collision_on=collision_on, animating=animating
+            )
             readout = []
-            collision_label = _set_collision_button(meshcat, collision_label, collision_on)
             collision_clicks = 0
+            animation_clicks = 0
             previous_pose = None
             previous_status = None
             previous_summary = ""
-            if not collision_on:
-                _reset_status(meshcat)
-                print("Collision detection OFF: sliders drive motion only.")
-            else:
-                print("Collision detection ON.")
 
-        new_reset = meshcat.GetButtonClicks("Reset to home")
-        if new_reset != reset_clicks:
-            reset_clicks = new_reset
-            for joint in joints:
-                meshcat.SetSliderValue(joint.label, joint.slider_bounds()[2])
+        if animating:
+            period = max(meshcat.GetSliderValue(AUTO_PERIOD_LABEL), 0.1)
+            span_fraction = meshcat.GetSliderValue(AUTO_RANGE_LABEL) / 100.0
+            phase = math.fmod(phase + 2.0 * math.pi * elapsed / period, 2.0 * math.pi)
+            for index, joint in enumerate(joints):
+                lower, upper, home = joint.slider_bounds()
+                amplitude = max(min(home - lower, upper - home), 0.0) * span_fraction
+                offset = 2.0 * math.pi * index / max(len(joints), 1)
+                meshcat.SetSliderValue(joint.label, home + amplitude * math.sin(phase + offset))
 
         values = [meshcat.GetSliderValue(joint.label) for joint in joints]
         warn_m = max(meshcat.GetSliderValue(WARN_LABEL), 0.0) / 1000.0
@@ -192,17 +222,25 @@ def run_collision_viewer(
                     print(report.summary())
             else:
                 log_clicks = new_log
-        time.sleep(0.1)
+        time.sleep(0.03 if animating else 0.1)
 
 
-def _set_collision_button(meshcat, previous_label: str | None, enabled: bool) -> str:
-    """Meshcat has no checkbox, so a relabelled button carries the on/off state."""
+def _set_toggles(meshcat, previous: list[str], *, collision_on: bool, animating: bool) -> list[str]:
+    """Meshcat has no checkbox, so relabelled buttons carry the on/off state.
 
-    if previous_label is not None:
-        meshcat.DeleteButton(previous_label)
-    label = COLLISION_ON if enabled else COLLISION_OFF
-    meshcat.AddButton(label)
-    return label
+    The offender readout is torn down with them because dat.GUI only appends, and the
+    toggles have to end up above it again.
+    """
+
+    for name in previous:
+        meshcat.DeleteButton(name)
+    labels = [
+        COLLISION_ON if collision_on else COLLISION_OFF,
+        ANIMATION_ON if animating else ANIMATION_OFF,
+    ]
+    for name in labels:
+        meshcat.AddButton(name)
+    return labels
 
 
 def _reset_status(meshcat) -> None:

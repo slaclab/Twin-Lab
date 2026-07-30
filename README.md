@@ -42,6 +42,12 @@ window into a plain slider-driven viewer with Drake's normal sky background. The
 same command therefore covers both jobs; clicking the toggle back on repaints
 the state for the current pose.
 
+The `Animation: OFF (click to start)` toggle and the two `Auto motion` sliders
+described under [animated motion](#animated-motion) are available here too, so a
+whole sweep can be swept for interference without touching a slider. With
+checking left on, each animation frame is evaluated, which is the fastest way to
+find the poses that actually collide.
+
 ### Reading the result
 
 | Background | State | Meaning |
@@ -128,8 +134,8 @@ Meshcat; **Reset to home** restores every reviewed home position.
 
 ### Animated motion
 
-Besides the per-joint sliders, one toggle button and two sliders drive a
-continuous demo animation of the whole stack:
+Both viewers carry the same controls. Besides the per-joint sliders, one toggle
+button and two sliders drive a continuous demo animation of the whole stack:
 
 | Control | Effect |
 | --- | --- |
@@ -145,7 +151,8 @@ nudge individual joints from there. **Reset to home** also switches the toggle
 back off.
 
 The range slider is a travel heuristic, not a clearance guarantee. To check an
-animated pose for real interference, use the collision viewer above.
+animated pose for real interference, run the animation inside the collision
+viewer above, which evaluates every frame.
 
 ## Updating The 43841 STEP
 
