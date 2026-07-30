@@ -17,8 +17,17 @@ from .collision import CollisionModel
 from .paths import EXPORT_ROOT, resolve_repo_path, review_artifact_stem
 
 WARN_LABEL = "Clearance warning band (mm)"
-CLEAR_RGB = [0.13, 0.42, 0.18]
-INTERFERENCE_RGB = [0.60, 0.08, 0.08]
+COLLISION_ON = "Collision detection: ON (click to disable)"
+COLLISION_OFF = "Collision detection: OFF (click to enable)"
+STATUS_RGB = {
+    "clear": [0.13, 0.42, 0.18],
+    "close": [0.72, 0.60, 0.05],
+    "interference": [0.60, 0.08, 0.08],
+}
+# Drake's own sky gradient, restored when clearance checking is switched off.
+DEFAULT_TOP_RGB = [0.53, 0.81, 0.98]
+DEFAULT_BOTTOM_RGB = [0.10, 0.10, 0.44]
+OFFENDER_LIMIT = 3
 
 
 @dataclass(frozen=True)
@@ -116,17 +125,40 @@ def run_collision_viewer(
     meshcat.AddButton("Reset to home")
     meshcat.AddButton("Log clearance report")
     meshcat.AddButton("Stop viewer", "Escape")
+    # Added after the fixed buttons so the offender readout always stays below it.
+    collision_label = _set_collision_button(meshcat, None, True)
 
     print(f"{len(joints)} joints")
-    print("Background is GREEN when clear and RED when any pair is touching.")
+    print("Background: GREEN clear, YELLOW inside the warning band, RED touching.")
+    print("Click 'Collision detection' to turn checking off and use this as a plain viewer.")
     print("Press Escape in Meshcat or Ctrl-C here to stop.")
 
     reset_clicks = 0
     log_clicks = 0
+    collision_clicks = 0
+    collision_on = True
     previous_pose: tuple[list[float], float] | None = None
-    previous_interference: bool | None = None
+    previous_status: str | None = None
+    readout: list[str] = []
     previous_summary = ""
     while meshcat.GetButtonClicks("Stop viewer") == 0:
+        new_collision = meshcat.GetButtonClicks(collision_label)
+        if new_collision != collision_clicks:
+            collision_on = not collision_on
+            for name in readout:
+                meshcat.DeleteButton(name)
+            readout = []
+            collision_label = _set_collision_button(meshcat, collision_label, collision_on)
+            collision_clicks = 0
+            previous_pose = None
+            previous_status = None
+            previous_summary = ""
+            if not collision_on:
+                _reset_status(meshcat)
+                print("Collision detection OFF: sliders drive motion only.")
+            else:
+                print("Collision detection ON.")
+
         new_reset = meshcat.GetButtonClicks("Reset to home")
         if new_reset != reset_clicks:
             reset_clicks = new_reset
@@ -146,26 +178,76 @@ def run_collision_viewer(
                 }
             )
             scene.diagram.ForcedPublish(model.context)
-            report = model.report(warn_m=warn_m)
-            if report.interference != previous_interference:
-                previous_interference = report.interference
-                _set_status(meshcat, report.interference)
-            if new_log != log_clicks:
+            if collision_on:
+                report = model.report(warn_m=warn_m)
+                if report.status != previous_status:
+                    previous_status = report.status
+                    _set_status(meshcat, report.status)
+                readout = _set_offender_readout(meshcat, report, readout)
+                if new_log != log_clicks:
+                    log_clicks = new_log
+                    _print_report(report)
+                elif report.summary() != previous_summary:
+                    previous_summary = report.summary()
+                    print(report.summary())
+            else:
                 log_clicks = new_log
-                _print_report(report)
-            elif report.summary() != previous_summary:
-                previous_summary = report.summary()
-                print(report.summary())
         time.sleep(0.1)
 
 
-def _set_status(meshcat, interfering: bool) -> None:
-    """Paint the whole viewport red for interference or green for clearance."""
+def _set_collision_button(meshcat, previous_label: str | None, enabled: bool) -> str:
+    """Meshcat has no checkbox, so a relabelled button carries the on/off state."""
 
-    color = INTERFERENCE_RGB if interfering else CLEAR_RGB
-    meshcat.SetProperty("/Background", "top_color", color)
-    meshcat.SetProperty("/Background", "bottom_color", color)
-    print("INTERFERENCE" if interfering else "CLEAR")
+    if previous_label is not None:
+        meshcat.DeleteButton(previous_label)
+    label = COLLISION_ON if enabled else COLLISION_OFF
+    meshcat.AddButton(label)
+    return label
+
+
+def _reset_status(meshcat) -> None:
+    meshcat.SetProperty("/Background/<object>", "top_color", DEFAULT_TOP_RGB)
+    meshcat.SetProperty("/Background/<object>", "bottom_color", DEFAULT_BOTTOM_RGB)
+
+
+def _set_status(meshcat, status: str) -> None:
+    """Paint the whole viewport by clearance state so the pose is readable at a glance."""
+
+    color = STATUS_RGB[status]
+    # Meshcat wants the property on the Background's object, not the group path.
+    meshcat.SetProperty("/Background/<object>", "top_color", color)
+    meshcat.SetProperty("/Background/<object>", "bottom_color", color)
+    print(status.upper())
+
+
+def _offender_labels(report) -> list[str]:
+    """Name the worst part pairs as Meshcat control labels, worst first.
+
+    Distances are deliberately left out so the labels only change when the offending
+    pairs change; a live number would rebuild the controls on every slider step.
+    """
+
+    if report.status == "clear":
+        return [f"clear: nothing within {report.warn_m * 1000:.0f} mm"]
+    heading = "TOUCHING" if report.status == "interference" else "CLOSE"
+    labels = []
+    for index, item in enumerate(report.offenders(OFFENDER_LIMIT), start=1):
+        first, second = item.parts
+        labels.append(f"{heading} {index}: {first} <-> {second}")
+    return labels
+
+
+def _set_offender_readout(meshcat, report, previous: list[str]) -> list[str]:
+    """Republish the offending part IDs as buttons, the only text Meshcat can show."""
+
+    labels = _offender_labels(report)
+    if labels == previous:
+        return previous
+    for name in previous:
+        meshcat.DeleteButton(name)
+    for name in labels:
+        meshcat.AddButton(name)
+    return labels
 
 
 def _read_ignored(ignore_file: str | Path | None) -> frozenset[tuple[str, str]]:
@@ -203,7 +285,11 @@ def _print_report(report) -> None:
     for item in report.clearances[:25]:
         state = "TOUCH" if item.distance_m <= 0.0 else "close"
         first, second = item.names
-        print(f"  {state} {item.distance_m * 1000:+8.2f} mm  {first}  <->  {second}")
+        part_a, part_b = item.parts
+        print(
+            f"  {state} {item.distance_m * 1000:+8.2f} mm  {part_a} <-> {part_b}"
+            f"   ({first}  <->  {second})"
+        )
     print(
         f"  {len(report.touching)} touching, {len(report.warnings)} within band, "
         f"{len(report.clearances)} reported"

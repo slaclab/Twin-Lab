@@ -18,7 +18,104 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-View and move the reviewed real-CAD assembly:
+## Collision detection
+
+This is the point of the model. Quick start, from the repository root:
+
+```bash
+source .venv/bin/activate
+slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
+```
+
+Open the Meshcat URL it prints. First load takes about 20 seconds; the window is
+blank until the console says the geometry is loaded. Drag any joint slider and
+the background colour tells you the state of the pose immediately.
+
+The collision viewer drives a Drake plant compiled from the same reviewed
+inventory, so the geometry drawn on screen and the geometry checked for
+interference are the same kinematics. The module form
+`python -m slac_robotics.collision_viewer <inventory>` is equivalent.
+
+Checking can be switched off at any time with the
+`Collision detection: ON (click to disable)` toggle button, which turns the
+window into a plain slider-driven viewer with Drake's normal sky background. The
+same command therefore covers both jobs; clicking the toggle back on repaints
+the state for the current pose.
+
+### Reading the result
+
+| Background | State | Meaning |
+| --- | --- | --- |
+| Green | `clear` | Nothing within the warning band |
+| Yellow | `close` | Something inside the warning band, but no contact |
+| Red | `interference` | At least one pair is touching or penetrating |
+
+The worst three part pairs are listed by reference ID in the Meshcat controls
+panel, for example `TOUCHING 1: P844 <-> P850`, so the offenders are identifiable
+without leaving the browser. Distances are deliberately omitted there; a live
+number would rebuild the panel on every slider step. The terminal carries the
+numbers, one line per state change, and **Log clearance report** dumps the worst
+25 pairs with both the part IDs and their owning links.
+
+Only `interference` is a hard finding. `close` depends entirely on the
+`Clearance warning band (mm)` slider, so it is a design-review aid rather than a
+pass/fail. At the reviewed home pose the assembly is `close` at the default 5 mm
+band and only goes `clear` below about 0.9 mm; the stack really is that tightly
+packed, so home is reported as close rather than clean.
+
+### Collision modes
+
+| Mode | How geometry is built | Use |
+| --- | --- | --- |
+| `hull` | One convex hull per part mesh | Fast, but a hull of a concave part such as the enclosure fills its interior, so it reports contact everywhere. Useful only as a smoke test |
+| `convex` | CoACD convex decomposition, one `<collision>` per hull with `<drake:declare_convex/>` | Default for the viewer. Tracks true concavity, so clearance numbers are meaningful |
+
+The convex build runs CoACD once and caches the result under
+`.cache/slac_robotics/convex-collision/`, keyed by mesh mtime, size, and the
+decomposition settings. The cold build on the 43841 assembly is long (roughly
+2.6 M triangles across 392 sub-parts), so give it workers and let it finish:
+
+```bash
+python -m slac_robotics.collision_viewer \
+  cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
+  --collision-mode convex --decomposition-workers 8
+```
+
+Later runs reuse the cache and start immediately. Meshes can also be decomposed
+ahead of time with `slac-decompose`, and the compiler accepts the same options:
+
+```bash
+python -m slac_robotics.sdf_compiler \
+  cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
+  --with-collisions --collision-mode convex --decomposition-workers 8
+```
+
+### Filtering expected contact
+
+Drake automatically ignores pairs that share a body, sit either side of one
+joint, or belong to the same welded subgraph, so a reported pair is a real
+finding rather than bookkeeping noise. Parts that are in contact by design go in
+the `ignored_pairs` block of the stage inventory:
+
+```yaml
+ignored_pairs:
+  - pair: [P1112, P1170]
+    reason: touching at reviewed CAD home (-2.69 mm)
+```
+
+That block is currently seeded from the home-pose report. The reviewed CAD home
+is an assembled state, so contact there is pre-existing rather than something
+motion caused; baselining it is what keeps the indicator off red at home and
+reserves red for interference the stages actually create. Those seven pairs have
+**not** been individually validated as by-design, so re-review them if a stack is
+re-modelled.
+
+Pass `--ignore-file` to read the block from another YAML file instead.
+
+## Viewing and moving the assembly
+
+For kinematics work without the collision plant, the cached CAD viewer is
+lighter and starts faster:
 
 ```bash
 python -m slac_robotics.stage_cad_viewer \
@@ -31,24 +128,24 @@ Meshcat; **Reset to home** restores every reviewed home position.
 
 ### Animated motion
 
-Besides the per-joint sliders, three controls drive a continuous demo animation
-of the whole stack:
+Besides the per-joint sliders, one toggle button and two sliders drive a
+continuous demo animation of the whole stack:
 
-| Slider | Effect |
+| Control | Effect |
 | --- | --- |
-| `Auto motion (0 manual / 1 cycle)` | `1` runs the animation, `0` hands control back to the manual sliders at the current pose |
+| `Animation: OFF (click to start)` | Toggle button. Starts the animation and relabels itself to `Animation: ON (click to stop)`; clicking again hands control back to the manual sliders at the current pose |
 | `Auto motion range (% of travel)` | Excursion as a percentage of the smaller side of each joint's reviewed limits, so every joint stays inside its operating window |
 | `Auto motion period (s)` | Cycle time, 2-60 s |
 
 Each joint swings sinusoidally about its reviewed home. Joints are
 phase-staggered around the cycle so the stack does not translate as one block
 and stage-to-stage interactions are visible. The manual sliders track the
-animation live, so you can stop on any frame by setting the toggle back to `0`
-and then nudge individual joints from there. **Reset to home** also switches the
-toggle back to manual.
+animation live, so you can stop on any frame by clicking the toggle off and then
+nudge individual joints from there. **Reset to home** also switches the toggle
+back off.
 
 The range slider is a travel heuristic, not a clearance guarantee. To check an
-animated pose for real interference, use the collision viewer below.
+animated pose for real interference, use the collision viewer above.
 
 ## Updating The 43841 STEP
 
@@ -106,84 +203,6 @@ exports/DSG-000040389.43841-stage-stack.sdf-package.zip
 
 Unzip it in MATLAB and run `load_in_matlab`. See
 [SDF sharing](docs/sdf-sharing.md) for details.
-
-## Collision detection
-
-The collision viewer drives a Drake plant compiled from the same reviewed
-inventory, so the geometry drawn on screen and the geometry checked for
-interference are the same kinematics:
-
-```bash
-python -m slac_robotics.collision_viewer \
-  cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
-```
-
-The console-script equivalent is `slac-collision`. The whole viewport acts as a
-boolean interference indicator:
-
-| Background | Meaning |
-| --- | --- |
-| Green | Clear — no reviewed pair is in contact |
-| Red | Interference — at least one pair is touching or penetrating |
-
-Every slider move re-solves signed distances and prints a one-line clearance
-summary; **Log clearance report** dumps the worst pairs in full. The
-`Clearance warning band (mm)` slider sets the distance at which a pair is
-reported as close, and negative distances mean penetration. The red/green state
-itself is fixed at zero distance and does not move with that slider.
-
-The first load takes about 20 seconds while Drake ingests roughly 4800 convex
-hulls. Meshcat starts serving before that finishes, so the window is briefly
-blank; the console prints when loading is done.
-
-### Collision modes
-
-| Mode | How geometry is built | Use |
-| --- | --- | --- |
-| `hull` | One convex hull per part mesh | Fast, but a hull of a concave part such as the enclosure fills its interior, so it reports contact everywhere. Useful only as a smoke test |
-| `convex` | CoACD convex decomposition, one `<collision>` per hull with `<drake:declare_convex/>` | Default for the viewer. Tracks true concavity, so clearance numbers are meaningful |
-
-The convex build runs CoACD once and caches the result under
-`.cache/slac_robotics/convex-collision/`, keyed by mesh mtime, size, and the
-decomposition settings. The cold build on the 43841 assembly is long (roughly
-2.6 M triangles across 392 sub-parts), so give it workers and let it finish:
-
-```bash
-python -m slac_robotics.collision_viewer \
-  cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
-  --collision-mode convex --decomposition-workers 8
-```
-
-Later runs reuse the cache and start immediately. Meshes can also be decomposed
-ahead of time with `slac-decompose`, and the compiler accepts the same options:
-
-```bash
-python -m slac_robotics.sdf_compiler \
-  cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
-  --with-collisions --collision-mode convex --decomposition-workers 8
-```
-
-### Filtering expected contact
-
-Drake automatically ignores pairs that share a body, sit either side of one
-joint, or belong to the same welded subgraph, so a reported pair is a real
-finding rather than bookkeeping noise. Parts that are in contact by design go in
-the `ignored_pairs` block of the stage inventory:
-
-```yaml
-ignored_pairs:
-  - pair: [P1112, P1170]
-    reason: touching at reviewed CAD home (-2.69 mm)
-```
-
-That block is currently seeded from the home-pose report. The reviewed CAD home
-is an assembled state, so contact there is pre-existing rather than something
-motion caused; baselining it is what makes the indicator green at home and red
-only for interference the stages actually create. Those seven pairs have **not**
-been individually validated as by-design, so re-review them if a stack is
-re-modelled.
-
-Pass `--ignore-file` to read the block from another YAML file instead.
 
 ## Windows (WSL)
 
@@ -323,9 +342,11 @@ ruff format --check .
 - The 43841 assembly has 22 scalar joints and 4798 convex collision hulls. Hull
   mode reports contact almost everywhere because the enclosure hull is solid;
   convex mode is the mode to trust.
-- Clearance is a boolean red/green readout at zero distance. Per-interface
-  margins and a fully validated `ignored_pairs` list are still open; the current
-  list is baselined from the home pose, not reviewed pair by pair.
+- Clearance is reported as a three-state readout: clear, close, and
+  interference. Only interference is a hard finding; close tracks the warning
+  band slider. Per-interface margins and a fully validated `ignored_pairs` list
+  are still open; the current list is baselined from the home pose, not reviewed
+  pair by pair.
 - The animation range slider is a travel heuristic and has not been
   clearance-verified; treat animated poses as candidates to check, not as
   cleared motion.

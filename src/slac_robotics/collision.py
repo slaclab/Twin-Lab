@@ -60,6 +60,22 @@ class ClearanceReport:
         return bool(self.touching)
 
     @property
+    def status(self) -> str:
+        """``interference`` when touching, ``close`` when inside the band, else ``clear``."""
+
+        if self.touching:
+            return "interference"
+        return "close" if self.warnings else "clear"
+
+    def offenders(self, limit: int = 3) -> tuple[Clearance, ...]:
+        """Worst clearance per part pair, so one physical interface is reported once."""
+
+        worst_by_pair: dict[tuple[str, str], Clearance] = {}
+        for item in self.clearances:
+            worst_by_pair.setdefault(item.parts, item)
+        return tuple(worst_by_pair.values())[:limit]
+
+    @property
     def worst_m(self) -> float | None:
         return self.clearances[0].distance_m if self.clearances else None
 
