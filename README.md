@@ -18,6 +18,15 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
+Enable the repository hooks once per clone. Git never activates hooks from a
+clone automatically, so this is a manual step:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+See [Large files](#large-files) for what this guards against.
+
 ## Collision detection
 
 This is the point of the model. Quick start, from the repository root:
@@ -211,6 +220,38 @@ exports/DSG-000040389.43841-stage-stack.sdf-package.zip
 Unzip it in MATLAB and run `load_in_matlab`. See
 [SDF sharing](docs/sdf-sharing.md) for details.
 
+## Large files
+
+`cad/DSG-000040389/source.stp` is tracked in git and is roughly 88 MiB. GitHub
+rejects any single file over 100 MiB and warns above 50 MiB, so a STEP
+replacement that crosses the hard limit cannot be pushed at all.
+
+The check applies to every revision in a push, not just the current one. A
+STEP file that is committed and then replaced still blocks all later pushes
+until the history is rewritten, so an oversized file must be caught before it
+is committed rather than at push time.
+
+`.githooks/pre-commit` does this. It rejects any staged file over 100 MiB and
+warns above 50 MiB. Enable it once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+If a replacement STEP is too large, reduce it in CAD (suppress cosmetic
+detail, drop cabling) before committing. Do not commit it with `--no-verify`
+and deal with it later; that is the situation the hook exists to prevent.
+
+To confirm nothing oversized is waiting to be pushed:
+
+```bash
+git rev-list --objects @{u}..HEAD \
+  | git cat-file --batch-check='%(objecttype) %(objectsize) %(rest)' \
+  | awk '$1=="blob" && $2>104857600'
+```
+
+Any output names a file that will be rejected. No output means the push is clear.
+
 ## Windows (WSL)
 
 Run the framework in WSL 2 rather than directly in Windows. From an
@@ -236,6 +277,7 @@ mkdir -p ~/src
 cd ~/src
 git clone <repository-url> slac-robotics-framework
 cd slac-robotics-framework
+git config core.hooksPath .githooks
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
@@ -264,6 +306,8 @@ export meshes; regenerate them instead.
 ## Repository layout
 
 ```text
+.githooks/
+  pre-commit                 blocks commits of files GitHub will reject
 cad/
   DSG-000040389/
     source.stp                 original full assembly
