@@ -143,6 +143,7 @@ def test_prismatic_slider_bounds_are_reported_in_millimetres_about_the_logical_h
         sdf_lower=-0.4,
         sdf_upper=0.0,
         logical_offset=0.0,
+        reviewed_home=0.0,
     )
 
     assert joint.unit == "mm"
@@ -160,6 +161,7 @@ def test_revolute_slider_bounds_recentre_on_the_reviewed_home_angle():
         sdf_lower=math.radians(-30.0),
         sdf_upper=math.radians(30.0),
         logical_offset=math.pi,
+        reviewed_home=math.pi,
     )
 
     lower, upper, home = joint.slider_bounds()
@@ -171,11 +173,30 @@ def test_revolute_slider_bounds_recentre_on_the_reviewed_home_angle():
     assert joint.to_sdf(210.0) == pytest.approx(math.radians(30.0))
 
 
+def test_slider_home_follows_the_reviewed_home_not_the_cad_pose():
+    # A066/A064/A060 are modelled 3.105 mm off centre, but travel is [-4, +4] mm
+    # and the reviewed home is the centre of travel.
+    joint = SliderJoint(
+        joint_name="north_polycap_a066_z",
+        stack="North Polycap",
+        stage_ref="A066",
+        joint_type="prismatic",
+        sdf_lower=-0.000894545,
+        sdf_upper=0.007105455,
+        logical_offset=-0.003105455,
+        reviewed_home=0.0,
+    )
+
+    assert joint.slider_bounds() == pytest.approx((-4.0, 4.0, 0.0))
+    # Home still has to map back onto the CAD-relative SDF coordinate.
+    assert joint.to_sdf(0.0) == pytest.approx(0.003105455)
+
+
 def test_read_joint_metadata_parses_the_compiled_table(tmp_path):
     (tmp_path / "joint_metadata.csv").write_text(
-        "joint_name,stack,stage_ref,type,sdf_lower,sdf_upper,logical_home_offset,units,"
-        "axis_x,axis_y,axis_z\n"
-        "detector_a041_motion,Detector,A041,prismatic,-0.4,0.0,0.0,m,1,0,0\n",
+        "joint_name,stack,stage_ref,type,sdf_lower,sdf_upper,logical_home_offset,"
+        "reviewed_home,units,axis_x,axis_y,axis_z\n"
+        "detector_a041_motion,Detector,A041,prismatic,-0.4,0.0,0.0,0.0,m,1,0,0\n",
         encoding="utf-8",
     )
 

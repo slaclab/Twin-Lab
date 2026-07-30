@@ -45,6 +45,7 @@ class SliderJoint:
     sdf_lower: float
     sdf_upper: float
     logical_offset: float
+    reviewed_home: float
 
     @property
     def scale(self) -> float:
@@ -64,8 +65,7 @@ class SliderJoint:
     def slider_bounds(self) -> tuple[float, float, float]:
         lower = (self.sdf_lower + self.logical_offset) * self.scale
         upper = (self.sdf_upper + self.logical_offset) * self.scale
-        home = self.logical_offset * self.scale
-        return lower, upper, home
+        return lower, upper, self.reviewed_home * self.scale
 
 
 def read_joint_metadata(package_dir: Path) -> list[SliderJoint]:
@@ -81,6 +81,7 @@ def read_joint_metadata(package_dir: Path) -> list[SliderJoint]:
                 sdf_lower=float(row["sdf_lower"]),
                 sdf_upper=float(row["sdf_upper"]),
                 logical_offset=float(row["logical_home_offset"]),
+                reviewed_home=float(row["reviewed_home"]),
             )
             for row in csv.DictReader(stream)
         ]
@@ -299,7 +300,10 @@ def _read_ignored(ignore_file: str | Path | None) -> frozenset[tuple[str, str]]:
 def _needs_recompile(package_dir: Path) -> bool:
     """Rebuild packages predating the OBJ-visual fix; Meshcat silently skips STL visuals."""
 
-    if not (package_dir / "joint_metadata.csv").exists():
+    metadata = package_dir / "joint_metadata.csv"
+    if not metadata.exists():
+        return True
+    if "reviewed_home" not in metadata.read_text(encoding="utf-8").partition("\n")[0]:
         return True
     sdf_path = next(
         (path for path in sorted(package_dir.glob("*.sdf")) if not path.stem.endswith("_matlab")),

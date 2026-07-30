@@ -43,6 +43,8 @@ class JointSpec:
     lower: float
     upper: float
     logical_home: float
+    # Differs from logical_home only where the CAD pose is not the reviewed home.
+    reviewed_home: float
 
 
 def compile_sdf_package(
@@ -210,6 +212,7 @@ def _build_tree(scene: dict[str, Any], scene_file: Path) -> tuple[list[LinkSpec]
                     lower=limits[0],
                     upper=limits[1],
                     logical_home=cad_position,
+                    reviewed_home=home,
                 )
             )
             parent = child
@@ -407,6 +410,7 @@ def _write_joint_metadata(output: Path, joints: list[JointSpec]) -> None:
                 "sdf_lower",
                 "sdf_upper",
                 "logical_home_offset",
+                "reviewed_home",
                 "units",
                 "axis_x",
                 "axis_y",
@@ -424,6 +428,7 @@ def _write_joint_metadata(output: Path, joints: list[JointSpec]) -> None:
                     _number(joint.lower),
                     _number(joint.upper),
                     _number(joint.logical_home),
+                    _number(joint.reviewed_home),
                     unit,
                     *(_number(value) for value in joint.axis),
                 ]
