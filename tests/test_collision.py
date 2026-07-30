@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 
 import pytest
 
@@ -21,8 +22,9 @@ from slac_robotics.convex_collision import (
     ConvexPart,
     DecompositionSettings,
     _clear_part_dir,
-    _prune_part_markers,
+    _read_manifest,
     _read_part_marker,
+    _write_manifest,
     _write_part_marker,
     read_obj_parts,
 )
@@ -264,22 +266,79 @@ def test_part_marker_is_rejected_when_its_hull_file_is_missing(tmp_path):
 
 def test_clear_part_dir_keeps_hulls_a_marker_vouches_for(tmp_path):
     source, part_dir, part = _marker_fixture(tmp_path)
-    _write_part_marker(part_dir / "part0005.json", source, DecompositionSettings(), part)
+    settings = DecompositionSettings()
+    _write_part_marker(part_dir / "part0005.json", source, settings, part)
     orphan = part_dir / "p999_hull000.obj"
     orphan.write_text("v 0 0 0\n", encoding="utf-8")
 
-    _clear_part_dir(part_dir)
+    _clear_part_dir(part_dir, source, settings)
 
     # Resumable work survives; hulls from a half-finished part do not.
     assert part.hulls[0].exists()
     assert not orphan.exists()
 
 
-def test_prune_part_markers_leaves_the_hulls_alone(tmp_path):
+def test_clear_part_dir_drops_markers_from_an_earlier_generation(tmp_path):
     source, part_dir, part = _marker_fixture(tmp_path)
-    _write_part_marker(part_dir / "part0005.json", source, DecompositionSettings(), part)
+    marker = part_dir / "part0005.json"
+    _write_part_marker(marker, source, DecompositionSettings(max_hulls=4), part)
 
-    _prune_part_markers(part_dir)
+    _clear_part_dir(part_dir, source, DecompositionSettings())
 
-    assert list(part_dir.glob("part*.json")) == []
-    assert part.hulls[0].exists()
+    assert not marker.exists()
+    assert not part.hulls[0].exists()
+
+
+def _touch(path, *, seconds=10):
+    """Bump mtime without touching content, the way re-tessellation does."""
+
+    stamp = path.stat().st_mtime_ns + seconds * 10**9
+    os.utime(path, ns=(stamp, stamp))
+
+
+def test_part_marker_survives_a_byte_identical_rewrite_of_the_source(tmp_path):
+    source, part_dir, part = _marker_fixture(tmp_path)
+    settings = DecompositionSettings()
+    marker = part_dir / "part0005.json"
+    _write_part_marker(marker, source, settings, part)
+
+    _touch(source)
+
+    # Re-tessellating the STEP rewrites identical bytes; that must not cost an 8 h rebuild.
+    assert _read_part_marker(marker, source, settings) == part
+
+
+def test_manifest_survives_a_byte_identical_rewrite_of_the_source(tmp_path):
+    source, part_dir, part = _marker_fixture(tmp_path)
+    settings = DecompositionSettings()
+    manifest = part_dir / "manifest.json"
+    _write_manifest(manifest, source, settings, [part])
+
+    _touch(source)
+
+    assert _read_manifest(manifest, source, settings) == [part]
+
+
+def test_manifest_is_rejected_when_the_source_bytes_change(tmp_path):
+    source, part_dir, part = _marker_fixture(tmp_path)
+    settings = DecompositionSettings()
+    manifest = part_dir / "manifest.json"
+    _write_manifest(manifest, source, settings, [part])
+
+    # Same byte count, different geometry: only the digest can tell these apart.
+    source.write_text("v 0 0 0\nv 2 0 0\nv 0 2 0\nv 0 0 2\nf 1 2 3\n", encoding="utf-8")
+    _touch(source)
+
+    assert _read_manifest(manifest, source, settings) is None
+
+
+def test_manifest_without_a_digest_still_validates_on_mtime(tmp_path):
+    source, part_dir, part = _marker_fixture(tmp_path)
+    settings = DecompositionSettings()
+    manifest = part_dir / "manifest.json"
+    _write_manifest(manifest, source, settings, [part])
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    del payload["source_sha256"]
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert _read_manifest(manifest, source, settings) == [part]

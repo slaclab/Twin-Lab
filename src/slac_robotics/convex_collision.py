@@ -8,6 +8,7 @@ part with a small set of convex hulls that Drake can use directly.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -95,22 +96,14 @@ def decompose_source(
     if cached is not None:
         return cached
 
-    _clear_part_dir(part_dir)
+    _clear_part_dir(part_dir, source, settings)
     parts = [
         part
         for index in range(len(read_obj_parts(source)))
         if (part := _decompose_part(source, part_dir, settings, index)) is not None
     ]
     _write_manifest(manifest_path, source, settings, parts)
-    _prune_part_markers(part_dir)
     return parts
-
-
-def _prune_part_markers(part_dir: Path) -> None:
-    """Markers only exist to resume an interrupted run; the manifest supersedes them."""
-
-    for marker in part_dir.glob("part*.json"):
-        marker.unlink()
 
 
 def _decompose_part(
@@ -154,6 +147,14 @@ def _decompose_part(
     return part
 
 
+def _source_digest(source: Path) -> str:
+    digest = hashlib.sha256()
+    with source.open("rb") as stream:
+        for block in iter(lambda: stream.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def _part_marker_key(source: Path, settings: DecompositionSettings) -> dict[str, Any]:
     stat = source.stat()
     return {
@@ -161,7 +162,22 @@ def _part_marker_key(source: Path, settings: DecompositionSettings) -> dict[str,
         "source_mtime_ns": stat.st_mtime_ns,
         "source_size": stat.st_size,
         "settings": settings.as_dict(),
+        "source_sha256": _source_digest(source),
     }
+
+
+def _source_matches(payload: dict[str, Any], source: Path, settings: DecompositionSettings) -> bool:
+    """Accept an entry whose source was rewritten byte-for-byte; re-tessellation bumps mtime."""
+
+    stat = source.stat()
+    if payload.get("schema") != CACHE_SCHEMA or payload.get("settings") != settings.as_dict():
+        return False
+    if payload.get("source_size") != stat.st_size:
+        return False
+    if payload.get("source_mtime_ns") == stat.st_mtime_ns:
+        return True
+    recorded = payload.get("source_sha256")
+    return recorded is not None and recorded == _source_digest(source)
 
 
 def _write_part_marker(
@@ -187,9 +203,7 @@ def _read_part_marker(
         payload = json.loads(marker.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return None
-    if {key: payload.get(key) for key in _part_marker_key(source, settings)} != _part_marker_key(
-        source, settings
-    ):
+    if not _source_matches(payload, source, settings):
         return None
     item = payload.get("part")
     if item is None:
@@ -200,19 +214,17 @@ def _read_part_marker(
     return ConvexPart(source=source, part_ref=item["part_ref"], hulls=hulls)
 
 
-def _clear_part_dir(part_dir: Path) -> None:
-    """Drop hulls that no marker vouches for, keeping resumable work intact."""
+def _clear_part_dir(part_dir: Path, source: Path, settings: DecompositionSettings) -> None:
+    """Drop hulls from earlier generations, keeping work the markers still vouch for."""
 
     part_dir.mkdir(parents=True, exist_ok=True)
-    keep = set()
-    for marker in part_dir.glob("part*.json"):
-        try:
-            payload = json.loads(marker.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            continue
-        item = payload.get("part")
-        if item:
-            keep.update(item["hulls"])
+    keep: set[str] = set()
+    for marker in sorted(part_dir.glob("part*.json")):
+        part = _read_part_marker(marker, source, settings)
+        if part is None:
+            marker.unlink()
+        else:
+            keep.update(hull.name for hull in part.hulls)
     for stale in part_dir.glob("*.obj"):
         if stale.name not in keep:
             stale.unlink()
@@ -247,7 +259,7 @@ def decompose_sources(
 
     jobs: list[tuple[int, Path, int]] = []
     for source in pending:
-        _clear_part_dir(cache_dir / _safe_name(source.stem))
+        _clear_part_dir(cache_dir / _safe_name(source.stem), source, settings)
         for index, (_, _, triangles) in enumerate(read_obj_parts(source)):
             jobs.append((len(triangles), source, index))
     jobs.sort(reverse=True, key=lambda job: job[0])
@@ -287,7 +299,6 @@ def decompose_sources(
         parts = sorted(collected[source], key=lambda part: part.part_ref)
         part_dir = cache_dir / _safe_name(source.stem)
         _write_manifest(part_dir / "manifest.json", source, settings, parts)
-        _prune_part_markers(part_dir)
         results[source] = parts
     if progress:
         hulls = sum(len(part.hulls) for parts in results.values() for part in parts)
@@ -314,13 +325,7 @@ def _read_manifest(
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return None
-    stat = source.stat()
-    if (
-        manifest.get("schema") != CACHE_SCHEMA
-        or manifest.get("source_mtime_ns") != stat.st_mtime_ns
-        or manifest.get("source_size") != stat.st_size
-        or manifest.get("settings") != settings.as_dict()
-    ):
+    if not _source_matches(manifest, source, settings):
         return None
     parts = []
     for item in manifest["parts"]:
@@ -337,15 +342,11 @@ def _write_manifest(
     settings: DecompositionSettings,
     parts: Sequence[ConvexPart],
 ) -> None:
-    stat = source.stat()
     manifest_path.write_text(
         json.dumps(
             {
-                "schema": CACHE_SCHEMA,
+                **_part_marker_key(source, settings),
                 "source": source.as_posix(),
-                "source_mtime_ns": stat.st_mtime_ns,
-                "source_size": stat.st_size,
-                "settings": settings.as_dict(),
                 "parts": [
                     {
                         "part_ref": part.part_ref,
