@@ -1,0 +1,45 @@
+{
+  // Large generated/vendored trees in this repo (measured): .venv 1.5G, .cache 499M,
+  // exports 173M, cad 98M. Excluding them from watching/searching/indexing keeps the
+  // extension host (especially over WSL Remote) from walking ~25k files on every load.
+  "files.watcherExclude": {
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true,
+    "**/.venv/**": true,
+    "**/.cache/**": true,
+    "**/exports/**": true,
+    "**/cad/**": true,
+    "**/__pycache__/**": true,
+    "**/.pytest_cache/**": true,
+    "**/.ruff_cache/**": true,
+    "**/node_modules/**": true
+  },
+
+  "search.exclude": {
+    "**/.venv": true,
+    "**/.cache": true,
+    "**/exports": true,
+    "**/__pycache__": true,
+    "**/.pytest_cache": true,
+    "**/.ruff_cache": true,
+    "**/*.stp": true
+  },
+
+  // Pylance: don't index the 1.5G virtualenv or generated mesh/CAD output.
+  "python.analysis.exclude": [
+    "**/.venv/**",
+    "**/.cache/**",
+    "**/exports/**",
+    "**/cad/**",
+    "**/__pycache__/**"
+  ],
+
+  // STEP files are LFS-backed and up to ~95 MB; never treat them as editable text.
+  "files.associations": {
+    "*.stp": "plaintext"
+  },
+  "files.readonlyInclude": {
+    "**/*.stp": true
+  },
+  "editor.largeFileOptimizations": true
+}
