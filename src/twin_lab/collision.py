@@ -89,6 +89,22 @@ class ClearanceReport:
             worst_by_pair.setdefault(item.parts, item)
         return tuple(worst_by_pair.values())[:limit]
 
+    def geometry_states(self) -> dict[str, str]:
+        """Map each offending collision geometry to ``interference`` or ``close``, worst first.
+
+        A geometry can appear in several pairs, and contact outranks a near miss.
+        """
+
+        states: dict[str, str] = {}
+        for item in self.clearances:
+            if item.distance_m > self.warn_m:
+                continue
+            state = "interference" if item.distance_m <= 0.0 else "close"
+            for name in (item.a, item.b):
+                if states.get(name) != "interference":
+                    states[name] = state
+        return states
+
     @property
     def worst_m(self) -> float | None:
         return self.clearances[0].distance_m if self.clearances else None

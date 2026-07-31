@@ -176,6 +176,13 @@ find the poses that actually collide.
 | Yellow | `close` | Something inside the warning band, but no contact |
 | Red | `interference` | At least one pair is touching or penetrating |
 
+The offending parts light up in place with the same code: yellow inside the
+warning band, red where they touch. The highlight is drawn from the convex hulls
+Drake actually tested, so it wraps the reviewed part and stays visible through
+the transparent enclosure. It follows the part as the sliders move and clears
+itself as soon as the pair separates, which makes a crowded stack searchable
+without reading the pair list.
+
 The worst three part pairs are listed by reference ID in the Meshcat controls
 panel, for example `TOUCHING 1: P844 <-> P850`, so the offenders are identifiable
 without leaving the browser. Distances are deliberately omitted there; a live

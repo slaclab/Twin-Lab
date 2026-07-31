@@ -76,15 +76,15 @@ class DrakeScene:
         pairs = query.ComputeSignedDistancePairwiseClosestPoints(max_distance_m)
         reports = [
             SignedDistanceReport(
-                a=self._geometry_name(inspector, pair.id_A),
-                b=self._geometry_name(inspector, pair.id_B),
+                a=self.geometry_name(inspector, pair.id_A),
+                b=self.geometry_name(inspector, pair.id_B),
                 distance_m=float(pair.distance),
             )
             for pair in pairs
         ]
         return sorted(reports, key=lambda item: (item.distance_m, item.a, item.b))
 
-    def _geometry_name(self, inspector, geometry_id) -> str:
+    def geometry_name(self, inspector, geometry_id) -> str:
         frame_id = inspector.GetFrameId(geometry_id)
         body = self.plant.GetBodyFromFrameId(frame_id)
         model_name = self.plant.GetModelInstanceName(body.model_instance())

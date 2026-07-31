@@ -21,6 +21,9 @@ from .paths import CACHE_ROOT, EXPORT_ROOT, resolve_repo_path, review_artifact_s
 COLLISION_MODES = ("hull", "convex")
 PACKAGE_MARKER_NAME = ".slac-sdf-package"
 PACKAGE_STAMP_SCHEMA = "slac-sdf-package/v1"
+# Clearance highlights own yellow and red, so a package built for the collision viewer
+# drops the semantic review colours in favour of one neutral grey.
+NEUTRAL_VISUAL_RGB = (0.72, 0.74, 0.76)
 
 
 @dataclass
@@ -57,6 +60,7 @@ def compile_sdf_package(
     model_name: str | None = None,
     include_collisions: bool = False,
     collision_mode: str = "hull",
+    neutral_visuals: bool = False,
     decomposition_workers: int | None = None,
     archive: bool = True,
 ) -> tuple[Path, Path | None]:
@@ -81,6 +85,8 @@ def compile_sdf_package(
 
     resolved_model_name = _safe_name(model_name or _default_model_name(scene_file))
     links, joints = _build_tree(scene, scene_file)
+    if neutral_visuals:
+        _neutralize_visuals(links)
     (package_dir / PACKAGE_MARKER_NAME).write_text(
         json.dumps(
             _package_build_key(
@@ -90,6 +96,7 @@ def compile_sdf_package(
                 model_name=model_name,
                 include_collisions=include_collisions,
                 collision_mode=collision_mode,
+                neutral_visuals=neutral_visuals,
             ),
             indent=2,
             sort_keys=True,
@@ -259,6 +266,16 @@ def _read_decomposition_config(scene: dict[str, Any]) -> dict[str, Any] | None:
     return (inventory or {}).get("decomposition")
 
 
+def _neutralize_visuals(links: list[LinkSpec]) -> None:
+    """Recolour every visual one grey, keeping each alpha so see-through parts stay so."""
+
+    for link in links:
+        link.meshes = [
+            (label, source, [*NEUTRAL_VISUAL_RGB, rgba[3] if rgba else 1.0])
+            for label, source, rgba in link.meshes
+        ]
+
+
 def _package_build_key(
     scene_file: Path,
     scene: dict[str, Any],
@@ -267,6 +284,7 @@ def _package_build_key(
     model_name: str | None,
     include_collisions: bool,
     collision_mode: str,
+    neutral_visuals: bool,
 ) -> dict[str, Any]:
     """Every input that changes package content, recorded so a stale package is rebuilt."""
 
@@ -277,6 +295,7 @@ def _package_build_key(
         "model_name": model_name,
         "include_collisions": include_collisions,
         "collision_mode": collision_mode,
+        "neutral_visuals": neutral_visuals,
         "decomposition": _read_decomposition_config(scene),
         "source_mtime_ns": max(path.stat().st_mtime_ns for path in inputs),
     }
@@ -289,6 +308,7 @@ def package_is_current(
     model_name: str | None = None,
     include_collisions: bool = False,
     collision_mode: str = "hull",
+    neutral_visuals: bool = False,
 ) -> bool:
     """True when the package on disk was compiled from these scene meshes and settings.
 
@@ -312,6 +332,7 @@ def package_is_current(
         model_name=model_name,
         include_collisions=include_collisions,
         collision_mode=collision_mode,
+        neutral_visuals=neutral_visuals,
     )
 
 
@@ -634,6 +655,11 @@ def main() -> None:
     )
     parser.add_argument("--no-zip", action="store_true", help="Do not create a shareable ZIP")
     parser.add_argument(
+        "--neutral-visuals",
+        action="store_true",
+        help="Drop the semantic review colours for one grey, as the collision viewer does",
+    )
+    parser.add_argument(
         "--decomposition-workers",
         type=int,
         default=None,
@@ -658,6 +684,7 @@ def main() -> None:
         model_name=args.model_name,
         include_collisions=args.with_collisions,
         collision_mode=args.collision_mode,
+        neutral_visuals=args.neutral_visuals,
         decomposition_workers=args.decomposition_workers,
         archive=not args.no_zip,
     )

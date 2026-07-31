@@ -29,6 +29,20 @@ STATUS_RGB = {
     "close": [0.72, 0.60, 0.05],
     "interference": [0.60, 0.08, 0.08],
 }
+# Off while the parts themselves carry the state; the tint fought the highlight colours.
+PAINT_STATUS_BACKGROUND = False
+# Highlights sit on top of the reviewed colours, so they are saturated rather than tinted.
+HIGHLIGHT_RGBA = {
+    "close": (1.0, 0.80, 0.0, 0.85),
+    "interference": (0.95, 0.10, 0.10, 0.9),
+}
+# Drake's MeshcatVisualizer publishes each body at this prefix, with "::" written as "/".
+VISUALIZER_PREFIX = "/drake/visualizer"
+# Highlights hang under the body they belong to, so they follow it without per-frame updates.
+HIGHLIGHT_GROUP = "clearance"
+# One offending part carries dozens of hulls, and uploading them costs about 3 ms each;
+# 40 covers the whole default 5 mm band at the reviewed home without stalling the loop.
+HIGHLIGHT_LIMIT = 40
 # Drake's own sky gradient, restored when clearance checking is switched off.
 DEFAULT_TOP_RGB = [0.53, 0.81, 0.98]
 DEFAULT_BOTTOM_RGB = [0.10, 0.10, 0.44]
@@ -140,9 +154,10 @@ def run_collision_viewer(
     meshcat.AddButton("Stop viewer", "Escape")
     # Added after the fixed buttons so the offender readout always stays below them.
     toggles = _set_toggles(meshcat, [], collision_on=True, animating=False)
+    highlighter = _Highlighter(meshcat, model)
 
     print(f"{len(joints)} joints")
-    print("Background: GREEN clear, YELLOW inside the warning band, RED touching.")
+    print("Offending parts light up: YELLOW inside the warning band, RED where they touch.")
     print("Click 'Collision detection' to turn checking off and use this as a plain viewer.")
     print("Click 'Animation' to cycle every joint about its reviewed home.")
     print("Press Escape in Meshcat or Ctrl-C here to stop.")
@@ -184,6 +199,7 @@ def run_collision_viewer(
                 print(f"Collision detection {'ON' if wanted_collision else 'OFF'}.")
             if not wanted_collision:
                 _reset_status(meshcat)
+                highlighter.clear()
             collision_on, animating = wanted_collision, wanted_animating
             toggles = _set_toggles(
                 meshcat, toggles + readout, collision_on=collision_on, animating=animating
@@ -231,6 +247,7 @@ def run_collision_viewer(
                 if report.status != previous_status:
                     previous_status = report.status
                     _set_status(meshcat, report.status)
+                highlighter.update(report)
                 readout = _set_offender_readout(meshcat, report, readout)
                 if new_log != log_clicks:
                     log_clicks = new_log
@@ -263,18 +280,67 @@ def _set_toggles(meshcat, previous: list[str], *, collision_on: bool, animating:
 
 
 def _reset_status(meshcat) -> None:
+    if not PAINT_STATUS_BACKGROUND:
+        return
     meshcat.SetProperty("/Background/<object>", "top_color", DEFAULT_TOP_RGB)
     meshcat.SetProperty("/Background/<object>", "bottom_color", DEFAULT_BOTTOM_RGB)
+
+
+class _Highlighter:
+    """Repaints the offending collision hulls so the reported pair is findable on screen.
+
+    The hulls are what Drake actually tests, and they wrap the reviewed part, so drawing
+    them over the illustration mesh marks the part without splitting its visual geometry.
+    """
+
+    def __init__(self, meshcat, model: CollisionModel):
+        from pydrake.geometry import Role
+
+        self._meshcat = meshcat
+        inspector = _inspector(model)
+        self._geometries = {}
+        for geometry_id in inspector.GetAllGeometryIds(Role.kProximity):
+            frame_path = inspector.GetName(inspector.GetFrameId(geometry_id)).replace("::", "/")
+            leaf = inspector.GetName(geometry_id).replace("::", "_")
+            self._geometries[model.scene.geometry_name(inspector, geometry_id)] = (
+                f"{VISUALIZER_PREFIX}/{frame_path}/{HIGHLIGHT_GROUP}/{leaf}",
+                inspector.GetShape(geometry_id),
+                inspector.GetPoseInFrame(geometry_id),
+            )
+        self._shown: dict[str, str] = {}
+
+    def update(self, report) -> None:
+        from pydrake.geometry import Rgba
+
+        states = report.geometry_states()
+        # Clearances arrive worst first, so truncating keeps the pairs worth looking at.
+        wanted = dict(list(states.items())[:HIGHLIGHT_LIMIT])
+        for name, state in wanted.items():
+            if self._shown.get(name) == state or name not in self._geometries:
+                continue
+            path, shape, pose = self._geometries[name]
+            self._meshcat.SetObject(path, shape, Rgba(*HIGHLIGHT_RGBA[state]))
+            self._meshcat.SetTransform(path, pose)
+        for name in self._shown.keys() - wanted.keys():
+            self._meshcat.Delete(self._geometries[name][0])
+        self._shown = wanted
+
+    def clear(self) -> None:
+        for name in self._shown:
+            self._meshcat.Delete(self._geometries[name][0])
+        self._shown = {}
 
 
 def _set_status(meshcat, status: str) -> None:
     """Paint the whole viewport by clearance state so the pose is readable at a glance."""
 
+    print(status.upper())
+    if not PAINT_STATUS_BACKGROUND:
+        return
     color = STATUS_RGB[status]
     # Meshcat wants the property on the Background's object, not the group path.
     meshcat.SetProperty("/Background/<object>", "top_color", color)
     meshcat.SetProperty("/Background/<object>", "bottom_color", color)
-    print(status.upper())
 
 
 def _offender_labels(report) -> list[str]:
@@ -333,15 +399,22 @@ def _needs_recompile(package_dir: Path, scene_path: Path, collision_mode: str) -
         scene_path,
         include_collisions=True,
         collision_mode=collision_mode,
+        neutral_visuals=True,
     )
 
 
-def _proximity_geometry_count(model: CollisionModel) -> int:
-    from pydrake.geometry import QueryObject, Role
+def _inspector(model: CollisionModel):
+    from pydrake.geometry import QueryObject
 
     scene_context = model.scene.scene_graph.GetMyContextFromRoot(model.context)
     query = cast(QueryObject, model.scene.scene_graph.get_query_output_port().Eval(scene_context))
-    return query.inspector().NumGeometriesWithRole(Role.kProximity)
+    return query.inspector()
+
+
+def _proximity_geometry_count(model: CollisionModel) -> int:
+    from pydrake.geometry import Role
+
+    return _inspector(model).NumGeometriesWithRole(Role.kProximity)
 
 
 def _print_report(report) -> None:
@@ -408,6 +481,7 @@ def main() -> None:
             package_dir,
             include_collisions=True,
             collision_mode=args.collision_mode,
+            neutral_visuals=True,
             decomposition_workers=args.decomposition_workers,
             archive=False,
         )
