@@ -127,8 +127,10 @@ stage_instances:
   - {ref: A004, library_id: LIB-OLD-XY, catalog: xy_stage}
 compound_motion_chains:
   Example:
-    - {key: A003:z, stage_ref: A003, fixed_role: fixed, moving_role: moving, name: z, axis_local: [0, 0, 1], limits: [-0.001, 0.001]}
-    - {key: A004:x, stage_ref: A004, moving_role: x, name: x, axis_local: [1, 0, 0], limits: [-0.001, 0.001]}
+    - {key: A003:z, stage_ref: A003, fixed_role: fixed, moving_role: moving,
+       name: z, axis_local: [0, 0, 1], limits: [-0.001, 0.001]}
+    - {key: A004:x, stage_ref: A004, moving_role: x,
+       name: x, axis_local: [1, 0, 0], limits: [-0.001, 0.001]}
 attachment_overrides:
   moving:
     A004: [P001]
