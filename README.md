@@ -164,25 +164,92 @@ packed, so home is reported as close rather than clean.
 | `hull` | One convex hull per part mesh | Fast, but a hull of a concave part such as the enclosure fills its interior, so it reports contact everywhere. Useful only as a smoke test |
 | `convex` | CoACD convex decomposition, one `<collision>` per hull with `<drake:declare_convex/>` | Default for the viewer. Tracks true concavity, so clearance numbers are meaningful |
 
-The convex build runs CoACD once and caches the result under
-`.cache/slac_robotics/convex-collision/`, keyed by mesh mtime, size, and the
-decomposition settings. The cold build on the 43841 assembly is long (roughly
-2.6 M triangles across 392 sub-parts), so give it workers and let it finish:
-
-```bash
-python -m slac_robotics.collision_viewer \
-  cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
-  --collision-mode convex --decomposition-workers 8
-```
-
-Later runs reuse the cache and start immediately. Meshes can also be decomposed
-ahead of time with `slac-decompose`, and the compiler accepts the same options:
+Meshes can also be decomposed ahead of time with `slac-decompose`, and the
+compiler accepts the same options:
 
 ```bash
 python -m slac_robotics.sdf_compiler \
   cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
-  --with-collisions --collision-mode convex --decomposition-workers 8
+  --with-collisions --collision-mode convex
 ```
+
+### Convex decomposition (CoACD)
+
+#### Why it is needed
+
+Drake's proximity queries do not see a concave mesh. The signed-distance support
+table states it outright:
+
+> Meshes are represented by the *convex* hull of the mesh, therefore the results
+> for Mesh are the same as for Convex.
+
+Every clearance number this tool reports comes from that query, so handing Drake
+the enclosure as a single mesh means handing it a solid block: the interior
+fills in and anything inside it reports contact. Splitting each part into convex
+pieces and declaring them with `<drake:declare_convex/>` is the only way to get
+honest distances.
+
+#### Why CoACD, and why Drake has no equivalent
+
+Drake ships no decomposition tool. `pydrake.geometry` provides the `Convex`
+shape, which *consumes* a piece and takes the hull of whatever it is given.
+That is deliberate: decomposition is slow, offline, and wants caching, which is
+the opposite of what belongs in a simulation loop. Drake owns the runtime half
+and leaves the asset-pipeline half to the model author. So the question is which
+external tool to use, not whether to use one.
+
+| Option | Assessment |
+| --- | --- |
+| V-HACD | The long-standing default, bundled with Bullet. Voxel-based, so it needs more hulls for the same fidelity, and thin CAD features such as brackets and shields blur out at practical voxel resolutions |
+| Hand-authored primitives | What production robot models do, and the fastest at runtime. Rejected here because the geometry is CAD-driven: every STEP revision would invalidate the hand work |
+| CoACD | **Chosen.** Its concavity metric is collision-aware, so hulls are spent where contact can actually occur, giving fewer and better-placed hulls than V-HACD on the same part. It also ships `abi3` wheels, so collaborators get a binary instead of a C++ build |
+
+#### What the first build costs
+
+The cold run is genuinely expensive. Measured on the reviewed 43841 inventory,
+which is 215 sub-parts totalling 1.2 M triangles:
+
+| | |
+| --- | --- |
+| Wall time | 34 min on a 12-core Xeon W-2265 |
+| CPU | Fully saturated, by design |
+| Memory | Up to 2.9 GB per worker, around 14 GB total while the largest parts run |
+
+Do not expect more cores to rescue this. The median part is only about 1,400
+triangles, while spawning a worker, importing CoACD, and running its
+size-independent tree search costs the equivalent of roughly 15,000. Per-part
+overhead dominates the run, not geometry.
+
+A progress bar reports percent complete and an ETA weighted by that setup cost
+plus triangle count. Weighting by triangles alone under-predicted the real build
+by nearly 4x, because the largest parts are dispatched first.
+
+Workers are sized automatically from CPU count and free memory. CoACD
+parallelizes internally with OpenMP, so one worker is not one core; two threads
+per worker measured fastest, and the run keeps workers times threads inside the
+machine. Override with `--decomposition-workers` if you want the machine back:
+
+```bash
+slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
+  --decomposition-workers 2
+```
+
+Interrupting a build is safe. Every finished sub-part writes a marker, so a
+re-run resumes; only the parts in flight when you killed it are repeated.
+Because those are dispatched largest-first, they are also the most expensive
+ones, which is a good reason to let a nearly-finished build finish.
+
+#### Caching: this cost is paid once
+
+Results are cached under `.cache/slac_robotics/convex-collision/`, keyed on the
+source mesh mtime and size plus the decomposition settings (`threshold`,
+`max_hulls`, `seed`). Later runs start immediately, and the cache is worth
+keeping across branches.
+
+It is invalidated only when the STEP is updated and the meshes are
+re-tessellated, or when `--threshold` or `--max-hulls` changes. A re-tessellation
+that produces byte-identical output is recognised by hash, so rebuilding the
+viewer cache alone does not force a re-decomposition.
 
 ### Filtering expected contact
 

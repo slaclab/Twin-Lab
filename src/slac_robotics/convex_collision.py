@@ -12,6 +12,9 @@ import hashlib
 import json
 import os
 import re
+import shutil
+import sys
+import time
 from collections.abc import Iterable, Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, replace
@@ -19,6 +22,18 @@ from pathlib import Path
 from typing import Any
 
 CACHE_SCHEMA = "slac-convex-decomposition/v1"
+
+# CoACD bundles libgomp and parallelizes internally, so one worker is not one core.
+# Two threads measured fastest; its own scaling is poor, so prefer parallel parts.
+COACD_THREADS_PER_WORKER = 2
+
+# Peak RSS observed on the largest 43841 parts. Workers are capped so a big cold
+# build cannot drive the machine into swap.
+COACD_PEAK_RSS_BYTES = 3 * 1024**3
+
+# Spawning a worker, importing CoACD, and its size-independent MCTS setup cost about
+# this much relative to per-triangle work, so progress must not be triangles alone.
+PART_SETUP_COST_TRIANGLES = 15_000
 
 ObjPart = tuple[str, list[tuple[float, float, float]], list[tuple[int, int, int]]]
 
@@ -264,36 +279,49 @@ def decompose_sources(
             jobs.append((len(triangles), source, index))
     jobs.sort(reverse=True, key=lambda job: job[0])
 
+    cpus = _available_cpus()
+    count = workers or _default_workers(cpus)
+    threads = max(1, cpus // count)
+
     if progress:
         total = sum(size for size, _, _ in jobs)
         done = sum(1 for _, source, index in jobs if _marker_exists(cache_dir, source, index))
         print(
             f"Decomposing {len(jobs)} parts across {len(pending)} of {len(ordered)} meshes "
-            f"({total:,} triangles, {len(results)} meshes cached, {done} parts resumable)",
+            f"({total:,} triangles, {len(results)} meshes cached, {done} parts resumable)\n"
+            f"Using {count} workers x {threads} CoACD threads on {cpus} CPUs; "
+            f"results are cached, so this cost is paid once",
             flush=True,
         )
 
-    count = workers or min(8, os.cpu_count() or 1)
     collected: dict[Path, list[ConvexPart]] = {source: [] for source in pending}
+    weights = {(source, index): size + PART_SETUP_COST_TRIANGLES for size, source, index in jobs}
+    bar = _Progress(len(jobs), sum(weights.values())) if progress else None
     # One task per child: CoACD retains memory per run, so recycling caps peak RSS.
-    with ProcessPoolExecutor(max_workers=count, max_tasks_per_child=1) as pool:
+    with ProcessPoolExecutor(
+        max_workers=count,
+        max_tasks_per_child=1,
+        initializer=_limit_worker_threads,
+        initargs=(threads,),
+    ) as pool:
         futures = {
             pool.submit(
                 _decompose_part, source, cache_dir / _safe_name(source.stem), settings, index
-            ): (source, index)
-            for _, source, index in jobs
+            ): (source, index, size)
+            for size, source, index in jobs
         }
-        for finished, future in enumerate(as_completed(futures), start=1):
-            source, index = futures[future]
+        for future in as_completed(futures):
+            source, index, size = futures[future]
             part = future.result()
             if part is not None:
                 collected[source].append(part)
-            if progress:
-                hulls = len(part.hulls) if part else 0
-                print(
-                    f"  [{finished}/{len(jobs)}] {source.stem}[{index}]: {hulls} hulls",
-                    flush=True,
+            if bar is not None:
+                bar.advance(
+                    weights[(source, index)],
+                    f"{source.stem}[{index}]: {len(part.hulls) if part else 0} hulls",
                 )
+    if bar is not None:
+        bar.close()
 
     for source in pending:
         parts = sorted(collected[source], key=lambda part: part.part_ref)
@@ -308,6 +336,90 @@ def decompose_sources(
 
 def _marker_exists(cache_dir: Path, source: Path, index: int) -> bool:
     return (cache_dir / _safe_name(source.stem) / f"part{index:04d}.json").exists()
+
+
+def _limit_worker_threads(threads: int) -> None:
+    """Runs in the child before CoACD is imported, which is when libgomp reads this."""
+
+    os.environ["OMP_NUM_THREADS"] = str(threads)
+
+
+def _available_cpus() -> int:
+    """cgroup quotas and taskset affinity are invisible to os.cpu_count()."""
+
+    if hasattr(os, "sched_getaffinity"):
+        return len(os.sched_getaffinity(0))
+    return os.cpu_count() or 1
+
+
+def _default_workers(cpus: int) -> int:
+    """Prefer separate processes: CoACD's own threads scale worse than parallel parts."""
+
+    workers = max(2 if cpus >= 4 else 1, cpus // COACD_THREADS_PER_WORKER)
+    cap = _memory_worker_cap()
+    return max(1, min(workers, cap)) if cap else workers
+
+
+def _memory_worker_cap() -> int | None:
+    """None when the budget cannot be read, in which case CPU count decides alone."""
+
+    try:
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("MemAvailable:"):
+                available = int(line.split()[1]) * 1024
+                return max(1, available // COACD_PEAK_RSS_BYTES)
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def _format_duration(seconds: float) -> str:
+    seconds = max(int(seconds), 0)
+    if seconds >= 3600:
+        return f"{seconds // 3600}h{seconds % 3600 // 60:02d}m"
+    if seconds >= 60:
+        return f"{seconds // 60}m{seconds % 60:02d}s"
+    return f"{seconds}s"
+
+
+class _Progress:
+    """Live decomposition progress: a redrawn bar on a TTY, one line per part otherwise."""
+
+    BAR_WIDTH = 28
+
+    def __init__(self, total_jobs: int, total_weight: int) -> None:
+        self._total_jobs = total_jobs
+        # Parts run largest-first, so weighting by count alone makes the bar crawl then
+        # sprint; weighting by triangles alone ignores the dominant per-part setup cost.
+        self._total_weight = max(total_weight, 1)
+        self._jobs = 0
+        self._weight = 0
+        self._start = time.monotonic()
+        self._live = sys.stdout.isatty()
+        self._width = shutil.get_terminal_size((100, 24)).columns
+
+    def advance(self, weight: int, label: str) -> None:
+        self._jobs += 1
+        self._weight += weight
+        fraction = min(self._weight / self._total_weight, 1.0)
+        elapsed = time.monotonic() - self._start
+        if not self._live:
+            print(f"  [{self._jobs}/{self._total_jobs}] {label}", flush=True)
+            return
+        filled = round(self.BAR_WIDTH * fraction)
+        bar = "#" * filled + "-" * (self.BAR_WIDTH - filled)
+        remaining = elapsed / fraction - elapsed if fraction > 0 else 0.0
+        text = (
+            f"  [{bar}] {fraction:5.1%}  {self._jobs}/{self._total_jobs} parts  "
+            f"{_format_duration(elapsed)} elapsed, ~{_format_duration(remaining)} left"
+        )
+        sys.stdout.write("\r" + text[: self._width - 1].ljust(self._width - 1))
+        sys.stdout.flush()
+
+    def close(self) -> None:
+        if self._live:
+            sys.stdout.write("\r" + " " * (self._width - 1) + "\r")
+            sys.stdout.flush()
 
 
 def _read_manifest_path(
