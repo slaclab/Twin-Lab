@@ -8,26 +8,55 @@ The current reviewed model is subassembly `*43841` from drawing
 `DSG-000040389`. It contains an EPIX detector stage, three crystal stacks, and
 three polycapillary stacks with 22 controllable joints.
 
-## Linux
+## Setup
 
-Create the environment once:
+The framework is Linux-based. Windows users run it inside WSL 2 rather than
+natively; every step after the first subsection is identical on both.
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
+### Windows: install WSL 2 first
+
+From an administrator PowerShell prompt, install Ubuntu if WSL is not already
+set up:
+
+```powershell
+wsl --install -d Ubuntu
 ```
 
-Use `python3` for that first command; a fresh Ubuntu has no `python` until a
-virtual environment is active. Under WSL, plain `python` may instead resolve to
-a Windows interpreter on the shared PATH, which cannot build a working Linux
-environment here.
+Restart when asked, open Ubuntu, and continue with the steps below. Work inside
+the WSL filesystem (for example `~/src`) rather than under `/mnt/c`; file access
+and Python environments are markedly faster there.
 
-### With uv (optional)
+The viewers print a Meshcat URL that opens in a normal Windows browser. WSL 2
+forwards `localhost` automatically, so no Linux desktop or X server is needed.
 
-[uv](https://docs.astral.sh/uv/) is an alternative to the block above, not a
-replacement for it. Both produce the same `.venv`, and the two workflows can be
-mixed freely across a team.
+### Install the prerequisites
+
+```bash
+sudo apt update
+sudo apt install -y git git-lfs python3 python3-venv
+git lfs install
+```
+
+Run `git lfs install` before cloning. The STEP sources are stored as LFS
+objects, and a clone made without it yields small pointer files instead of CAD.
+See [Large files](#large-files) for the full picture.
+
+### Get the code
+
+```bash
+mkdir -p ~/src && cd ~/src
+git clone <repository-url> slac-robotics-framework
+cd slac-robotics-framework
+```
+
+If the clone predates your Git LFS setup, `cad/DSG-000040389/source.stp` will be
+a few hundred bytes rather than 88 MiB. Run `git lfs install` and then
+`git lfs pull` to fill in the real content.
+
+### Create the environment
+
+Either tool works and a team can mix them freely, since both produce the same
+`.venv`. [uv](https://docs.astral.sh/uv/) is faster and pins the interpreter:
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -35,37 +64,54 @@ uv venv --seed
 uv pip install -r requirements.txt
 ```
 
-Installs take seconds rather than minutes, and `uv venv` reads `.python-version`
-to fetch the interpreter this project is tested against instead of using
-whatever the system provides. That matters because Drake ships wheels only for
-specific Python versions, and a newer system Python resolves to an unusable
-environment.
-
-The `--seed` flag is what installs `pip` into the environment. Without it the
-environment still runs the project correctly, but anything that shells out to
+`uv venv` reads `.python-version` and fetches the interpreter this project is
+tested against instead of using whatever the system provides, which matters
+because Drake publishes wheels only for specific Python versions. The `--seed`
+flag installs `pip` into the environment; without it anything that shells out to
 `pip` fails, including the VS Code Python extension's package list.
 
-Install Git LFS once per machine, before cloning. The STEP sources are stored as
-LFS objects, and a clone made without it yields small pointer files instead of
-CAD:
+The stock tooling works too:
 
 ```bash
-sudo apt install -y git-lfs
-git lfs install
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
 ```
 
-If this clone already exists and `cad/DSG-000040389/source.stp` is only a few
-hundred bytes, run `git lfs install` and then `git lfs pull` to replace the
-pointers with real content.
+Use `python3` for that first command. A fresh Ubuntu has no `python` until a
+virtual environment is active, and under WSL a bare `python` may resolve to a
+Windows interpreter on the shared PATH, which cannot build a working Linux
+environment here.
 
-See [Large files](#large-files) for what this guards against.
+### Running commands
+
+Every command in this README assumes the environment is active, which is one
+step per new shell:
+
+```bash
+source .venv/bin/activate
+```
+
+With uv you can skip activation entirely and prefix any command with `uv run`:
+
+```bash
+uv run slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
+```
+
+### Verify
+
+```bash
+pytest -q
+```
+
+The suite exercises the CAD manifest, inventory remap, SDF compiler, and
+collision plumbing without opening a viewer.
 
 ## Collision detection
 
 This is the point of the model. Quick start, from the repository root:
 
 ```bash
-source .venv/bin/activate
 slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
 ```
 
@@ -196,7 +242,7 @@ The range slider is a travel heuristic, not a clearance guarantee. To check an
 animated pose for real interference, run the animation inside the collision
 viewer above, which evaluates every frame.
 
-## Updating The 43841 STEP
+## Updating the 43841 STEP
 
 For this reviewed polycap assembly, use the dedicated helper instead of running
 manifest refresh, remap, and cache rebuild manually.
@@ -205,7 +251,6 @@ If the new STEP is already copied into
 `cad/DSG-000040389/source.stp`:
 
 ```bash
-source .venv/bin/activate
 python -m slac_robotics.update_43841_step --rebuild-viewer-cache
 ```
 
@@ -213,14 +258,12 @@ If the new STEP is still somewhere else on disk, pass that file path and let
 the helper copy it into the repo first:
 
 ```bash
-source .venv/bin/activate
 python -m slac_robotics.update_43841_step \
   /mnt/c/Users/koashen/Downloads/DSG-000040389.stp \
   --rebuild-viewer-cache
 ```
 
-If you install the package as a console script entry point, the equivalent
-command is `slac-refresh-43841`.
+The console-script equivalent is `slac-refresh-43841`.
 
 What this command does:
 
@@ -289,44 +332,6 @@ that commit before pushing rather than after.
 The pointer is also what you see in a diff, so `git show` on a STEP revision
 reports an oid and size instead of attempting to render 88 MiB of CAD text.
 
-## Windows (WSL)
-
-Run the framework in WSL 2 rather than directly in Windows. From an
-administrator PowerShell prompt, install Ubuntu if WSL is not already set up:
-
-```powershell
-wsl --install -d Ubuntu
-```
-
-After the requested restart, open Ubuntu and install the system prerequisites:
-
-```bash
-sudo apt update
-sudo apt install -y git git-lfs python3 python3-pip python3-venv
-git lfs install
-```
-
-Clone the repository inside the WSL filesystem (for example, under `~/src`)
-instead of under `/mnt/c`; file access and Python environments are generally
-faster there. Then create the environment and run the viewer as usual:
-
-```bash
-mkdir -p ~/src
-cd ~/src
-git clone <repository-url> slac-robotics-framework
-cd slac-robotics-framework
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-python -m slac_robotics.stage_cad_viewer \
-  cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
-```
-
-Open the Meshcat URL printed by the viewer in a Windows browser. WSL 2 normally
-forwards `localhost` automatically, so no Linux desktop or X server is needed.
-The environment is Linux-based: activate it with `source .venv/bin/activate`
-each time you open a new Ubuntu shell.
-
 ## What to edit
 
 | File | Purpose |
@@ -373,7 +378,7 @@ tests/
 exports/                       generated share and collision packages (ignored)
 ```
 
-## Other commands
+## Command reference
 
 Console-script entry points, all installed with the package:
 

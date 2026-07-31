@@ -35,6 +35,10 @@ cad = [
 drake = [
     "drake>=1.54",
 ]
+collision = [
+    "coacd>=1.0",
+    "numpy>=1.26",
+]
 
 [project.scripts]
 slac-cad-manifest = "slac_robotics.constraints_wizard:main"
