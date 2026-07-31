@@ -1,5 +1,6 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+# 77 is where setuptools accepts the PEP 639 SPDX license string below.
+requires = ["setuptools>=77.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -9,7 +10,8 @@ description = "SLAC Robotics Framework"
 readme = "README.md"
 # Floor is set by drake, which dropped 3.10/3.11 wheels at 1.52.
 requires-python = ">=3.12,<3.15"
-license = "MIT"
+license = "BSD-3-Clause-LBNL"
+license-files = ["LICENSE.txt"]
 authors = [
     {name = "SLAC"},
 ]

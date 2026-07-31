@@ -4,5 +4,5 @@
   <version>0.1.0</version>
   <description>Stage-stack models for SLAC X-ray spectrometers.</description>
   <maintainer email="noreply@slac.stanford.edu">SLAC</maintainer>
-  <license>MIT</license>
+  <license>BSD-3-Clause-LBNL</license>
 </package>
