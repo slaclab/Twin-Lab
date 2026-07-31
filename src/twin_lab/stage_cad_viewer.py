@@ -334,7 +334,7 @@ def prepare_stage_cad(
     return scene_path
 
 
-def view_stage_cad(scene_path: str | Path) -> None:
+def view_stage_cad(scene_path: str | Path, *, fps: float = 30.0) -> None:
     """Show reusable real-CAD meshes with one transform per occurrence."""
 
     from pydrake.geometry import Mesh, Meshcat, MeshcatParams, Rgba
@@ -443,6 +443,7 @@ def view_stage_cad(scene_path: str | Path) -> None:
     print(f"Motion sliders: {len(joints)}")
     print("Click the 'Animation' button to start and stop cyclic motion.")
     print("Press Escape in Meshcat or Ctrl-C here to stop.")
+    frame_period = 1.0 / max(fps, 1.0)
     reset_clicks = 0
     motion_clicks = 0
     phase = 0.0
@@ -491,7 +492,7 @@ def view_stage_cad(scene_path: str | Path) -> None:
                     joint["axis_world"], joint["origin_m"], value, RigidTransform, RotationMatrix
                 )
             meshcat.SetTransform(joint_paths[joint["key"]], transform)
-        time.sleep(0.03 if automatic else 0.1)
+        time.sleep(frame_period if automatic else 0.1)
 
 
 def _write_shape_obj(shape: Any, output: Path, linear_deflection_mm: float) -> None:
@@ -663,6 +664,12 @@ def main() -> None:
     parser.add_argument("--rebuild", action="store_true")
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--deflection-mm", type=float, default=2.0)
+    parser.add_argument(
+        "--fps",
+        type=float,
+        default=30.0,
+        help="Animation frame rate; raise for smoother motion (e.g. 120)",
+    )
     args = parser.parse_args()
 
     scene = prepare_stage_cad(
@@ -673,7 +680,7 @@ def main() -> None:
     print(f"Stage CAD cache: {scene.parent}")
     if not args.prepare_only:
         try:
-            view_stage_cad(scene)
+            view_stage_cad(scene, fps=args.fps)
         except KeyboardInterrupt:
             print("\nStage CAD viewer stopped.")
 
