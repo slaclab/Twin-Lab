@@ -59,9 +59,30 @@ Either tool works and a team can mix them freely, since both produce the same
 `.venv`. [uv](https://docs.astral.sh/uv/) is faster and pins the interpreter:
 
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
+sudo apt install -y pipx
+pipx install uv
+pipx ensurepath
+```
+
+Open a new shell after `pipx ensurepath` so `~/.local/bin` is on your `PATH`,
+then build the environment:
+
+```bash
 uv venv --seed
 uv pip install -r requirements.txt
+```
+
+uv's own documentation suggests `curl -LsSf https://astral.sh/uv/install.sh | sh`.
+Avoid that here: it runs a downloaded script before anyone can read it, so a
+hijacked host or a bad DNS answer executes arbitrary code as your user. `pipx`
+installs the same release from PyPI, records a version you can audit with
+`pipx list`, and removes cleanly with `pipx uninstall uv`. If you do want the
+official installer, save it and read it before running it:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh -o uv-install.sh
+less uv-install.sh
+sh uv-install.sh && rm uv-install.sh
 ```
 
 `uv venv` reads `.python-version` and fetches the interpreter this project is
@@ -326,9 +347,12 @@ the helper copy it into the repo first:
 
 ```bash
 python -m twin_lab.update_43841_step \
-  /mnt/c/Users/koashen/Downloads/DSG-000040389.stp \
+  /path/to/DSG-000040389.stp \
   --rebuild-viewer-cache
 ```
+
+Under WSL a file downloaded on the Windows side is reachable at
+`/mnt/c/Users/<your-user>/Downloads/DSG-000040389.stp`.
 
 The console-script equivalent is `slac-refresh-43841`.
 

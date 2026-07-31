@@ -198,11 +198,14 @@ Collision geometry is built one of two ways, selected by `--collision-mode`:
   drops to roughly 1.4x-1.5x, and the residual is mostly filled bolt holes rather than
   spanned external concavity.
 
-Decomposition costs about 88 triangles per second per worker and is cached under
-`.cache/twin_lab/convex-collision/` keyed by source mtime, size, and settings, so
-the full assembly is a one-time cost and milliseconds thereafter. Hull count barely
-affects that runtime: CoACD's search dominates, so `max_hulls` trades query cost and
-package size, not build time.
+Decomposing the full `43841` assembly (215 sub-parts, 1.2 M triangles) measured 34
+minutes on a 12-core Xeon W-2265. A triangles-per-second figure does not predict that
+well, because per-part setup dominates: the median part is about 1,400 triangles, while
+spawning a worker and running CoACD's size-independent search costs the equivalent of
+roughly 15,000. Results are cached under `.cache/twin_lab/convex-collision/` keyed by
+source mtime, size, and settings, so the full assembly is a one-time cost and
+milliseconds thereafter. Hull count barely affects that runtime: CoACD's search
+dominates, so `max_hulls` trades query cost and package size, not build time.
 
 Work is dispatched per sub-part rather than per file, longest first, so one large mesh
 cannot set the makespan. Each finished sub-part writes a resume marker, so a build that
