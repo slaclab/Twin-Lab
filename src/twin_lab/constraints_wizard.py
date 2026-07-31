@@ -206,7 +206,9 @@ def remap_stage_inventory(
         inventory_text,
         ref_map,
         new_manifest_path=_portable_repo_path(new_manifest_file),
-        subassembly_stats=_subassembly_stats(new_manifest, ref_map.get(str(inventory["subassembly"]["ref"]))),
+        subassembly_stats=_subassembly_stats(
+            new_manifest, ref_map.get(str(inventory["subassembly"]["ref"]))
+        ),
     )
     output_file.write_text(remapped_text, encoding="utf-8")
 
@@ -224,7 +226,6 @@ def _build_manifest_ref_map(
 ) -> tuple[dict[str, str], set[str]]:
     old_items = previous_manifest["occurrences"]
     new_items = new_manifest["occurrences"]
-    old_by_id = {str(item["id"]): item for item in old_items}
     new_by_id = {str(item["id"]): item for item in new_items}
     new_children: dict[str | None, list[dict[str, Any]]] = {}
     for item in new_items:
@@ -283,7 +284,9 @@ def _resolve_occurrence_match(
 
     transformed_id = _transform_occurrence_id(old_id, aliases["name_aliases"])
     terminal = transformed_id.rsplit("/", 1)[-1]
-    id_like = [candidate for candidate in candidates if str(candidate["id"]).rsplit("/", 1)[-1] == terminal]
+    id_like = [
+        candidate for candidate in candidates if str(candidate["id"]).rsplit("/", 1)[-1] == terminal
+    ]
     if len(id_like) == 1:
         return id_like[0]
 
@@ -303,7 +306,9 @@ def _load_aliases(alias_map_path: str | Path | None) -> dict[str, dict[str, str]
         "occurrence_id_aliases": {
             str(key): str(value) for key, value in loaded.get("occurrence_id_aliases", {}).items()
         },
-        "name_aliases": {str(key): str(value) for key, value in loaded.get("name_aliases", {}).items()},
+        "name_aliases": {
+            str(key): str(value) for key, value in loaded.get("name_aliases", {}).items()
+        },
     }
 
 
@@ -354,7 +359,9 @@ def _portable_repo_path(path: Path) -> str:
         return path.as_posix()
 
 
-def _subassembly_stats(manifest: dict[str, Any], subassembly_ref: str | None) -> dict[str, int] | None:
+def _subassembly_stats(
+    manifest: dict[str, Any], subassembly_ref: str | None
+) -> dict[str, int] | None:
     if subassembly_ref is None:
         return None
     by_ref = {str(item["ref"]): item for item in manifest["occurrences"]}

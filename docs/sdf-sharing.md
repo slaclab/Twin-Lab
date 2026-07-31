@@ -53,7 +53,7 @@ plus 180 degrees.
 Load the exported SDF directly:
 
 ```bash
-python -m slac_robotics.scene \
+python -m twin_lab.scene \
   exports/DSG-000040389.43841-stage-stack.sdf-package/*.sdf
 ```
 

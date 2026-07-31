@@ -1,4 +1,8 @@
 {
+  // Pin the interpreter so discovery never falls back to the Windows pyenv shim
+  // that WSL puts on PATH; that interpreter cannot import this project's deps.
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+
   // Large generated/vendored trees in this repo (measured): .venv 1.5G, .cache 499M,
   // exports 173M, cad 98M. Excluding them from watching/searching/indexing keeps the
   // extension host (especially over WSL Remote) from walking ~25k files on every load.

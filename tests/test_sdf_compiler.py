@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from slac_robotics.sdf_compiler import compile_sdf_package
+from twin_lab.sdf_compiler import compile_sdf_package
 
 
 def _write_triangle_obj(path: Path, x_offset: float = 0.0) -> None:
@@ -193,7 +193,7 @@ def test_refuses_to_replace_an_unmanaged_output_directory(tmp_path: Path) -> Non
 def test_add_mesh_geometry_declares_convex_only_when_requested():
     import xml.etree.ElementTree as ET
 
-    from slac_robotics.sdf_compiler import _add_mesh_geometry
+    from twin_lab.sdf_compiler import _add_mesh_geometry
 
     plain = ET.Element("collision")
     _add_mesh_geometry(plain, "meshes/a048.obj")
@@ -208,7 +208,7 @@ def test_add_mesh_geometry_declares_convex_only_when_requested():
 def test_compile_sdf_package_rejects_an_unknown_collision_mode(tmp_path):
     import pytest
 
-    from slac_robotics.sdf_compiler import compile_sdf_package
+    from twin_lab.sdf_compiler import compile_sdf_package
 
     with pytest.raises(ValueError, match="collision_mode"):
         compile_sdf_package(tmp_path / "scene.yaml", tmp_path / "out", collision_mode="vhacd")

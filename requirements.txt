@@ -1,2 +1,2 @@
 # Complete local development environment.
--e ".[dev,cad,drake]"
+-e .[dev,cad,drake,collision]

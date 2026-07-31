@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 
-from slac_robotics.stage_cad_viewer import (
+from twin_lab.stage_cad_viewer import (
     _auto_amplitude,
     _is_fastener_name,
     _joint_displacement,

@@ -1,1 +1,1 @@
-"""Tests for SLAC Robotics Framework."""
+"""Tests for Twin Lab."""

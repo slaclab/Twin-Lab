@@ -92,6 +92,7 @@ def run_collision_viewer(
     *,
     warn_mm: float = 5.0,
     ignore_file: str | Path | None = None,
+    fps: float = 30.0,
 ) -> None:
     """Drive the compiled assembly from sliders and report clearance at every pose."""
 
@@ -141,6 +142,7 @@ def run_collision_viewer(
     print("Click 'Animation' to cycle every joint about its reviewed home.")
     print("Press Escape in Meshcat or Ctrl-C here to stop.")
 
+    frame_period = 1.0 / max(fps, 1.0)
     reset_clicks = 0
     log_clicks = 0
     collision_clicks = 0
@@ -223,7 +225,7 @@ def run_collision_viewer(
                     print(report.summary())
             else:
                 log_clicks = new_log
-        time.sleep(0.03 if animating else 0.1)
+        time.sleep(frame_period if animating else 0.1)
 
 
 def _set_toggles(meshcat, previous: list[str], *, collision_on: bool, animating: bool) -> list[str]:
@@ -366,6 +368,12 @@ def main() -> None:
         default=None,
         help="Parallel CoACD workers for the one-time convex build",
     )
+    parser.add_argument(
+        "--fps",
+        type=float,
+        default=30.0,
+        help="Animation frame rate; raise for smoother motion (e.g. 120)",
+    )
     args = parser.parse_args()
 
     inventory = resolve_repo_path(args.stage_inventory).resolve()
@@ -386,6 +394,7 @@ def main() -> None:
             package_dir,
             warn_mm=args.warn_mm,
             ignore_file=args.ignore_file or inventory,
+            fps=args.fps,
         )
     except KeyboardInterrupt:
         print("\nCollision viewer stopped.")
