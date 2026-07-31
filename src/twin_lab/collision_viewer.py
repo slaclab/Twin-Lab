@@ -33,6 +33,9 @@ STATUS_RGB = {
 DEFAULT_TOP_RGB = [0.53, 0.81, 0.98]
 DEFAULT_BOTTOM_RGB = [0.10, 0.10, 0.44]
 OFFENDER_LIMIT = 3
+# The signed-distance query costs ~30 ms, so running it every animated frame would cap the
+# loop near 30 fps; throttle it to this rate so the render can reach the requested fps.
+DETECTOR_HZ = 20.0
 
 
 @dataclass(frozen=True)
@@ -145,6 +148,7 @@ def run_collision_viewer(
     print("Press Escape in Meshcat or Ctrl-C here to stop.")
 
     frame_period = 1.0 / max(fps, 1.0)
+    detector_period = 1.0 / DETECTOR_HZ
     reset_clicks = 0
     log_clicks = 0
     collision_clicks = 0
@@ -157,6 +161,7 @@ def run_collision_viewer(
     previous_status: str | None = None
     readout: list[str] = []
     previous_summary = ""
+    last_detect = 0.0
     while meshcat.GetButtonClicks("Stop viewer") == 0:
         tick = time.monotonic()
         elapsed = tick - previous_tick
@@ -213,7 +218,15 @@ def run_collision_viewer(
                 }
             )
             scene.diagram.ForcedPublish(model.context)
-            if collision_on:
+            # The render above runs every frame; the query below is throttled so its cost
+            # stutters the detector rather than the motion.
+            detect_due = (
+                not animating
+                or new_log != log_clicks
+                or tick - last_detect >= detector_period
+            )
+            if collision_on and detect_due:
+                last_detect = tick
                 report = model.report(warn_m=warn_m)
                 if report.status != previous_status:
                     previous_status = report.status
@@ -225,9 +238,10 @@ def run_collision_viewer(
                 elif report.summary() != previous_summary:
                     previous_summary = report.summary()
                     print(report.summary())
-            else:
+            elif not collision_on:
                 log_clicks = new_log
-        time.sleep(frame_period if animating else 0.1)
+        frame_cost = time.monotonic() - tick
+        time.sleep(max(0.0, frame_period - frame_cost) if animating else 0.1)
 
 
 def _set_toggles(meshcat, previous: list[str], *, collision_on: bool, animating: bool) -> list[str]:
