@@ -13,10 +13,37 @@ three polycapillary stacks with 22 controllable joints.
 Create the environment once:
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
+
+Use `python3` for that first command; a fresh Ubuntu has no `python` until a
+virtual environment is active. Under WSL, plain `python` may instead resolve to
+a Windows interpreter on the shared PATH, which cannot build a working Linux
+environment here.
+
+### With uv (optional)
+
+[uv](https://docs.astral.sh/uv/) is an alternative to the block above, not a
+replacement for it. Both produce the same `.venv`, and the two workflows can be
+mixed freely across a team.
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv venv --seed
+uv pip install -r requirements.txt
+```
+
+Installs take seconds rather than minutes, and `uv venv` reads `.python-version`
+to fetch the interpreter this project is tested against instead of using
+whatever the system provides. That matters because Drake ships wheels only for
+specific Python versions, and a newer system Python resolves to an unusable
+environment.
+
+The `--seed` flag is what installs `pip` into the environment. Without it the
+environment still runs the project correctly, but anything that shells out to
+`pip` fails, including the VS Code Python extension's package list.
 
 Enable the repository hooks once per clone. Git never activates hooks from a
 clone automatically, so this is a manual step:
