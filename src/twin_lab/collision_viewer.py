@@ -323,19 +323,17 @@ def _read_part_labels(label_source: str | Path | None) -> dict[str, str]:
     return read_part_labels(label_source)
 
 
-def _needs_recompile(package_dir: Path) -> bool:
-    """Rebuild packages predating the OBJ-visual fix; Meshcat silently skips STL visuals."""
+def _needs_recompile(package_dir: Path, scene_path: Path, collision_mode: str) -> bool:
+    """Recompile whenever the package no longer matches the scene meshes and review settings."""
 
-    metadata = package_dir / "joint_metadata.csv"
-    if not metadata.exists():
-        return True
-    if "reviewed_home" not in metadata.read_text(encoding="utf-8").partition("\n")[0]:
-        return True
-    sdf_path = next(
-        (path for path in sorted(package_dir.glob("*.sdf")) if not path.stem.endswith("_matlab")),
-        None,
+    from .sdf_compiler import package_is_current
+
+    return not package_is_current(
+        package_dir,
+        scene_path,
+        include_collisions=True,
+        collision_mode=collision_mode,
     )
-    return sdf_path is None or ".stl</uri>" in sdf_path.read_text(encoding="utf-8")
 
 
 def _proximity_geometry_count(model: CollisionModel) -> int:
@@ -403,7 +401,7 @@ def main() -> None:
     inventory = resolve_repo_path(args.stage_inventory).resolve()
     scene_path = prepare_stage_cad(inventory, rebuild=args.rebuild)
     package_dir = args.package_dir or EXPORT_ROOT / f"{review_artifact_stem(inventory)}.collision"
-    if args.rebuild or _needs_recompile(package_dir):
+    if args.rebuild or _needs_recompile(package_dir, scene_path, args.collision_mode):
         print(f"Compiling collision package into {package_dir}")
         compile_sdf_package(
             scene_path,

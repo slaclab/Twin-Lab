@@ -283,6 +283,11 @@ re-tessellated, or when `--threshold` or `--max-hulls` changes. A re-tessellatio
 that produces byte-identical output is recognised by hash, so rebuilding the
 viewer cache alone does not force a re-decomposition.
 
+The compiled package under `exports/` carries a build stamp recording the scene
+meshes, the collision mode, and the inventory `decomposition` block it was built
+from. `slac-collision` recompiles whenever that stamp no longer matches, so
+editing a per-part override reaches the viewer without `--rebuild`.
+
 ### Filtering expected contact
 
 Drake automatically ignores pairs that share a body, sit either side of one
