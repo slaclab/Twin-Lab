@@ -5,7 +5,7 @@ from pathlib import Path
 
 import yaml
 
-from slac_robotics.constraints_wizard import remap_stage_inventory
+from twin_lab.constraints_wizard import remap_stage_inventory
 
 
 def test_remaps_inventory_with_name_aliases(tmp_path: Path) -> None:

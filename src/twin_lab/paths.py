@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-CACHE_ROOT = REPOSITORY_ROOT / ".cache" / "slac_robotics"
+CACHE_ROOT = REPOSITORY_ROOT / ".cache" / "twin_lab"
 EXPORT_ROOT = REPOSITORY_ROOT / "exports"
 
 

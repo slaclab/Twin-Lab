@@ -8,8 +8,8 @@ import pytest
 
 pytest.importorskip("OCP")
 
-from slac_robotics.cad_motion import prepare_motion_setup  # noqa: E402
-from slac_robotics.constraints_wizard import (  # noqa: E402
+from twin_lab.cad_motion import prepare_motion_setup  # noqa: E402
+from twin_lab.constraints_wizard import (  # noqa: E402
     _default_kinematics_path,
     _default_manifest_path,
     _default_preview_path,
@@ -31,7 +31,7 @@ def test_cad_project_defaults_keep_generated_files_out_of_source_directories() -
     assert (
         _default_preview_path(source, "A035")
         .as_posix()
-        .endswith(".cache/slac_robotics/previews/DSG-000040389/preview.A035.gltf")
+        .endswith(".cache/twin_lab/previews/DSG-000040389/preview.A035.gltf")
     )
 
 

@@ -1,4 +1,4 @@
-# SLAC Robotics Framework
+# Twin Lab
 
 Kinematic modeling and interference-analysis tooling for STEP-based X-ray
 spectrometer stage stacks. Open Cascade reads the CAD hierarchy and Drake handles
@@ -45,8 +45,8 @@ See [Large files](#large-files) for the full picture.
 
 ```bash
 mkdir -p ~/src && cd ~/src
-git clone <repository-url> slac-robotics-framework
-cd slac-robotics-framework
+git clone <repository-url> twin-lab
+cd twin-lab
 ```
 
 If the clone predates your Git LFS setup, `cad/DSG-000040389/source.stp` will be
@@ -122,7 +122,7 @@ the background colour tells you the state of the pose immediately.
 The collision viewer drives a Drake plant compiled from the same reviewed
 inventory, so the geometry drawn on screen and the geometry checked for
 interference are the same kinematics. The module form
-`python -m slac_robotics.collision_viewer <inventory>` is equivalent.
+`python -m twin_lab.collision_viewer <inventory>` is equivalent.
 
 Checking can be switched off at any time with the
 `Collision detection: ON (click to disable)` toggle button, which turns the
@@ -168,7 +168,7 @@ Meshes can also be decomposed ahead of time with `slac-decompose`, and the
 compiler accepts the same options:
 
 ```bash
-python -m slac_robotics.sdf_compiler \
+python -m twin_lab.sdf_compiler \
   cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
   --with-collisions --collision-mode convex
 ```
@@ -241,7 +241,7 @@ ones, which is a good reason to let a nearly-finished build finish.
 
 #### Caching: this cost is paid once
 
-Results are cached under `.cache/slac_robotics/convex-collision/`, keyed on the
+Results are cached under `.cache/twin_lab/convex-collision/`, keyed on the
 source mesh mtime and size plus the decomposition settings (`threshold`,
 `max_hulls`, `seed`). Later runs start immediately, and the cache is worth
 keeping across branches.
@@ -279,11 +279,11 @@ For kinematics work without the collision plant, the cached CAD viewer is
 lighter and starts faster:
 
 ```bash
-python -m slac_robotics.stage_cad_viewer \
+python -m twin_lab.stage_cad_viewer \
   cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
 ```
 
-The first run builds meshes under `.cache/slac_robotics/stage-cad/`. Later runs
+The first run builds meshes under `.cache/twin_lab/stage-cad/`. Later runs
 reuse that cache. Use the North/Middle/South Crystal and Polycap controls in
 Meshcat; **Reset to home** restores every reviewed home position.
 
@@ -318,14 +318,14 @@ If the new STEP is already copied into
 `cad/DSG-000040389/source.stp`:
 
 ```bash
-python -m slac_robotics.update_43841_step --rebuild-viewer-cache
+python -m twin_lab.update_43841_step --rebuild-viewer-cache
 ```
 
 If the new STEP is still somewhere else on disk, pass that file path and let
 the helper copy it into the repo first:
 
 ```bash
-python -m slac_robotics.update_43841_step \
+python -m twin_lab.update_43841_step \
   /mnt/c/Users/koashen/Downloads/DSG-000040389.stp \
   --rebuild-viewer-cache
 ```
@@ -343,14 +343,14 @@ What this command does:
 After it finishes, verify the result with:
 
 ```bash
-python -m slac_robotics.stage_cad_viewer \
+python -m twin_lab.stage_cad_viewer \
   cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
 ```
 
 Build the portable SDF package:
 
 ```bash
-python -m slac_robotics.sdf_compiler \
+python -m twin_lab.sdf_compiler \
   cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
 ```
 
@@ -428,7 +428,7 @@ config/
 docs/
   cad-review.md                STEP hierarchy and constraint-review workflow
   sdf-sharing.md               portable SDF and MATLAB handoff
-src/slac_robotics/
+src/twin_lab/
   constraints_wizard.py        STEP import, manifest, tree, and preview
   cad_geometry.py              shared Open Cascade traversal/mesh helpers
   stage_cad_viewer.py          current full-stack cached motion viewer
@@ -441,7 +441,7 @@ src/slac_robotics/
   paths.py                     repo, cache, and export path resolution
 tests/
   fixtures/                    small proxy models used only by tests
-.cache/slac_robotics/          generated previews, viewer meshes, convex hulls (ignored)
+.cache/twin_lab/               generated previews, viewer meshes, convex hulls (ignored)
 exports/                       generated share and collision packages (ignored)
 ```
 

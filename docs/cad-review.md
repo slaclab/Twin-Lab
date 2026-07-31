@@ -22,7 +22,7 @@ cad/DSG-000040389/
   as `A035` and `P1114` for that exact STEP revision.
 - `reviews/*.yaml` contains human-reviewed mechanical meaning.
 
-Generated previews and motion meshes go under `.cache/slac_robotics/`; they do
+Generated previews and motion meshes go under `.cache/twin_lab/`; they do
 not belong beside the source or review files.
 
 ## Inspect the hierarchy
@@ -69,7 +69,7 @@ in the assembly review, because they change with the STEP revision.
 ## Test motion
 
 ```bash
-python -m slac_robotics.stage_cad_viewer \
+python -m twin_lab.stage_cad_viewer \
   cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
 ```
 
@@ -101,14 +101,14 @@ For the current `DSG-000040389` review, use the dedicated helper:
 
 ```bash
 source .venv/bin/activate
-python -m slac_robotics.update_43841_step --rebuild-viewer-cache
+python -m twin_lab.update_43841_step --rebuild-viewer-cache
 ```
 
 Or, if the replacement STEP is not yet inside the repo:
 
 ```bash
 source .venv/bin/activate
-python -m slac_robotics.update_43841_step /path/to/new/DSG-000040389.stp --rebuild-viewer-cache
+python -m twin_lab.update_43841_step /path/to/new/DSG-000040389.stp --rebuild-viewer-cache
 ```
 
 This helper:
@@ -199,7 +199,7 @@ Collision geometry is built one of two ways, selected by `--collision-mode`:
   spanned external concavity.
 
 Decomposition costs about 88 triangles per second per worker and is cached under
-`.cache/slac_robotics/convex-collision/` keyed by source mtime, size, and settings, so
+`.cache/twin_lab/convex-collision/` keyed by source mtime, size, and settings, so
 the full assembly is a one-time cost and milliseconds thereafter. Hull count barely
 affects that runtime: CoACD's search dominates, so `max_hulls` trades query cost and
 package size, not build time.

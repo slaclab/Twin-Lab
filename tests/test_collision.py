@@ -8,7 +8,7 @@ import os
 
 import pytest
 
-from slac_robotics.collision import (
+from twin_lab.collision import (
     Clearance,
     ClearanceReport,
     _pair_key,
@@ -16,8 +16,8 @@ from slac_robotics.collision import (
     _short,
     read_ignored_pairs,
 )
-from slac_robotics.collision_viewer import SliderJoint, read_joint_metadata
-from slac_robotics.convex_collision import (
+from twin_lab.collision_viewer import SliderJoint, read_joint_metadata
+from twin_lab.convex_collision import (
     CACHE_SCHEMA,
     ConvexPart,
     DecompositionSettings,

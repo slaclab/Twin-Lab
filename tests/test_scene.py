@@ -4,7 +4,7 @@ import pytest
 
 pytest.importorskip("pydrake")
 
-from slac_robotics.scene import load_scene  # noqa: E402
+from twin_lab.scene import load_scene  # noqa: E402
 
 SCENE = "tests/fixtures/three-stage-demo.dmd.yaml"
 

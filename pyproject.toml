@@ -4,9 +4,9 @@ requires = ["setuptools>=77.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "slac-robotics-framework"
+name = "twin-lab"
 version = "0.1.0"
-description = "SLAC Robotics Framework"
+description = "Stage-stack models for SLAC X-ray spectrometers."
 readme = "README.md"
 # Floor is set by drake, which dropped 3.10/3.11 wheels at 1.52.
 requires-python = ">=3.12,<3.15"
@@ -43,13 +43,13 @@ collision = [
 ]
 
 [project.scripts]
-slac-cad-manifest = "slac_robotics.constraints_wizard:main"
-slac-stage-cad = "slac_robotics.stage_cad_viewer:main"
-slac-compile-sdf = "slac_robotics.sdf_compiler:main"
-slac-collision = "slac_robotics.collision_viewer:main"
-slac-decompose = "slac_robotics.convex_collision:main"
-slac-view = "slac_robotics.scene:main"
-slac-refresh-43841 = "slac_robotics.update_43841_step:main"
+slac-cad-manifest = "twin_lab.constraints_wizard:main"
+slac-stage-cad = "twin_lab.stage_cad_viewer:main"
+slac-compile-sdf = "twin_lab.sdf_compiler:main"
+slac-collision = "twin_lab.collision_viewer:main"
+slac-decompose = "twin_lab.convex_collision:main"
+slac-view = "twin_lab.scene:main"
+slac-refresh-43841 = "twin_lab.update_43841_step:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
