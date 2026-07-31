@@ -618,7 +618,7 @@ wheels = [
 ]
 
 [[package]]
-name = "slac-robotics-framework"
+name = "twin-lab"
 version = "0.1.0"
 source = { editable = "." }
 

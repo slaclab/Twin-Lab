@@ -64,20 +64,31 @@ pipx install uv
 pipx ensurepath
 ```
 
-Open a new shell after `pipx ensurepath` so `~/.local/bin` is on your `PATH`,
-then build the environment:
+`pipx ensurepath` adds `~/.local/bin` to your `PATH`, but only for shells you
+open afterward. To use `uv` in the shell you already have, reload it once:
+
+```bash
+source ~/.bashrc
+```
+
+Opening a brand-new terminal works too. Either way, `uv --version` should now
+print a version. Then build the environment:
 
 ```bash
 uv venv --seed
 uv pip install -r requirements.txt
 ```
 
-uv's own documentation suggests `curl -LsSf https://astral.sh/uv/install.sh | sh`.
-Avoid that here: it runs a downloaded script before anyone can read it, so a
-hijacked host or a bad DNS answer executes arbitrary code as your user. `pipx`
-installs the same release from PyPI, records a version you can audit with
-`pipx list`, and removes cleanly with `pipx uninstall uv`. If you do want the
-official installer, save it and read it before running it:
+Installing `pipx` just to install `uv` looks like a detour, but the one-step
+alternatives are worse here. `uv` is not in the Ubuntu or Debian repositories,
+so `apt install uv` fails; the only snap is a stale, unofficial rebuild rather
+than an Astral release; and `curl -LsSf https://astral.sh/uv/install.sh | sh`,
+which uv's own documentation suggests, runs a downloaded script before anyone
+can read it, so a hijacked host or a bad DNS answer executes arbitrary code as
+your user. `pipx` is a small bootstrap that installs the official release from
+PyPI into its own isolated environment on any Linux distro, records a version
+you can audit with `pipx list`, and removes cleanly with `pipx uninstall uv`.
+If you do want the official installer, save it and read it before running it:
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh -o uv-install.sh
