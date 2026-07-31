@@ -8,6 +8,7 @@ facts separate from the small, human-reviewed kinematics overlay.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -25,9 +26,10 @@ from OCP.TDocStd import TDocStd_Document
 from OCP.TopLoc import TopLoc_Location
 from OCP.XCAFDoc import XCAFDoc_DocumentTool, XCAFDoc_ShapeTool
 
-from .paths import CACHE_ROOT, resolve_repo_path
+from .paths import CACHE_ROOT, REPOSITORY_ROOT, resolve_repo_path
 
 SUPPORTED_STEP_SUFFIXES = {".stp", ".step"}
+REF_TOKEN = re.compile(r"\b[AP]\d{3}\b")
 
 
 def extract_cad_manifest(step_path: str | Path) -> dict[str, Any]:
@@ -176,6 +178,201 @@ joints:
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(text, encoding="utf-8")
     return output
+
+
+def remap_stage_inventory(
+    inventory_path: str | Path,
+    *,
+    previous_manifest_path: str | Path,
+    new_manifest_path: str | Path,
+    output_path: str | Path | None = None,
+    alias_map_path: str | Path | None = None,
+) -> tuple[Path, dict[str, Any]]:
+    """Rewrite an inventory file against a new manifest, preserving comments and layout."""
+
+    inventory_file = resolve_repo_path(inventory_path).resolve()
+    previous_manifest_file = resolve_repo_path(previous_manifest_path).resolve()
+    new_manifest_file = resolve_repo_path(new_manifest_path).resolve()
+    output_file = Path(output_path).resolve() if output_path else inventory_file
+
+    inventory_text = inventory_file.read_text(encoding="utf-8")
+    inventory = yaml.safe_load(inventory_text)
+    previous_manifest = json.loads(previous_manifest_file.read_text(encoding="utf-8"))
+    new_manifest = json.loads(new_manifest_file.read_text(encoding="utf-8"))
+    aliases = _load_aliases(alias_map_path)
+
+    ref_map, unresolved = _build_manifest_ref_map(previous_manifest, new_manifest, aliases)
+    remapped_text = _rewrite_inventory_text(
+        inventory_text,
+        ref_map,
+        new_manifest_path=_portable_repo_path(new_manifest_file),
+        subassembly_stats=_subassembly_stats(new_manifest, ref_map.get(str(inventory["subassembly"]["ref"]))),
+    )
+    output_file.write_text(remapped_text, encoding="utf-8")
+
+    return output_file, {
+        "mapped_ref_count": len(ref_map),
+        "unresolved_refs": sorted(unresolved),
+        "alias_map": aliases,
+    }
+
+
+def _build_manifest_ref_map(
+    previous_manifest: dict[str, Any],
+    new_manifest: dict[str, Any],
+    aliases: dict[str, dict[str, str]],
+) -> tuple[dict[str, str], set[str]]:
+    old_items = previous_manifest["occurrences"]
+    new_items = new_manifest["occurrences"]
+    old_by_id = {str(item["id"]): item for item in old_items}
+    new_by_id = {str(item["id"]): item for item in new_items}
+    new_children: dict[str | None, list[dict[str, Any]]] = {}
+    for item in new_items:
+        new_children.setdefault(item["parent_id"], []).append(item)
+
+    mapped_ids: dict[str, str] = {}
+    ref_map: dict[str, str] = {}
+    unresolved: set[str] = set()
+
+    for item in sorted(old_items, key=lambda occurrence: int(occurrence["depth"])):
+        old_id = str(item["id"])
+        new_item = _resolve_occurrence_match(item, mapped_ids, new_by_id, new_children, aliases)
+        if new_item is None:
+            unresolved.add(str(item["ref"]))
+            continue
+        mapped_ids[old_id] = str(new_item["id"])
+        ref_map[str(item["ref"])] = str(new_item["ref"])
+
+    return ref_map, unresolved
+
+
+def _resolve_occurrence_match(
+    item: dict[str, Any],
+    mapped_ids: dict[str, str],
+    new_by_id: dict[str, dict[str, Any]],
+    new_children: dict[str | None, list[dict[str, Any]]],
+    aliases: dict[str, dict[str, str]],
+) -> dict[str, Any] | None:
+    old_id = str(item["id"])
+    if old_id in new_by_id:
+        return new_by_id[old_id]
+
+    occurrence_aliases = aliases["occurrence_id_aliases"]
+    if old_id in occurrence_aliases and occurrence_aliases[old_id] in new_by_id:
+        return new_by_id[occurrence_aliases[old_id]]
+
+    parent_id = item["parent_id"]
+    mapped_parent_id = mapped_ids.get(str(parent_id)) if parent_id is not None else None
+    candidates = [
+        candidate
+        for candidate in new_children.get(mapped_parent_id, [])
+        if bool(candidate["is_assembly"]) == bool(item["is_assembly"])
+    ]
+    if not candidates:
+        return None
+
+    expected_names = {
+        str(item["name"]),
+        aliases["name_aliases"].get(str(item["name"]), str(item["name"])),
+        _transform_occurrence_name(str(item["name"]), aliases["name_aliases"]),
+    }
+    expected_names.discard("")
+    named = [candidate for candidate in candidates if str(candidate["name"]) in expected_names]
+    if len(named) == 1:
+        return named[0]
+
+    transformed_id = _transform_occurrence_id(old_id, aliases["name_aliases"])
+    terminal = transformed_id.rsplit("/", 1)[-1]
+    id_like = [candidate for candidate in candidates if str(candidate["id"]).rsplit("/", 1)[-1] == terminal]
+    if len(id_like) == 1:
+        return id_like[0]
+
+    return None
+
+
+def _load_aliases(alias_map_path: str | Path | None) -> dict[str, dict[str, str]]:
+    if alias_map_path is None:
+        return {"occurrence_id_aliases": {}, "name_aliases": {}}
+    alias_file = resolve_repo_path(alias_map_path).resolve()
+    loaded = yaml.safe_load(alias_file.read_text(encoding="utf-8"))
+    if loaded is None:
+        loaded = {}
+    if not isinstance(loaded, dict):
+        raise ValueError("Alias map must contain a YAML object")
+    return {
+        "occurrence_id_aliases": {
+            str(key): str(value) for key, value in loaded.get("occurrence_id_aliases", {}).items()
+        },
+        "name_aliases": {str(key): str(value) for key, value in loaded.get("name_aliases", {}).items()},
+    }
+
+
+def _transform_occurrence_id(occurrence_id: str, name_aliases: dict[str, str]) -> str:
+    parts = occurrence_id.split("/")
+    return "/".join(_transform_occurrence_name(part, name_aliases) for part in parts)
+
+
+def _transform_occurrence_name(name: str, name_aliases: dict[str, str]) -> str:
+    prefix, separator, suffix = name.partition(":")
+    if not separator:
+        return name_aliases.get(name, name)
+    return f"{prefix}:{name_aliases.get(suffix, suffix)}"
+
+
+def _rewrite_inventory_text(
+    text: str,
+    ref_map: dict[str, str],
+    *,
+    new_manifest_path: str,
+    subassembly_stats: dict[str, int] | None,
+) -> str:
+    remapped = REF_TOKEN.sub(lambda match: ref_map.get(match.group(0), match.group(0)), text)
+    remapped = re.sub(r"(?m)^cad_manifest:\s+.+$", f"cad_manifest: {new_manifest_path}", remapped)
+    if subassembly_stats is not None:
+        remapped = re.sub(
+            r"(?m)^(\s*occurrence_count:)\s+\d+$",
+            rf"\1 {subassembly_stats['occurrence_count']}",
+            remapped,
+        )
+        remapped = re.sub(
+            r"(?m)^(\s*assembly_count:)\s+\d+$",
+            rf"\1 {subassembly_stats['assembly_count']}",
+            remapped,
+        )
+        remapped = re.sub(
+            r"(?m)^(\s*leaf_part_count:)\s+\d+$",
+            rf"\1 {subassembly_stats['leaf_part_count']}",
+            remapped,
+        )
+    return remapped
+
+
+def _portable_repo_path(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(REPOSITORY_ROOT).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def _subassembly_stats(manifest: dict[str, Any], subassembly_ref: str | None) -> dict[str, int] | None:
+    if subassembly_ref is None:
+        return None
+    by_ref = {str(item["ref"]): item for item in manifest["occurrences"]}
+    item = by_ref.get(subassembly_ref)
+    if item is None:
+        return None
+    root_id = str(item["id"])
+    members = [
+        occurrence
+        for occurrence in manifest["occurrences"]
+        if str(occurrence["id"]) == root_id or str(occurrence["id"]).startswith(f"{root_id}/")
+    ]
+    assembly_count = sum(bool(occurrence["is_assembly"]) for occurrence in members)
+    return {
+        "occurrence_count": len(members),
+        "assembly_count": assembly_count,
+        "leaf_part_count": len(members) - assembly_count,
+    }
 
 
 def manifest_tree_lines(manifest: dict[str, Any]) -> list[str]:
@@ -570,6 +767,22 @@ def main() -> None:
         action="store_true",
         help="Check assignments in the kinematics review after generation",
     )
+    parser.add_argument(
+        "--remap-stage-inventory",
+        help="Rewrite a reviewed stage inventory against the newly generated manifest",
+    )
+    parser.add_argument(
+        "--previous-manifest",
+        help="Manifest for the previous STEP revision; required for inventory remapping",
+    )
+    parser.add_argument(
+        "--alias-map",
+        help="YAML file mapping copied Teamcenter names or occurrence IDs to new ones",
+    )
+    parser.add_argument(
+        "--remapped-inventory-output",
+        help="Write the remapped inventory to a different path instead of replacing it in place",
+    )
     args = parser.parse_args()
 
     step_path = _validated_step_path(args.step_file)
@@ -586,6 +799,25 @@ def main() -> None:
     print(f"  Assemblies: {assembly_count}")
     print(f"  Leaf parts: {part_count}")
     print(f"  CAD manifest: {manifest_path}{' (cached)' if manifest_cached else ''}")
+
+    if args.remap_stage_inventory:
+        if not args.previous_manifest:
+            parser.error("--remap-stage-inventory requires --previous-manifest")
+        remapped_inventory, report = remap_stage_inventory(
+            args.remap_stage_inventory,
+            previous_manifest_path=args.previous_manifest,
+            new_manifest_path=manifest_path,
+            output_path=args.remapped_inventory_output,
+            alias_map_path=args.alias_map,
+        )
+        print(f"  Remapped inventory: {remapped_inventory}")
+        print(f"  Remapped refs: {report['mapped_ref_count']}")
+        if report["unresolved_refs"]:
+            print("  Unresolved refs:")
+            for reference in report["unresolved_refs"]:
+                print(f"    - {reference}")
+        else:
+            print("  Unresolved refs: none")
 
     if args.show_tree:
         print("\nAssembly tree")

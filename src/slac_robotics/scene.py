@@ -89,7 +89,7 @@ class DrakeScene:
         return f"{model_name}::{body.name()}::{inspector.GetName(geometry_id)}"
 
 
-def load_scene(path: str | Path) -> DrakeScene:
+def load_scene(path: str | Path, *, meshcat=None) -> DrakeScene:
     """Parse an SDF, URDF, or Drake Model Directives file."""
 
     model_path = Path(path).resolve()
@@ -99,6 +99,13 @@ def load_scene(path: str | Path) -> DrakeScene:
     parser.package_map().AddPackageXml(PACKAGE_XML)
     parser.AddModels(model_path)
     plant.Finalize()
+    if meshcat is not None:
+        from pydrake.geometry import MeshcatVisualizer, MeshcatVisualizerParams, Role
+
+        # Illustration only: the proximity role would draw every convex hull as wireframe.
+        MeshcatVisualizer.AddToBuilder(
+            builder, scene_graph, meshcat, MeshcatVisualizerParams(role=Role.kIllustration)
+        )
     return DrakeScene(
         diagram=builder.Build(),
         plant=plant,

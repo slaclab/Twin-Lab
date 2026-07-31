@@ -1,0 +1,44 @@
+#!/bin/sh
+# Rejects staged blobs that GitHub will refuse to receive, so oversized files
+# never enter history in the first place. Bypass with `git commit --no-verify`.
+#
+# Enable in a fresh clone with: git config core.hooksPath .githooks
+
+HARD_LIMIT=104857600  # 100 MiB: GitHub rejects the push outright
+SOFT_LIMIT=52428800   # 50 MiB: GitHub warns
+
+raw=$(mktemp) || exit 1
+trap 'rm -f "$raw"' EXIT
+
+git diff --cached --raw --abbrev=40 --diff-filter=ACM >"$raw"
+
+blocked=0
+while IFS= read -r line; do
+	[ -n "$line" ] || continue
+	sha=$(printf '%s' "$line" | cut -d' ' -f4)
+	path=$(printf '%s' "$line" | cut -f2-)
+	size=$(git cat-file -s "$sha" 2>/dev/null) || continue
+
+	if [ "$size" -gt "$HARD_LIMIT" ]; then
+		printf 'BLOCKED  %s\n         %s bytes (%s) exceeds GitHub'"'"'s 100 MiB hard limit.\n' \
+			"$path" "$size" "$(awk -v b="$size" 'BEGIN { printf "%.1f MiB", b / 1048576 }')" >&2
+		blocked=1
+	elif [ "$size" -gt "$SOFT_LIMIT" ]; then
+		printf 'warning: %s is %s, past GitHub'"'"'s 50 MiB recommended maximum.\n' \
+			"$path" "$(awk -v b="$size" 'BEGIN { printf "%.1f MiB", b / 1048576 }')" >&2
+	fi
+done <"$raw"
+
+if [ "$blocked" -ne 0 ]; then
+	cat >&2 <<'EOF'
+
+Commit aborted. Once an oversized blob is committed it stays in history and
+blocks every later push until the history is rewritten, so fix it here:
+
+  git restore --staged <file>   # unstage, then shrink it or keep it untracked
+
+EOF
+	exit 1
+fi
+
+exit 0

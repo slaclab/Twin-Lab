@@ -25,6 +25,11 @@ from .cad_geometry import leaf_occurrences, placed_shape, write_group_obj
 from .constraints_wizard import _occurrence_shape_by_ref, _read_step_document
 from .paths import CACHE_ROOT, resolve_repo_path, review_artifact_stem
 
+AUTO_MOTION_ON = "Animation: ON (click to stop)"
+AUTO_MOTION_OFF = "Animation: OFF (click to start)"
+AUTO_RANGE_LABEL = "Auto motion range (% of travel)"
+AUTO_PERIOD_LABEL = "Auto motion period (s)"
+
 
 def prepare_stage_cad(
     inventory_path: str | Path,
@@ -280,11 +285,12 @@ def prepare_stage_cad(
                     "fixed_role": "fixed",
                     "moving_role": "moving",
                     "axis_world": axis_world,
-                    "origin_m": item["translation_m"],
+                    "origin_m": _joint_origin_m(item, stage),
                     "limits": _reviewed_limits(
                         inventory, item["ref"], item["ref"], stage["limits"]
                     ),
                     "home": _reviewed_home(inventory, item["ref"], item["ref"]),
+                    "cad_position": _reviewed_home(inventory, item["ref"], item["ref"]),
                 }
             )
         motion_chains.append({"name": str(chain_name), "joints": joints})
@@ -308,6 +314,7 @@ def prepare_stage_cad(
                     "origin_m": item["translation_m"],
                     "limits": _reviewed_limits(inventory, key, item["ref"], spec["limits"]),
                     "home": _reviewed_home(inventory, key, item["ref"]),
+                    "cad_position": float(spec.get("cad_position", 0.0)),
                 }
             )
         motion_chains.append({"name": str(chain_name), "joints": joints})
@@ -406,8 +413,7 @@ def view_stage_cad(scene_path: str | Path) -> None:
 
     joints = [joint for chain in scene.get("motion_chains", []) for joint in chain["joints"]]
     for joint in joints:
-        scale = 1000.0 if joint["joint_type"] == "prismatic" else 180.0 / math.pi
-        unit = "mm" if joint["joint_type"] == "prismatic" else "deg"
+        scale, unit = _slider_scale(joint)
         meshcat.AddSlider(
             _slider_label(joint, unit),
             joint["limits"][0] * scale,
@@ -415,6 +421,8 @@ def view_stage_cad(scene_path: str | Path) -> None:
             0.1,
             joint["home"] * scale,
         )
+    meshcat.AddSlider(AUTO_RANGE_LABEL, 0.0, 100.0, 1.0, 25.0)
+    meshcat.AddSlider(AUTO_PERIOD_LABEL, 2.0, 60.0, 0.5, 12.0)
 
     center = [
         sum(item["translation_m"][axis] for item in instances) / len(instances) for axis in range(3)
@@ -425,26 +433,57 @@ def view_stage_cad(scene_path: str | Path) -> None:
     )
     meshcat.AddButton("Reset to home")
     meshcat.AddButton("Stop viewer", "Escape")
+    # Added last so the relabel-on-toggle always lands back in the same slot.
+    motion_label = _set_motion_button(meshcat, None, False)
     print(f"Reusable stage CAD: {meshcat.web_url()}")
     print(
         f"Showing {len(instances)} real stages and {scene['attached_part_count']} attached "
         "non-fastener parts."
     )
     print(f"Motion sliders: {len(joints)}")
+    print("Click the 'Animation' button to start and stop cyclic motion.")
     print("Press Escape in Meshcat or Ctrl-C here to stop.")
     reset_clicks = 0
+    motion_clicks = 0
+    phase = 0.0
+    automatic = False
+    previous_tick = time.monotonic()
     while meshcat.GetButtonClicks("Stop viewer") == 0:
+        tick = time.monotonic()
+        elapsed = tick - previous_tick
+        previous_tick = tick
+        new_motion_clicks = meshcat.GetButtonClicks(motion_label)
+        if new_motion_clicks != motion_clicks:
+            automatic = not automatic
+            motion_label = _set_motion_button(meshcat, motion_label, automatic)
+            motion_clicks = 0
         new_reset_clicks = meshcat.GetButtonClicks("Reset to home")
         if new_reset_clicks != reset_clicks:
             reset_clicks = new_reset_clicks
+            phase = 0.0
+            if automatic:
+                automatic = False
+                motion_label = _set_motion_button(meshcat, motion_label, automatic)
+                motion_clicks = 0
             for joint in joints:
-                scale = 1000.0 if joint["joint_type"] == "prismatic" else 180.0 / math.pi
-                unit = "mm" if joint["joint_type"] == "prismatic" else "deg"
+                scale, unit = _slider_scale(joint)
                 meshcat.SetSliderValue(_slider_label(joint, unit), joint["home"] * scale)
+        if automatic:
+            period = max(meshcat.GetSliderValue(AUTO_PERIOD_LABEL), 0.1)
+            span_fraction = meshcat.GetSliderValue(AUTO_RANGE_LABEL) / 100.0
+            phase = math.fmod(phase + 2.0 * math.pi * elapsed / period, 2.0 * math.pi)
+            for index, joint in enumerate(joints):
+                scale, unit = _slider_scale(joint)
+                offset = 2.0 * math.pi * index / max(len(joints), 1)
+                target = joint["home"] + _auto_amplitude(joint, span_fraction) * math.sin(
+                    phase + offset
+                )
+                meshcat.SetSliderValue(_slider_label(joint, unit), target * scale)
         for joint in joints:
-            scale = 1000.0 if joint["joint_type"] == "prismatic" else 180.0 / math.pi
-            unit = "mm" if joint["joint_type"] == "prismatic" else "deg"
-            value = meshcat.GetSliderValue(_slider_label(joint, unit)) / scale - joint["home"]
+            scale, unit = _slider_scale(joint)
+            value = _joint_displacement(
+                joint, meshcat.GetSliderValue(_slider_label(joint, unit)) / scale
+            )
             if joint["joint_type"] == "prismatic":
                 transform = RigidTransform([component * value for component in joint["axis_world"]])
             else:
@@ -452,7 +491,7 @@ def view_stage_cad(scene_path: str | Path) -> None:
                     joint["axis_world"], joint["origin_m"], value, RigidTransform, RotationMatrix
                 )
             meshcat.SetTransform(joint_paths[joint["key"]], transform)
-        time.sleep(0.1)
+        time.sleep(0.03 if automatic else 0.1)
 
 
 def _write_shape_obj(shape: Any, output: Path, linear_deflection_mm: float) -> None:
@@ -511,6 +550,15 @@ def _rotate_vector(rotation: list[list[float]], vector: list[float]) -> list[flo
     return [value / norm for value in result]
 
 
+def _joint_origin_m(instance: dict[str, Any], stage: dict[str, Any]) -> list[float]:
+    offset = [float(value) for value in stage.get("pivot_offset_local", [0.0, 0.0, 0.0])]
+    return [
+        float(instance["translation_m"][row])
+        + sum(float(instance["rotation"][row][column]) * offset[column] for column in range(3))
+        for row in range(3)
+    ]
+
+
 def _reviewed_limits(
     inventory: dict[str, Any], key: str, stage_ref: str, default: list[float]
 ) -> list[float]:
@@ -534,6 +582,34 @@ def _reviewed_home(inventory: dict[str, Any], key: str, stage_ref: str) -> float
 def _slider_label(joint: dict[str, Any], unit: str) -> str:
     axis_name = "" if joint["name"] == "motion" else f" {joint['name']}"
     return f"{joint['stack']} / {joint['ref']}{axis_name} {joint['model']} ({unit})"
+
+
+def _slider_scale(joint: dict[str, Any]) -> tuple[float, str]:
+    if joint["joint_type"] == "prismatic":
+        return 1000.0, "mm"
+    return 180.0 / math.pi, "deg"
+
+
+def _auto_amplitude(joint: dict[str, Any], span_fraction: float) -> float:
+    """Largest symmetric excursion about home that stays inside the reviewed limits."""
+
+    home = float(joint["home"])
+    reach = min(home - float(joint["limits"][0]), float(joint["limits"][1]) - home)
+    return max(reach, 0.0) * span_fraction
+
+
+def _set_motion_button(meshcat: Any, previous_label: str | None, running: bool) -> str:
+    """Meshcat has no checkbox, so a relabelled button carries the animation state."""
+
+    if previous_label is not None:
+        meshcat.DeleteButton(previous_label)
+    label = AUTO_MOTION_ON if running else AUTO_MOTION_OFF
+    meshcat.AddButton(label)
+    return label
+
+
+def _joint_displacement(joint: dict[str, Any], slider_value: float) -> float:
+    return slider_value - float(joint.get("cad_position", joint["home"]))
 
 
 def _shape_center_m(shape: Any) -> list[float]:

@@ -6,23 +6,25 @@ units:
 # These are reusable mechanism facts. Joint frames, positive directions, home
 # positions, and payload attachment groups remain assembly-specific review data.
 stages:
-  newport_vt_50l_400:
-    manufacturer: Newport
-    model: VT-50L
+  micronix_vt_50l_c0014:
+    manufacturer: MICRONIX USA
+    model: VT-50L-C0014
     joint_type: prismatic
-    axis_local: [1.0, 0.0, 0.0]
-    component_roles: {fixed: [1], moving: [2]}
+    axis_local: [0.0, 1.0, 0.0]
+    component_roles: {fixed: [2], moving: [1]}
     travel: 0.400
-    limits: null
+    limits: [-0.200, 0.200]
     notes:
-      - The STEP occurrence identifies the 400 mm open-loop variant.
-      - Defer endpoint and home conventions until the detector stack is reviewed.
+      - The STEP occurrence is SLAC library part LIB-000032416.
+      - The moving component is REF-000225050, the 430250 carriage.
+      - Catalog limits are centered defaults; assembly reviews define the CAD home offset.
 
   kohzu_sa04b_rt02_bm:
     manufacturer: KOHZU
     model: SA04B-RT02-BM
     joint_type: revolute
-    axis_local: [0.0, 1.0, 0.0]  # provisional; verify against the pivot marker
+    axis_local: [0.0, 1.0, 0.0]
+    pivot_offset_local: [0.0, 0.0, 0.057]
     component_roles: {fixed: [3], moving: [1], reference: [2]}
     limits: [-0.1745329252, 0.1745329252]
     work_distance: 0.040
@@ -32,7 +34,8 @@ stages:
     manufacturer: KOHZU
     model: SA04B-RT02-R-BM
     joint_type: revolute
-    axis_local: [0.0, 1.0, 0.0]  # provisional; verify against the pivot marker
+    axis_local: [0.0, 1.0, 0.0]
+    pivot_offset_local: [0.0, 0.0, 0.057]
     component_roles: {fixed: [3], moving: [1], reference: [2]}
     limits: [-0.1745329252, 0.1745329252]
     work_distance: 0.040
@@ -100,5 +103,5 @@ stages:
     manufacturer: KOHZU
     model: ZA05A-W101-BM
     joint_type: prismatic
-    component_roles: {fixed: [2], moving: [1]}
+    component_roles: {fixed: [1], moving: [2]}
     limits: [-0.004, 0.004]
