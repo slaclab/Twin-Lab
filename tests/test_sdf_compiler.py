@@ -1,12 +1,18 @@
 import csv
 import math
+import os
 import struct
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import yaml
 
-from twin_lab.sdf_compiler import compile_sdf_package
+from twin_lab.sdf_compiler import (
+    NEUTRAL_VISUAL_RGB,
+    PACKAGE_MARKER_NAME,
+    compile_sdf_package,
+    package_is_current,
+)
 
 
 def _write_triangle_obj(path: Path, x_offset: float = 0.0) -> None:
@@ -188,6 +194,90 @@ def test_refuses_to_replace_an_unmanaged_output_directory(tmp_path: Path) -> Non
     else:
         raise AssertionError("Expected unmanaged output-directory protection")
     assert (output / "user-file.txt").read_text(encoding="utf-8") == "keep"
+
+
+def test_neutral_visuals_drop_the_review_colours_but_keep_transparency(tmp_path: Path) -> None:
+    mesh = tmp_path / "shell.obj"
+    _write_triangle_obj(mesh)
+    scene_path = tmp_path / "scene.yaml"
+    scene_path.write_text(
+        yaml.safe_dump(
+            {
+                "schema": "slac-stage-cad-scene/v6",
+                "instances": [],
+                "motion_stage_meshes": {},
+                "attachments": [],
+                "motion_chains": [],
+                "static_geometry": [
+                    {
+                        "source_ref": "A037",
+                        "name": "Enclosure",
+                        "mesh": str(mesh),
+                        "part_count": 1,
+                        "rgba": [0.95, 0.78, 0.12, 0.28],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    sdf_path, _ = compile_sdf_package(
+        scene_path, tmp_path / "package", neutral_visuals=True, archive=False
+    )
+
+    diffuse = ET.parse(sdf_path).getroot().findtext(".//visual/material/diffuse")
+    red, green, blue, alpha = (float(value) for value in diffuse.split())
+    assert (red, green, blue) == NEUTRAL_VISUAL_RGB
+    # The enclosure has to stay see-through or the highlights inside it are invisible.
+    assert alpha == 0.28
+    assert not package_is_current(tmp_path / "package", scene_path)
+    assert package_is_current(tmp_path / "package", scene_path, neutral_visuals=True)
+
+
+def test_package_is_stale_when_the_review_or_its_meshes_change(tmp_path: Path) -> None:
+    mesh = tmp_path / "fixed.obj"
+    _write_triangle_obj(mesh)
+    inventory = tmp_path / "stack.inventory.yaml"
+
+    def write_inventory(threshold: float) -> None:
+        inventory.write_text(
+            yaml.safe_dump(
+                {"decomposition": {"overrides": [{"refs": ["P650"], "threshold": threshold}]}}
+            ),
+            encoding="utf-8",
+        )
+
+    write_inventory(0.05)
+    scene_path = tmp_path / "scene.yaml"
+    scene_path.write_text(
+        yaml.safe_dump(
+            {
+                "schema": "slac-stage-cad-scene/v6",
+                "source_inventory": str(inventory),
+                "instances": [{"ref": "A001", "model": "fixed", "mesh": str(mesh)}],
+                "motion_stage_meshes": {},
+                "attachments": [],
+                "motion_chains": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    package = tmp_path / "package"
+
+    compile_sdf_package(scene_path, package, archive=False)
+    assert package_is_current(package, scene_path)
+    assert not package_is_current(package, scene_path, collision_mode="convex")
+
+    write_inventory(0.01)
+    assert not package_is_current(package, scene_path)
+
+    write_inventory(0.05)
+    assert package_is_current(package, scene_path)
+
+    stamped = (package / PACKAGE_MARKER_NAME).stat().st_mtime_ns
+    os.utime(mesh, ns=(stamped + 1, stamped + 1))
+    assert not package_is_current(package, scene_path)
 
 
 def test_add_mesh_geometry_declares_convex_only_when_requested():

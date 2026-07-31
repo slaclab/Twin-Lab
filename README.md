@@ -176,6 +176,13 @@ find the poses that actually collide.
 | Yellow | `close` | Something inside the warning band, but no contact |
 | Red | `interference` | At least one pair is touching or penetrating |
 
+The offending parts light up in place with the same code: yellow inside the
+warning band, red where they touch. The highlight is drawn from the convex hulls
+Drake actually tested, so it wraps the reviewed part and stays visible through
+the transparent enclosure. It follows the part as the sliders move and clears
+itself as soon as the pair separates, which makes a crowded stack searchable
+without reading the pair list.
+
 The worst three part pairs are listed by reference ID in the Meshcat controls
 panel, for example `TOUCHING 1: P844 <-> P850`, so the offenders are identifiable
 without leaving the browser. Distances are deliberately omitted there; a live
@@ -282,6 +289,11 @@ It is invalidated only when the STEP is updated and the meshes are
 re-tessellated, or when `--threshold` or `--max-hulls` changes. A re-tessellation
 that produces byte-identical output is recognised by hash, so rebuilding the
 viewer cache alone does not force a re-decomposition.
+
+The compiled package under `exports/` carries a build stamp recording the scene
+meshes, the collision mode, and the inventory `decomposition` block it was built
+from. `slac-collision` recompiles whenever that stamp no longer matches, so
+editing a per-part override reaches the viewer without `--rebuild`.
 
 ### Filtering expected contact
 

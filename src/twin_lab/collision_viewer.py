@@ -12,6 +12,7 @@ import math
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from .collision import CollisionModel
 from .paths import EXPORT_ROOT, resolve_repo_path, review_artifact_stem
@@ -28,10 +29,27 @@ STATUS_RGB = {
     "close": [0.72, 0.60, 0.05],
     "interference": [0.60, 0.08, 0.08],
 }
+# Off while the parts themselves carry the state; the tint fought the highlight colours.
+PAINT_STATUS_BACKGROUND = False
+# Highlights sit on top of the reviewed colours, so they are saturated rather than tinted.
+HIGHLIGHT_RGBA = {
+    "close": (1.0, 0.80, 0.0, 0.85),
+    "interference": (0.95, 0.10, 0.10, 0.9),
+}
+# Drake's MeshcatVisualizer publishes each body at this prefix, with "::" written as "/".
+VISUALIZER_PREFIX = "/drake/visualizer"
+# Highlights hang under the body they belong to, so they follow it without per-frame updates.
+HIGHLIGHT_GROUP = "clearance"
+# One offending part carries dozens of hulls, and uploading them costs about 3 ms each;
+# 40 covers the whole default 5 mm band at the reviewed home without stalling the loop.
+HIGHLIGHT_LIMIT = 40
 # Drake's own sky gradient, restored when clearance checking is switched off.
 DEFAULT_TOP_RGB = [0.53, 0.81, 0.98]
 DEFAULT_BOTTOM_RGB = [0.10, 0.10, 0.44]
 OFFENDER_LIMIT = 3
+# The signed-distance query costs ~30 ms, so running it every animated frame would cap the
+# loop near 30 fps; throttle it to this rate so the render can reach the requested fps.
+DETECTOR_HZ = 20.0
 
 
 @dataclass(frozen=True)
@@ -92,6 +110,7 @@ def run_collision_viewer(
     *,
     warn_mm: float = 5.0,
     ignore_file: str | Path | None = None,
+    label_source: str | Path | None = None,
     fps: float = 30.0,
 ) -> None:
     """Drive the compiled assembly from sliders and report clearance at every pose."""
@@ -118,7 +137,7 @@ def run_collision_viewer(
     print("Loading collision geometry into Drake; the viewer stays blank until this finishes.")
     load_start = time.monotonic()
     scene = load_scene(sdf_path, meshcat=meshcat)
-    model = CollisionModel(scene, _read_ignored(ignore_file))
+    model = CollisionModel(scene, _read_ignored(ignore_file), _read_part_labels(label_source))
     print(
         f"Loaded {_proximity_geometry_count(model)} collision geometries "
         f"in {time.monotonic() - load_start:.0f} s"
@@ -135,14 +154,16 @@ def run_collision_viewer(
     meshcat.AddButton("Stop viewer", "Escape")
     # Added after the fixed buttons so the offender readout always stays below them.
     toggles = _set_toggles(meshcat, [], collision_on=True, animating=False)
+    highlighter = _Highlighter(meshcat, model)
 
     print(f"{len(joints)} joints")
-    print("Background: GREEN clear, YELLOW inside the warning band, RED touching.")
+    print("Offending parts light up: YELLOW inside the warning band, RED where they touch.")
     print("Click 'Collision detection' to turn checking off and use this as a plain viewer.")
     print("Click 'Animation' to cycle every joint about its reviewed home.")
     print("Press Escape in Meshcat or Ctrl-C here to stop.")
 
     frame_period = 1.0 / max(fps, 1.0)
+    detector_period = 1.0 / DETECTOR_HZ
     reset_clicks = 0
     log_clicks = 0
     collision_clicks = 0
@@ -155,6 +176,7 @@ def run_collision_viewer(
     previous_status: str | None = None
     readout: list[str] = []
     previous_summary = ""
+    last_detect = 0.0
     while meshcat.GetButtonClicks("Stop viewer") == 0:
         tick = time.monotonic()
         elapsed = tick - previous_tick
@@ -177,6 +199,7 @@ def run_collision_viewer(
                 print(f"Collision detection {'ON' if wanted_collision else 'OFF'}.")
             if not wanted_collision:
                 _reset_status(meshcat)
+                highlighter.clear()
             collision_on, animating = wanted_collision, wanted_animating
             toggles = _set_toggles(
                 meshcat, toggles + readout, collision_on=collision_on, animating=animating
@@ -211,11 +234,20 @@ def run_collision_viewer(
                 }
             )
             scene.diagram.ForcedPublish(model.context)
-            if collision_on:
+            # The render above runs every frame; the query below is throttled so its cost
+            # stutters the detector rather than the motion.
+            detect_due = (
+                not animating
+                or new_log != log_clicks
+                or tick - last_detect >= detector_period
+            )
+            if collision_on and detect_due:
+                last_detect = tick
                 report = model.report(warn_m=warn_m)
                 if report.status != previous_status:
                     previous_status = report.status
                     _set_status(meshcat, report.status)
+                highlighter.update(report)
                 readout = _set_offender_readout(meshcat, report, readout)
                 if new_log != log_clicks:
                     log_clicks = new_log
@@ -223,9 +255,10 @@ def run_collision_viewer(
                 elif report.summary() != previous_summary:
                     previous_summary = report.summary()
                     print(report.summary())
-            else:
+            elif not collision_on:
                 log_clicks = new_log
-        time.sleep(frame_period if animating else 0.1)
+        frame_cost = time.monotonic() - tick
+        time.sleep(max(0.0, frame_period - frame_cost) if animating else 0.1)
 
 
 def _set_toggles(meshcat, previous: list[str], *, collision_on: bool, animating: bool) -> list[str]:
@@ -247,18 +280,67 @@ def _set_toggles(meshcat, previous: list[str], *, collision_on: bool, animating:
 
 
 def _reset_status(meshcat) -> None:
+    if not PAINT_STATUS_BACKGROUND:
+        return
     meshcat.SetProperty("/Background/<object>", "top_color", DEFAULT_TOP_RGB)
     meshcat.SetProperty("/Background/<object>", "bottom_color", DEFAULT_BOTTOM_RGB)
+
+
+class _Highlighter:
+    """Repaints the offending collision hulls so the reported pair is findable on screen.
+
+    The hulls are what Drake actually tests, and they wrap the reviewed part, so drawing
+    them over the illustration mesh marks the part without splitting its visual geometry.
+    """
+
+    def __init__(self, meshcat, model: CollisionModel):
+        from pydrake.geometry import Role
+
+        self._meshcat = meshcat
+        inspector = _inspector(model)
+        self._geometries = {}
+        for geometry_id in inspector.GetAllGeometryIds(Role.kProximity):
+            frame_path = inspector.GetName(inspector.GetFrameId(geometry_id)).replace("::", "/")
+            leaf = inspector.GetName(geometry_id).replace("::", "_")
+            self._geometries[model.scene.geometry_name(inspector, geometry_id)] = (
+                f"{VISUALIZER_PREFIX}/{frame_path}/{HIGHLIGHT_GROUP}/{leaf}",
+                inspector.GetShape(geometry_id),
+                inspector.GetPoseInFrame(geometry_id),
+            )
+        self._shown: dict[str, str] = {}
+
+    def update(self, report) -> None:
+        from pydrake.geometry import Rgba
+
+        states = report.geometry_states()
+        # Clearances arrive worst first, so truncating keeps the pairs worth looking at.
+        wanted = dict(list(states.items())[:HIGHLIGHT_LIMIT])
+        for name, state in wanted.items():
+            if self._shown.get(name) == state or name not in self._geometries:
+                continue
+            path, shape, pose = self._geometries[name]
+            self._meshcat.SetObject(path, shape, Rgba(*HIGHLIGHT_RGBA[state]))
+            self._meshcat.SetTransform(path, pose)
+        for name in self._shown.keys() - wanted.keys():
+            self._meshcat.Delete(self._geometries[name][0])
+        self._shown = wanted
+
+    def clear(self) -> None:
+        for name in self._shown:
+            self._meshcat.Delete(self._geometries[name][0])
+        self._shown = {}
 
 
 def _set_status(meshcat, status: str) -> None:
     """Paint the whole viewport by clearance state so the pose is readable at a glance."""
 
+    print(status.upper())
+    if not PAINT_STATUS_BACKGROUND:
+        return
     color = STATUS_RGB[status]
     # Meshcat wants the property on the Background's object, not the group path.
     meshcat.SetProperty("/Background/<object>", "top_color", color)
     meshcat.SetProperty("/Background/<object>", "bottom_color", color)
-    print(status.upper())
 
 
 def _offender_labels(report) -> list[str]:
@@ -273,7 +355,7 @@ def _offender_labels(report) -> list[str]:
     heading = "TOUCHING" if report.status == "interference" else "CLOSE"
     labels = []
     for index, item in enumerate(report.offenders(OFFENDER_LIMIT), start=1):
-        first, second = item.parts
+        first, second = report.labeled_parts(item)
         labels.append(f"{heading} {index}: {first} <-> {second}")
     return labels
 
@@ -299,27 +381,40 @@ def _read_ignored(ignore_file: str | Path | None) -> frozenset[tuple[str, str]]:
     return read_ignored_pairs(ignore_file)
 
 
-def _needs_recompile(package_dir: Path) -> bool:
-    """Rebuild packages predating the OBJ-visual fix; Meshcat silently skips STL visuals."""
+def _read_part_labels(label_source: str | Path | None) -> dict[str, str]:
+    if label_source is None:
+        return {}
+    from .collision import read_part_labels
 
-    metadata = package_dir / "joint_metadata.csv"
-    if not metadata.exists():
-        return True
-    if "reviewed_home" not in metadata.read_text(encoding="utf-8").partition("\n")[0]:
-        return True
-    sdf_path = next(
-        (path for path in sorted(package_dir.glob("*.sdf")) if not path.stem.endswith("_matlab")),
-        None,
+    return read_part_labels(label_source)
+
+
+def _needs_recompile(package_dir: Path, scene_path: Path, collision_mode: str) -> bool:
+    """Recompile whenever the package no longer matches the scene meshes and review settings."""
+
+    from .sdf_compiler import package_is_current
+
+    return not package_is_current(
+        package_dir,
+        scene_path,
+        include_collisions=True,
+        collision_mode=collision_mode,
+        neutral_visuals=True,
     )
-    return sdf_path is None or ".stl</uri>" in sdf_path.read_text(encoding="utf-8")
+
+
+def _inspector(model: CollisionModel):
+    from pydrake.geometry import QueryObject
+
+    scene_context = model.scene.scene_graph.GetMyContextFromRoot(model.context)
+    query = cast(QueryObject, model.scene.scene_graph.get_query_output_port().Eval(scene_context))
+    return query.inspector()
 
 
 def _proximity_geometry_count(model: CollisionModel) -> int:
     from pydrake.geometry import Role
 
-    scene_context = model.scene.scene_graph.GetMyContextFromRoot(model.context)
-    query = model.scene.scene_graph.get_query_output_port().Eval(scene_context)
-    return query.inspector().NumGeometriesWithRole(Role.kProximity)
+    return _inspector(model).NumGeometriesWithRole(Role.kProximity)
 
 
 def _print_report(report) -> None:
@@ -328,8 +423,8 @@ def _print_report(report) -> None:
         print("  nothing within the warning band")
     for item in report.clearances[:25]:
         state = "TOUCH" if item.distance_m <= 0.0 else "close"
-        first, second = item.names
-        part_a, part_b = item.parts
+        first, second = report.described(item)
+        part_a, part_b = report.labeled_parts(item)
         print(
             f"  {state} {item.distance_m * 1000:+8.2f} mm  {part_a} <-> {part_b}"
             f"   ({first}  <->  {second})"
@@ -379,13 +474,14 @@ def main() -> None:
     inventory = resolve_repo_path(args.stage_inventory).resolve()
     scene_path = prepare_stage_cad(inventory, rebuild=args.rebuild)
     package_dir = args.package_dir or EXPORT_ROOT / f"{review_artifact_stem(inventory)}.collision"
-    if args.rebuild or _needs_recompile(package_dir):
+    if args.rebuild or _needs_recompile(package_dir, scene_path, args.collision_mode):
         print(f"Compiling collision package into {package_dir}")
         compile_sdf_package(
             scene_path,
             package_dir,
             include_collisions=True,
             collision_mode=args.collision_mode,
+            neutral_visuals=True,
             decomposition_workers=args.decomposition_workers,
             archive=False,
         )
@@ -394,6 +490,7 @@ def main() -> None:
             package_dir,
             warn_mm=args.warn_mm,
             ignore_file=args.ignore_file or inventory,
+            label_source=inventory,
             fps=args.fps,
         )
     except KeyboardInterrupt:

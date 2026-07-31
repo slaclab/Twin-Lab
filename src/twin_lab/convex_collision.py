@@ -15,9 +15,9 @@ import re
 import shutil
 import sys
 import time
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +62,52 @@ class ConvexPart:
 DEFAULT_SETTINGS = DecompositionSettings()
 
 
+@dataclass(frozen=True)
+class PartSettings:
+    """A default with per-part CoACD overrides keyed by reviewed part ref."""
+
+    default: DecompositionSettings = DEFAULT_SETTINGS
+    overrides: Mapping[str, DecompositionSettings] = field(default_factory=dict)
+
+    def for_part(self, part_ref: str) -> DecompositionSettings:
+        return self.overrides.get(part_ref, self.default)
+
+
+def _as_resolver(settings: DecompositionSettings | PartSettings) -> PartSettings:
+    """Accept a bare settings object or a resolver, so callers can pass either."""
+
+    return settings if isinstance(settings, PartSettings) else PartSettings(settings)
+
+
+def _settings_from_entry(
+    entry: Mapping[str, Any], base: DecompositionSettings
+) -> DecompositionSettings:
+    return replace(
+        base,
+        threshold=float(entry.get("threshold", base.threshold)),
+        max_hulls=int(entry.get("max_hulls", base.max_hulls)),
+        seed=int(entry.get("seed", base.seed)),
+    )
+
+
+def part_settings_from_config(config: Mapping[str, Any] | None) -> PartSettings:
+    """Build per-part settings from an inventory ``decomposition`` block.
+
+    An override names only the fields it changes: the rest fall back to the block
+    default, which in turn falls back to the module default.
+    """
+
+    if not config:
+        return PartSettings()
+    default = _settings_from_entry(config, DEFAULT_SETTINGS)
+    overrides: dict[str, DecompositionSettings] = {}
+    for entry in config.get("overrides", []):
+        settings = _settings_from_entry(entry, default)
+        for ref in entry.get("refs", []):
+            overrides[str(ref)] = settings
+    return PartSettings(default, overrides)
+
+
 def read_obj_parts(path: Path) -> list[ObjPart]:
     """Split one cached OBJ into its ``o``-delimited parts with local vertex indices."""
 
@@ -101,23 +147,25 @@ def read_obj_parts(path: Path) -> list[ObjPart]:
 def decompose_source(
     source: Path,
     cache_dir: Path,
-    settings: DecompositionSettings = DEFAULT_SETTINGS,
+    settings: DecompositionSettings | PartSettings = DEFAULT_SETTINGS,
 ) -> list[ConvexPart]:
     """Return cached convex hulls for one source OBJ, decomposing only when stale."""
 
+    resolver = _as_resolver(settings)
     part_dir = cache_dir / _safe_name(source.stem)
     manifest_path = part_dir / "manifest.json"
-    cached = _read_manifest(manifest_path, source, settings)
+    cached = _read_manifest(manifest_path, source, resolver)
     if cached is not None:
         return cached
 
-    _clear_part_dir(part_dir, source, settings)
+    _clear_part_dir(part_dir, source, resolver)
+    obj_parts = read_obj_parts(source)
     parts = [
         part
-        for index in range(len(read_obj_parts(source)))
-        if (part := _decompose_part(source, part_dir, settings, index)) is not None
+        for index, (ref, _, _) in enumerate(obj_parts)
+        if (part := _decompose_part(source, part_dir, resolver.for_part(ref), index)) is not None
     ]
-    _write_manifest(manifest_path, source, settings, parts)
+    _write_manifest(manifest_path, source, resolver, parts)
     return parts
 
 
@@ -143,8 +191,13 @@ def _decompose_part(
         _write_part_marker(marker, source, settings, None)
         return None
 
+    # coacd.Mesh infers its parameter types from mutable zero-shaped defaults, so the
+    # stub demands an unsatisfiable literal shape; runtime re-casts to these dtypes anyway.
     hulls = coacd.run_coacd(
-        coacd.Mesh(np.asarray(vertices, dtype=float), np.asarray(triangles, dtype=int)),
+        coacd.Mesh(
+            np.asarray(vertices, dtype=np.float64),  # pyright: ignore[reportArgumentType]
+            np.asarray(triangles, dtype=np.int32),  # pyright: ignore[reportArgumentType]
+        ),
         threshold=settings.threshold,
         max_convex_hull=settings.max_hulls,
         seed=settings.seed,
@@ -170,29 +223,47 @@ def _source_digest(source: Path) -> str:
     return digest.hexdigest()
 
 
-def _part_marker_key(source: Path, settings: DecompositionSettings) -> dict[str, Any]:
+def _source_content_key(source: Path) -> dict[str, Any]:
     stat = source.stat()
     return {
         "schema": CACHE_SCHEMA,
         "source_mtime_ns": stat.st_mtime_ns,
         "source_size": stat.st_size,
-        "settings": settings.as_dict(),
         "source_sha256": _source_digest(source),
     }
 
 
-def _source_matches(payload: dict[str, Any], source: Path, settings: DecompositionSettings) -> bool:
-    """Accept an entry whose source was rewritten byte-for-byte; re-tessellation bumps mtime."""
+def _content_matches(payload: dict[str, Any], source: Path) -> bool:
+    """True when the payload was written for this source; a byte-identical rewrite bumps mtime."""
 
     stat = source.stat()
-    if payload.get("schema") != CACHE_SCHEMA or payload.get("settings") != settings.as_dict():
-        return False
-    if payload.get("source_size") != stat.st_size:
+    if payload.get("schema") != CACHE_SCHEMA or payload.get("source_size") != stat.st_size:
         return False
     if payload.get("source_mtime_ns") == stat.st_mtime_ns:
         return True
     recorded = payload.get("source_sha256")
     return recorded is not None and recorded == _source_digest(source)
+
+
+def _part_marker_key(source: Path, settings: DecompositionSettings) -> dict[str, Any]:
+    return {**_source_content_key(source), "settings": settings.as_dict()}
+
+
+def _source_matches(payload: dict[str, Any], source: Path, settings: DecompositionSettings) -> bool:
+    """A marker matches when both the source bytes and the part's settings are unchanged."""
+
+    return _content_matches(payload, source) and payload.get("settings") == settings.as_dict()
+
+
+def _settings_signature(part_refs: Iterable[str], resolver: PartSettings) -> str:
+    """Fingerprint every part's effective settings.
+
+    An override change then invalidates only the manifest, not the resumable
+    per-part markers, so unchanged parts resume instead of re-running CoACD.
+    """
+
+    payload = [[ref, resolver.for_part(ref).as_dict()] for ref in sorted(part_refs)]
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 def _write_part_marker(
@@ -229,13 +300,16 @@ def _read_part_marker(
     return ConvexPart(source=source, part_ref=item["part_ref"], hulls=hulls)
 
 
-def _clear_part_dir(part_dir: Path, source: Path, settings: DecompositionSettings) -> None:
+def _clear_part_dir(
+    part_dir: Path, source: Path, settings: DecompositionSettings | PartSettings
+) -> None:
     """Drop hulls from earlier generations, keeping work the markers still vouch for."""
 
+    resolver = _as_resolver(settings)
     part_dir.mkdir(parents=True, exist_ok=True)
     keep: set[str] = set()
     for marker in sorted(part_dir.glob("part*.json")):
-        part = _read_part_marker(marker, source, settings)
+        part = _read_part_marker(marker, source, _marker_settings(marker, resolver))
         if part is None:
             marker.unlink()
         else:
@@ -245,10 +319,22 @@ def _clear_part_dir(part_dir: Path, source: Path, settings: DecompositionSetting
             stale.unlink()
 
 
+def _marker_settings(marker: Path, resolver: PartSettings) -> DecompositionSettings:
+    """Resolve a marker's settings from the part ref it records, before validating it."""
+
+    try:
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return resolver.default
+    item = payload.get("part")
+    ref = item.get("part_ref") if isinstance(item, dict) else None
+    return resolver.for_part(ref) if ref else resolver.default
+
+
 def decompose_sources(
     sources: Iterable[Path],
     cache_dir: Path,
-    settings: DecompositionSettings = DEFAULT_SETTINGS,
+    settings: DecompositionSettings | PartSettings = DEFAULT_SETTINGS,
     *,
     workers: int | None = None,
     progress: bool = False,
@@ -259,12 +345,13 @@ def decompose_sources(
     cannot set the makespan, and the longest parts start first.
     """
 
+    resolver = _as_resolver(settings)
     ordered = sorted({Path(source) for source in sources})
     cache_dir.mkdir(parents=True, exist_ok=True)
     results: dict[Path, list[ConvexPart]] = {}
     pending: list[Path] = []
     for source in ordered:
-        cached = _read_manifest_path(cache_dir, source, settings)
+        cached = _read_manifest_path(cache_dir, source, resolver)
         if cached is None:
             pending.append(source)
         else:
@@ -272,11 +359,11 @@ def decompose_sources(
     if not pending:
         return {source: results[source] for source in ordered}
 
-    jobs: list[tuple[int, Path, int]] = []
+    jobs: list[tuple[int, Path, int, str]] = []
     for source in pending:
-        _clear_part_dir(cache_dir / _safe_name(source.stem), source, settings)
-        for index, (_, _, triangles) in enumerate(read_obj_parts(source)):
-            jobs.append((len(triangles), source, index))
+        _clear_part_dir(cache_dir / _safe_name(source.stem), source, resolver)
+        for index, (ref, _, triangles) in enumerate(read_obj_parts(source)):
+            jobs.append((len(triangles), source, index, ref))
     jobs.sort(reverse=True, key=lambda job: job[0])
 
     cpus = _available_cpus()
@@ -284,8 +371,8 @@ def decompose_sources(
     threads = max(1, cpus // count)
 
     if progress:
-        total = sum(size for size, _, _ in jobs)
-        done = sum(1 for _, source, index in jobs if _marker_exists(cache_dir, source, index))
+        total = sum(size for size, *_ in jobs)
+        done = sum(1 for _, source, index, _ in jobs if _marker_exists(cache_dir, source, index))
         print(
             f"Decomposing {len(jobs)} parts across {len(pending)} of {len(ordered)} meshes "
             f"({total:,} triangles, {len(results)} meshes cached, {done} parts resumable)\n"
@@ -295,7 +382,9 @@ def decompose_sources(
         )
 
     collected: dict[Path, list[ConvexPart]] = {source: [] for source in pending}
-    weights = {(source, index): size + PART_SETUP_COST_TRIANGLES for size, source, index in jobs}
+    weights = {
+        (source, index): size + PART_SETUP_COST_TRIANGLES for size, source, index, _ in jobs
+    }
     bar = _Progress(len(jobs), sum(weights.values())) if progress else None
     # One task per child: CoACD retains memory per run, so recycling caps peak RSS.
     with ProcessPoolExecutor(
@@ -306,9 +395,13 @@ def decompose_sources(
     ) as pool:
         futures = {
             pool.submit(
-                _decompose_part, source, cache_dir / _safe_name(source.stem), settings, index
+                _decompose_part,
+                source,
+                cache_dir / _safe_name(source.stem),
+                resolver.for_part(ref),
+                index,
             ): (source, index, size)
-            for size, source, index in jobs
+            for size, source, index, ref in jobs
         }
         for future in as_completed(futures):
             source, index, size = futures[future]
@@ -326,7 +419,7 @@ def decompose_sources(
     for source in pending:
         parts = sorted(collected[source], key=lambda part: part.part_ref)
         part_dir = cache_dir / _safe_name(source.stem)
-        _write_manifest(part_dir / "manifest.json", source, settings, parts)
+        _write_manifest(part_dir / "manifest.json", source, resolver, parts)
         results[source] = parts
     if progress:
         hulls = sum(len(part.hulls) for parts in results.values() for part in parts)
@@ -423,21 +516,25 @@ class _Progress:
 
 
 def _read_manifest_path(
-    cache_dir: Path, source: Path, settings: DecompositionSettings
+    cache_dir: Path, source: Path, settings: DecompositionSettings | PartSettings
 ) -> list[ConvexPart] | None:
     return _read_manifest(cache_dir / _safe_name(source.stem) / "manifest.json", source, settings)
 
 
 def _read_manifest(
-    manifest_path: Path, source: Path, settings: DecompositionSettings
+    manifest_path: Path, source: Path, settings: DecompositionSettings | PartSettings
 ) -> list[ConvexPart] | None:
+    resolver = _as_resolver(settings)
     if not manifest_path.exists():
         return None
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return None
-    if not _source_matches(manifest, source, settings):
+    if not _content_matches(manifest, source):
+        return None
+    refs = [item["part_ref"] for item in manifest["parts"]]
+    if manifest.get("parts_settings_sig") != _settings_signature(refs, resolver):
         return None
     parts = []
     for item in manifest["parts"]:
@@ -451,18 +548,23 @@ def _read_manifest(
 def _write_manifest(
     manifest_path: Path,
     source: Path,
-    settings: DecompositionSettings,
+    settings: DecompositionSettings | PartSettings,
     parts: Sequence[ConvexPart],
 ) -> None:
+    resolver = _as_resolver(settings)
     manifest_path.write_text(
         json.dumps(
             {
-                **_part_marker_key(source, settings),
+                **_source_content_key(source),
+                "parts_settings_sig": _settings_signature(
+                    [part.part_ref for part in parts], resolver
+                ),
                 "source": source.as_posix(),
                 "parts": [
                     {
                         "part_ref": part.part_ref,
                         "hulls": [hull.name for hull in part.hulls],
+                        "settings": resolver.for_part(part.part_ref).as_dict(),
                     }
                     for part in parts
                 ],

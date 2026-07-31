@@ -74,7 +74,8 @@ def write_group_obj(
         BRepMesh_IncrementalMesh(placed, linear_deflection_mm, False, 0.5, True).Perform()
         explorer = TopExp_Explorer(placed, TopAbs_FACE)
         while explorer.More():
-            face = TopoDS.Face_s(explorer.Current())
+            # OCP's stub omits the bare TopoDS class; Face_s exists at runtime.
+            face = TopoDS.Face_s(explorer.Current())  # pyright: ignore[reportAttributeAccessIssue]
             face_location = TopLoc_Location()
             triangulation = BRep_Tool.Triangulation_s(face, face_location)
             if triangulation is not None:

@@ -121,6 +121,28 @@ def test_empty_clearance_report_reads_as_clear():
     assert report.summary() == "clear: nothing within 5 mm"
 
 
+def test_geometry_states_paint_contact_red_and_near_misses_yellow():
+    shared = "a::l::a::a003_collision"
+    report = ClearanceReport(
+        clearances=(
+            Clearance("a::l::a::a001_collision", "a::l::a::a002_collision", -0.002),
+            Clearance(shared, "a::l::a::a004_collision", 0.001),
+            # The shared geometry also touches, and contact has to win over the near miss.
+            Clearance("a::l::a::a005_collision", shared, -0.001),
+            Clearance("a::l::a::a006_collision", "a::l::a::a007_collision", 0.009),
+        ),
+        warn_m=0.005,
+    )
+
+    states = report.geometry_states()
+
+    assert states["a::l::a::a001_collision"] == "interference"
+    assert states["a::l::a::a004_collision"] == "close"
+    assert states[shared] == "interference"
+    # Beyond the warning band nothing is painted, so a clear pose leaves the model alone.
+    assert "a::l::a::a006_collision" not in states
+
+
 def test_read_ignored_pairs_is_order_independent(tmp_path):
     path = tmp_path / "ignore.yaml"
     path.write_text(

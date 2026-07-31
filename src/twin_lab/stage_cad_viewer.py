@@ -427,10 +427,9 @@ def view_stage_cad(scene_path: str | Path, *, fps: float = 30.0) -> None:
     center = [
         sum(item["translation_m"][axis] for item in instances) / len(instances) for axis in range(3)
     ]
-    meshcat.SetCameraPose(
-        [center[0] + 0.8, center[1] + 0.8, center[2] + 0.8],
-        center,
-    )
+    eye = [center[0] + 0.8, center[1] + 0.8, center[2] + 0.8]
+    # pydrake's stub gives SetCameraPose a malformed Eigen shape; lists convert at runtime.
+    meshcat.SetCameraPose(eye, center)  # pyright: ignore[reportArgumentType]
     meshcat.AddButton("Reset to home")
     meshcat.AddButton("Stop viewer", "Escape")
     # Added last so the relabel-on-toggle always lands back in the same slot.
@@ -486,7 +485,9 @@ def view_stage_cad(scene_path: str | Path, *, fps: float = 30.0) -> None:
                 joint, meshcat.GetSliderValue(_slider_label(joint, unit)) / scale
             )
             if joint["joint_type"] == "prismatic":
-                transform = RigidTransform([component * value for component in joint["axis_world"]])
+                offset = [component * value for component in joint["axis_world"]]
+                # pydrake's Eigen stub is malformed; the list converts at runtime.
+                transform = RigidTransform(offset)  # pyright: ignore
             else:
                 transform = _rotation_about_axis(
                     joint["axis_world"], joint["origin_m"], value, RigidTransform, RotationMatrix
@@ -501,7 +502,8 @@ def _write_shape_obj(shape: Any, output: Path, linear_deflection_mm: float) -> N
     BRepMesh_IncrementalMesh(shape, linear_deflection_mm, False, 0.5, True).Perform()
     explorer = TopExp_Explorer(shape, TopAbs_FACE)
     while explorer.More():
-        face = TopoDS.Face_s(explorer.Current())
+        # OCP's stub omits the bare TopoDS class; Face_s exists at runtime.
+        face = TopoDS.Face_s(explorer.Current())  # pyright: ignore[reportAttributeAccessIssue]
         face_location = TopLoc_Location()
         triangulation = BRep_Tool.Triangulation_s(face, face_location)
         if triangulation is not None:

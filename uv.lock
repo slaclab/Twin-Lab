@@ -37,6 +37,18 @@ wheels = [
 ]
 
 [[package]]
+name = "cadquery-ocp-stubs"
+version = "7.9.3.1.1"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ef/f0/0cb52aa92e8c8e3b45c70e3a56958e85068e6a2bc60909eed0ed1613aafe/cadquery_ocp_stubs-7.9.3.1.1-py3-none-macosx_11_0_arm64.whl", hash = "sha256:2285b7c33e6fe1a7e09df58953a0dc9550c8cb13990dab4190da025ca40d2f0f", size = 2851543, upload-time = "2026-05-28T13:08:50.067Z" },
+    { url = "https://files.pythonhosted.org/packages/83/f6/bba5582cd3eb416adc404f70140f47c10c4628eb2081957834e2c444127f/cadquery_ocp_stubs-7.9.3.1.1-py3-none-macosx_11_0_x86_64.whl", hash = "sha256:7e94ac49d21d2d0fa64b555bdbe986f8d57db5f37f333feb86fb11d2523aa71f", size = 2851545, upload-time = "2026-05-28T13:08:51.676Z" },
+    { url = "https://files.pythonhosted.org/packages/f0/e6/6ba73f9302f53cb008c487fae82b1198974f3e6f608febba161f56d4993e/cadquery_ocp_stubs-7.9.3.1.1-py3-none-manylinux_2_31_aarch64.whl", hash = "sha256:1e8e95091fbb6c8001cf258dd1e204e43754e39f186afba58fc8d2ce14f84198", size = 2851802, upload-time = "2026-05-28T13:08:53.317Z" },
+    { url = "https://files.pythonhosted.org/packages/1c/39/d0a4533ef1d776feea0cc04613438ddec1279ed0719f310cdf192f2e42b9/cadquery_ocp_stubs-7.9.3.1.1-py3-none-manylinux_2_31_x86_64.whl", hash = "sha256:5f31f5f8b04edb151612fc0a1a35bcb0491f47f06e160820149c3be37eb01575", size = 2851802, upload-time = "2026-05-28T13:08:54.852Z" },
+    { url = "https://files.pythonhosted.org/packages/6c/de/2a93a7cd47226bdd802674e8a040235ef1a1a4433bbf4d220e21253fe31e/cadquery_ocp_stubs-7.9.3.1.1-py3-none-win_amd64.whl", hash = "sha256:5ecba090df1ada12c558ff4a1b49c61d5155edc8cb3411067a785e3b43f4b359", size = 2899849, upload-time = "2026-05-28T13:08:56.172Z" },
+]
+
+[[package]]
 name = "coacd"
 version = "1.0.11"
 source = { registry = "https://pypi.org/simple" }
@@ -632,6 +644,7 @@ collision = [
     { name = "numpy" },
 ]
 dev = [
+    { name = "cadquery-ocp-stubs" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -642,6 +655,7 @@ drake = [
 [package.metadata]
 requires-dist = [
     { name = "cadquery-ocp", marker = "extra == 'cad'", specifier = ">=7.8" },
+    { name = "cadquery-ocp-stubs", marker = "extra == 'dev'", specifier = ">=7.9.3.1.1" },
     { name = "coacd", marker = "extra == 'collision'", specifier = ">=1.0" },
     { name = "drake", marker = "extra == 'drake'", specifier = ">=1.54" },
     { name = "numpy", marker = "extra == 'collision'", specifier = ">=1.26" },
