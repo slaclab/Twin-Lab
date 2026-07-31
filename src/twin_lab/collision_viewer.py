@@ -92,6 +92,7 @@ def run_collision_viewer(
     *,
     warn_mm: float = 5.0,
     ignore_file: str | Path | None = None,
+    label_source: str | Path | None = None,
     fps: float = 30.0,
 ) -> None:
     """Drive the compiled assembly from sliders and report clearance at every pose."""
@@ -118,7 +119,7 @@ def run_collision_viewer(
     print("Loading collision geometry into Drake; the viewer stays blank until this finishes.")
     load_start = time.monotonic()
     scene = load_scene(sdf_path, meshcat=meshcat)
-    model = CollisionModel(scene, _read_ignored(ignore_file))
+    model = CollisionModel(scene, _read_ignored(ignore_file), _read_part_labels(label_source))
     print(
         f"Loaded {_proximity_geometry_count(model)} collision geometries "
         f"in {time.monotonic() - load_start:.0f} s"
@@ -273,7 +274,7 @@ def _offender_labels(report) -> list[str]:
     heading = "TOUCHING" if report.status == "interference" else "CLOSE"
     labels = []
     for index, item in enumerate(report.offenders(OFFENDER_LIMIT), start=1):
-        first, second = item.parts
+        first, second = report.labeled_parts(item)
         labels.append(f"{heading} {index}: {first} <-> {second}")
     return labels
 
@@ -297,6 +298,14 @@ def _read_ignored(ignore_file: str | Path | None) -> frozenset[tuple[str, str]]:
     from .collision import read_ignored_pairs
 
     return read_ignored_pairs(ignore_file)
+
+
+def _read_part_labels(label_source: str | Path | None) -> dict[str, str]:
+    if label_source is None:
+        return {}
+    from .collision import read_part_labels
+
+    return read_part_labels(label_source)
 
 
 def _needs_recompile(package_dir: Path) -> bool:
@@ -328,8 +337,8 @@ def _print_report(report) -> None:
         print("  nothing within the warning band")
     for item in report.clearances[:25]:
         state = "TOUCH" if item.distance_m <= 0.0 else "close"
-        first, second = item.names
-        part_a, part_b = item.parts
+        first, second = report.described(item)
+        part_a, part_b = report.labeled_parts(item)
         print(
             f"  {state} {item.distance_m * 1000:+8.2f} mm  {part_a} <-> {part_b}"
             f"   ({first}  <->  {second})"
@@ -394,6 +403,7 @@ def main() -> None:
             package_dir,
             warn_mm=args.warn_mm,
             ignore_file=args.ignore_file or inventory,
+            label_source=inventory,
             fps=args.fps,
         )
     except KeyboardInterrupt:
