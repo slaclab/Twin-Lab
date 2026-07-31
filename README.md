@@ -45,12 +45,18 @@ The `--seed` flag is what installs `pip` into the environment. Without it the
 environment still runs the project correctly, but anything that shells out to
 `pip` fails, including the VS Code Python extension's package list.
 
-Enable the repository hooks once per clone. Git never activates hooks from a
-clone automatically, so this is a manual step:
+Install Git LFS once per machine, before cloning. The STEP sources are stored as
+LFS objects, and a clone made without it yields small pointer files instead of
+CAD:
 
 ```bash
-git config core.hooksPath .githooks
+sudo apt install -y git-lfs
+git lfs install
 ```
+
+If this clone already exists and `cad/DSG-000040389/source.stp` is only a few
+hundred bytes, run `git lfs install` and then `git lfs pull` to replace the
+pointers with real content.
 
 See [Large files](#large-files) for what this guards against.
 
@@ -249,35 +255,39 @@ Unzip it in MATLAB and run `load_in_matlab`. See
 
 ## Large files
 
-`cad/DSG-000040389/source.stp` is tracked in git and is roughly 88 MiB. GitHub
-rejects any single file over 100 MiB and warns above 50 MiB, so a STEP
-replacement that crosses the hard limit cannot be pushed at all.
+`cad/DSG-000040389/source.stp` is roughly 88 MiB. GitHub rejects any single file
+over 100 MiB in ordinary git storage, and the limit applies to every revision in
+a push rather than only the current one, so an oversized blob that reaches
+history blocks all later pushes until the history is rewritten.
 
-The check applies to every revision in a push, not just the current one. A
-STEP file that is committed and then replaced still blocks all later pushes
-until the history is rewritten, so an oversized file must be caught before it
-is committed rather than at push time.
+Git LFS avoids that. `.gitattributes` routes every STEP file to LFS:
 
-`.githooks/pre-commit` does this. It rejects any staged file over 100 MiB and
-warns above 50 MiB. Enable it once per clone:
-
-```bash
-git config core.hooksPath .githooks
+```text
+*.stp filter=lfs diff=lfs merge=lfs -text
 ```
 
-If a replacement STEP is too large, reduce it in CAD (suppress cosmetic
-detail, drop cabling) before committing. Do not commit it with `--no-verify`
-and deal with it later; that is the situation the hook exists to prevent.
+What git commits is a small pointer, while the bytes live in LFS storage:
 
-To confirm nothing oversized is waiting to be pushed:
-
-```bash
-git rev-list --objects @{u}..HEAD \
-  | git cat-file --batch-check='%(objecttype) %(objectsize) %(rest)' \
-  | awk '$1=="blob" && $2>104857600'
+```text
+version https://git-lfs.github.com/spec/v1
+oid sha256:69dc3dc0b1b64932f25fde6b65b36c38442e9caa34eec7bfe0646d026418734a
+size 92523231
 ```
 
-Any output names a file that will be rejected. No output means the push is clear.
+Because the rule is a pattern rather than a per-file entry, a replacement STEP
+is handled automatically: copy it into place and commit as usual. Confirm it
+landed in LFS rather than in git proper:
+
+```bash
+git lfs ls-files
+```
+
+Both STEP files should be listed. A file missing from that output was committed
+as a normal blob, which means `git lfs install` never ran in this clone. Undo
+that commit before pushing rather than after.
+
+The pointer is also what you see in a diff, so `git show` on a STEP revision
+reports an oid and size instead of attempting to render 88 MiB of CAD text.
 
 ## Windows (WSL)
 
@@ -292,7 +302,8 @@ After the requested restart, open Ubuntu and install the system prerequisites:
 
 ```bash
 sudo apt update
-sudo apt install -y git python3 python3-pip python3-venv
+sudo apt install -y git git-lfs python3 python3-pip python3-venv
+git lfs install
 ```
 
 Clone the repository inside the WSL filesystem (for example, under `~/src`)
@@ -304,7 +315,6 @@ mkdir -p ~/src
 cd ~/src
 git clone <repository-url> slac-robotics-framework
 cd slac-robotics-framework
-git config core.hooksPath .githooks
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
@@ -333,8 +343,7 @@ export meshes; regenerate them instead.
 ## Repository layout
 
 ```text
-.githooks/
-  pre-commit                 blocks commits of files GitHub will reject
+.gitattributes               routes *.stp to Git LFS
 cad/
   DSG-000040389/
     source.stp                 original full assembly
