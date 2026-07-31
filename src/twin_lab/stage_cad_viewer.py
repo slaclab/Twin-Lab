@@ -427,10 +427,9 @@ def view_stage_cad(scene_path: str | Path, *, fps: float = 30.0) -> None:
     center = [
         sum(item["translation_m"][axis] for item in instances) / len(instances) for axis in range(3)
     ]
-    meshcat.SetCameraPose(
-        [center[0] + 0.8, center[1] + 0.8, center[2] + 0.8],
-        center,
-    )
+    eye = [center[0] + 0.8, center[1] + 0.8, center[2] + 0.8]
+    # pydrake's stub gives SetCameraPose a malformed Eigen shape; lists convert at runtime.
+    meshcat.SetCameraPose(eye, center)  # pyright: ignore[reportArgumentType]
     meshcat.AddButton("Reset to home")
     meshcat.AddButton("Stop viewer", "Escape")
     # Added last so the relabel-on-toggle always lands back in the same slot.

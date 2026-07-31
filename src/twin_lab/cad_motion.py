@@ -132,7 +132,8 @@ def run_motion_viewer(setup: MotionSetup) -> None:
         )
     meshcat.AddButton("Reset to home")
     meshcat.AddButton("Stop viewer", "Escape")
-    meshcat.SetCameraPose([0.4, 0.4, 0.4], [0.0, 0.0, 0.0])
+    # pydrake's stub gives SetCameraPose a malformed Eigen shape; lists convert at runtime.
+    meshcat.SetCameraPose([0.4, 0.4, 0.4], [0.0, 0.0, 0.0])  # pyright: ignore[reportArgumentType]
 
     print("PROVISIONAL MOTION MODEL — do not use for hardware limits")
     print(f"Motion viewer: {meshcat.web_url()}")

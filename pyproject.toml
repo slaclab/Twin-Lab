@@ -27,6 +27,7 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = [
+    "cadquery-ocp-stubs>=7.9.3.1.1",
     "pytest>=8.0",
     "ruff>=0.12",
 ]

@@ -551,7 +551,8 @@ def view_step_preview(preview_path: str | Path) -> None:
     # OCCT's glTF writer converts its millimetre working units to glTF metres.
     meshcat.SetObject("/STEP assembly", Mesh(preview, 1.0))
     # Start close enough for compact positioning hardware to be unmistakable.
-    meshcat.SetCameraPose([0.4, 0.4, 0.4], [0.0, 0.0, 0.0])
+    # pydrake's stub gives SetCameraPose a malformed Eigen shape; lists convert at runtime.
+    meshcat.SetCameraPose([0.4, 0.4, 0.4], [0.0, 0.0, 0.0])  # pyright: ignore[reportArgumentType]
     print(f"STEP preview: {meshcat.web_url()}")
     input("Press Enter to close the preview... ")
 
