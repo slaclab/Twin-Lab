@@ -191,8 +191,13 @@ def _decompose_part(
         _write_part_marker(marker, source, settings, None)
         return None
 
+    # coacd.Mesh infers its parameter types from mutable zero-shaped defaults, so the
+    # stub demands an unsatisfiable literal shape; runtime re-casts to these dtypes anyway.
     hulls = coacd.run_coacd(
-        coacd.Mesh(np.asarray(vertices, dtype=float), np.asarray(triangles, dtype=int)),
+        coacd.Mesh(
+            np.asarray(vertices, dtype=np.float64),  # pyright: ignore[reportArgumentType]
+            np.asarray(triangles, dtype=np.int32),  # pyright: ignore[reportArgumentType]
+        ),
         threshold=settings.threshold,
         max_convex_hull=settings.max_hulls,
         seed=settings.seed,

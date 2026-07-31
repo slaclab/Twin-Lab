@@ -407,7 +407,9 @@ def _triangle_normal(
         ab[0] * ac[1] - ab[1] * ac[0],
     )
     norm = math.sqrt(sum(value * value for value in cross))
-    return (0.0, 0.0, 0.0) if norm == 0.0 else tuple(value / norm for value in cross)
+    if norm == 0.0:
+        return (0.0, 0.0, 0.0)
+    return (cross[0] / norm, cross[1] / norm, cross[2] / norm)
 
 
 def _write_joint_metadata(output: Path, joints: list[JointSpec]) -> None:

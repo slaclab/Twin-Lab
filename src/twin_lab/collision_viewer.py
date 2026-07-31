@@ -12,6 +12,7 @@ import math
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from .collision import CollisionModel
 from .paths import EXPORT_ROOT, resolve_repo_path, review_artifact_stem
@@ -324,10 +325,10 @@ def _needs_recompile(package_dir: Path) -> bool:
 
 
 def _proximity_geometry_count(model: CollisionModel) -> int:
-    from pydrake.geometry import Role
+    from pydrake.geometry import QueryObject, Role
 
     scene_context = model.scene.scene_graph.GetMyContextFromRoot(model.context)
-    query = model.scene.scene_graph.get_query_output_port().Eval(scene_context)
+    query = cast(QueryObject, model.scene.scene_graph.get_query_output_port().Eval(scene_context))
     return query.inspector().NumGeometriesWithRole(Role.kProximity)
 
 

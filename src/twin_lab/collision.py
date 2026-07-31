@@ -205,7 +205,8 @@ def read_part_labels(inventory_path: str | Path) -> dict[str, str]:
 
 
 def _pair_key(a: str, b: str) -> tuple[str, str]:
-    return tuple(sorted((_part_of(a), _part_of(b))))
+    first, second = sorted((_part_of(a), _part_of(b)))
+    return first, second
 
 
 def _part_of(geometry_name: str) -> str:

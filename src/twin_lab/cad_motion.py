@@ -150,13 +150,15 @@ def run_motion_viewer(setup: MotionSetup) -> None:
         for joint in setup.joints:
             value_m = meshcat.GetSliderValue(f"{joint.name} (mm)") / 1000.0
             translation = [component * value_m for component in joint.axis_xyz]
-            meshcat.SetTransform(group_paths[joint.child_group], RigidTransform(translation))
+            # pydrake's Eigen stub is malformed; the list converts at runtime.
+            pose = RigidTransform(translation)  # pyright: ignore
+            meshcat.SetTransform(group_paths[joint.child_group], pose)
         time.sleep(0.05)
 
 
 def _parse_joint(value: dict[str, Any]) -> MotionJoint:
-    axis = tuple(float(item) for item in value["axis_xyz"])
-    norm = math.sqrt(sum(item * item for item in axis))
+    ax, ay, az = (float(item) for item in value["axis_xyz"])
+    norm = math.sqrt(ax * ax + ay * ay + az * az)
     if norm == 0.0:
         raise ValueError(f"Joint '{value['name']}' has a zero axis")
     limits = tuple(float(item) for item in value["limits"])
@@ -164,7 +166,7 @@ def _parse_joint(value: dict[str, Any]) -> MotionJoint:
         name=str(value["name"]),
         parent_group=str(value["parent_group"]),
         child_group=str(value["child_group"]),
-        axis_xyz=tuple(item / norm for item in axis),
+        axis_xyz=(ax / norm, ay / norm, az / norm),
         limits_m=(limits[0], limits[1]),
         home_m=float(value["home"]),
     )

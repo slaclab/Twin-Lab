@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from pydrake.all import (
     AddMultibodyPlantSceneGraph,
@@ -12,6 +13,7 @@ from pydrake.all import (
     DiagramBuilder,
     MultibodyPlant,
     Parser,
+    QueryObject,
     SceneGraph,
 )
 
@@ -69,7 +71,7 @@ class DrakeScene:
         """Return candidate geometry pairs within the requested distance."""
 
         scene_context = self.scene_graph.GetMyContextFromRoot(root_context)
-        query = self.scene_graph.get_query_output_port().Eval(scene_context)
+        query = cast(QueryObject, self.scene_graph.get_query_output_port().Eval(scene_context))
         inspector = query.inspector()
         pairs = query.ComputeSignedDistancePairwiseClosestPoints(max_distance_m)
         reports = [
@@ -118,7 +120,8 @@ def main() -> None:
 
     import argparse
 
-    from pydrake.visualization import ModelVisualizer
+    # pydrake's stub omits ModelVisualizer, which exists at runtime.
+    from pydrake.visualization import ModelVisualizer  # pyright: ignore[reportAttributeAccessIssue]
 
     parser = argparse.ArgumentParser(description="View an SDF, URDF, or Drake scene")
     parser.add_argument("model_file")
