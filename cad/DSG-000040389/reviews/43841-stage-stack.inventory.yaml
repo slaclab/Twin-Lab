@@ -121,6 +121,17 @@ hidden_occurrences:
   - P776  # REF-000168820 beam path
   - P777  # REF-000168820 beam path
 
+# Per-part convex-decomposition overrides. Drake replaces each collision mesh with its
+# convex hulls, so a hollow shell split into too few hulls fills its own cavity and
+# reports contact that cannot happen. The enclosure shell walls need a tighter CoACD
+# threshold and more hulls so the hulls hug the walls instead of spanning the interior.
+decomposition:
+  overrides:
+    - refs: [P650, P651, P652, P653, P654, P655, P656, P657, P659, P660]
+      threshold: 0.01
+      max_hulls: 64
+      reason: hollow enclosure shell walls; coarse hulls span the cavity and touch the polycap optics
+
 # Part pairs that clearance reports should not flag. Drake already filters bodies
 # joined by a joint and bodies welded into one subgraph, so this is only for parts
 # that touch by design across otherwise independent bodies. Populate from a review
@@ -140,10 +151,6 @@ ignored_pairs:
     reason: touching at reviewed CAD home (-1.59 mm)
   - pair: [P056, P1110]
     reason: touching at reviewed CAD home (-1.15 mm)
-  - pair: [P1032, P650]
-    reason: touching at reviewed CAD home (-1.02 mm)
-  - pair: [P1111, P650]
-    reason: touching at reviewed CAD home (-0.55 mm)
 
 attachment_overrides:
   fixed:

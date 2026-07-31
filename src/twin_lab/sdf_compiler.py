@@ -14,7 +14,7 @@ from typing import Any
 
 import yaml
 
-from .convex_collision import DEFAULT_SETTINGS, decompose_sources
+from .convex_collision import PartSettings, decompose_sources, part_settings_from_config
 from .paths import CACHE_ROOT, EXPORT_ROOT, resolve_repo_path, review_artifact_stem
 
 COLLISION_MODES = ("hull", "convex")
@@ -91,6 +91,7 @@ def compile_sdf_package(
         include_collision_obj=include_collisions,
         collision_mode=collision_mode,
         decomposition_workers=decomposition_workers,
+        decomposition_settings=part_settings_from_config(_read_decomposition_config(scene)),
     )
     sdf_path = package_dir / f"{resolved_model_name}.sdf"
     _write_sdf(
@@ -233,6 +234,16 @@ def _build_tree(scene: dict[str, Any], scene_file: Path) -> tuple[list[LinkSpec]
     return links, joints
 
 
+def _read_decomposition_config(scene: dict[str, Any]) -> dict[str, Any] | None:
+    """The reviewed inventory carries the per-part CoACD overrides, reachable via the scene."""
+
+    inventory_path = scene.get("source_inventory")
+    if not inventory_path:
+        return None
+    inventory = yaml.safe_load(resolve_repo_path(inventory_path).read_text(encoding="utf-8"))
+    return (inventory or {}).get("decomposition")
+
+
 def _convert_meshes(
     links: list[LinkSpec],
     meshes_dir: Path,
@@ -241,6 +252,7 @@ def _convert_meshes(
     include_collision_obj: bool,
     collision_mode: str = "hull",
     decomposition_workers: int | None = None,
+    decomposition_settings: PartSettings | None = None,
 ) -> tuple[dict[Path, str], dict[Path, str], dict[Path, list[tuple[str, str]]]]:
     sources = {source for link in links for _, source, _ in link.meshes}
     visual_result: dict[Path, str] = {}
@@ -252,7 +264,7 @@ def _convert_meshes(
         decomposed = decompose_sources(
             sources,
             CACHE_ROOT / "convex-collision" / scene_file.parent.name,
-            DEFAULT_SETTINGS,
+            decomposition_settings or PartSettings(),
             workers=decomposition_workers,
             progress=True,
         )
