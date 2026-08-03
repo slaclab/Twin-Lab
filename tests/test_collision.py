@@ -143,6 +143,72 @@ def test_geometry_states_paint_contact_red_and_near_misses_yellow():
     assert "a::l::a::a006_collision" not in states
 
 
+ANCHORED_ENVIRONMENT_SDF = """\
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <model name="rig">
+    <link name="assembly_base">
+      <collision name="a010_fixed_0_p001_collision">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry><box><size>0.1 0.1 0.1</size></box></geometry>
+      </collision>
+      <collision name="environment_wall_p002_collision">
+        <pose>1 0 0 0 0 0</pose>
+        <geometry><box><size>0.1 0.1 0.1</size></box></geometry>
+      </collision>
+    </link>
+    <link name="stack_01_a010_motion">
+      <pose>0 0 0.2 0 0 0</pose>
+      <inertial><mass>1</mass>
+        <inertia><ixx>1</ixx><iyy>1</iyy><izz>1</izz></inertia>
+      </inertial>
+      <collision name="a010_moving_1_p003_collision">
+        <geometry><box><size>0.1 0.1 0.1</size></box></geometry>
+      </collision>
+    </link>
+    <joint name="assembly_base_to_world" type="fixed">
+      <parent>world</parent><child>assembly_base</child>
+    </joint>
+    <joint name="stack_a010_motion" type="prismatic">
+      <parent>assembly_base</parent><child>stack_01_a010_motion</child>
+      <axis><xyz>1 0 0</xyz><limit><lower>-1</lower><upper>1</upper></limit></axis>
+    </joint>
+  </model>
+</sdf>
+"""
+
+
+def test_the_environment_stays_checked_against_a_stages_first_moving_link(tmp_path):
+    """Drake filters bodies either side of a joint, which would hide the whole room.
+
+    The static environment shares one anchored body with each stage's fixed rail, so the
+    default filter has to be reopened for everything except that stage's own rail.
+    """
+
+    from pydrake.geometry import Role
+
+    from twin_lab.collision import CollisionModel
+    from twin_lab.scene import load_scene
+
+    path = tmp_path / "rig.sdf"
+    path.write_text(ANCHORED_ENVIRONMENT_SDF, encoding="utf-8")
+    model = CollisionModel(load_scene(path))
+    inspector = model.scene.scene_graph.model_inspector()
+    ids = {
+        inspector.GetName(geometry_id).rsplit("::", 1)[-1]: geometry_id
+        for geometry_id in inspector.GetAllGeometryIds(Role.kProximity)
+    }
+    context = model.scene.scene_graph.GetMyContextFromRoot(model.context)
+    query = model.scene.scene_graph.get_query_output_port().Eval(context)
+    live = query.inspector()
+
+    assert model.reopened_joints == 1
+    moving = ids["a010_moving_1_p003_collision"]
+    assert not live.CollisionFiltered(moving, ids["environment_wall_p002_collision"])
+    # The stage's own rail is genuinely adjacent across the joint, so it stays filtered.
+    assert live.CollisionFiltered(moving, ids["a010_fixed_0_p001_collision"])
+
+
 def test_read_ignored_pairs_is_order_independent(tmp_path):
     path = tmp_path / "ignore.yaml"
     path.write_text(

@@ -20,6 +20,8 @@ from .paths import resolve_repo_path
 from .scene import DrakeScene, load_scene
 
 PART_PATTERN = re.compile(r"(?<![0-9A-Za-z])([AP]\d{3,4})(?![0-9A-Za-z])", re.IGNORECASE)
+# Compiled joint names carry the stage they drive, e.g. ``middle_crystal_a044_motion``.
+STAGE_PATTERN = re.compile(r"(?<![0-9A-Za-z])(A\d{3,4})(?![0-9A-Za-z])", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -136,6 +138,56 @@ class CollisionModel:
         self.ignored_pairs = ignored_pairs
         self.part_labels = dict(part_labels or {})
         self.context = scene.create_context()
+        self.reopened_joints = self._reopen_anchored_pairs()
+
+    def _reopen_anchored_pairs(self) -> int:
+        """Restore clearance checking between each stage's first moving link and the room.
+
+        Drake filters the two bodies either side of a joint. The compiled assembly holds
+        the whole static environment in a single anchored body, so that filter also hides
+        every approach between a stage's first moving link and the chamber, the enclosure,
+        or a neighbouring stage. Only the driven stage's own fixed-role geometry is truly
+        adjacent, so that alone stays filtered.
+
+        Returns the number of joints whose surroundings were reopened.
+        """
+
+        from pydrake.geometry import CollisionFilterDeclaration, GeometrySet, Role
+        from pydrake.multibody.tree import JointIndex
+
+        plant = self.scene.plant
+        scene_graph = self.scene.scene_graph
+        inspector = scene_graph.model_inspector()
+        anchored = {body.name() for body in plant.GetBodiesWeldedTo(plant.world_body())}
+
+        def proximity(body) -> list:
+            frame_id = plant.GetBodyFrameIdOrThrow(body.index())
+            return list(inspector.GetGeometries(frame_id, Role.kProximity))
+
+        declaration = CollisionFilterDeclaration()
+        reopened = 0
+        for index in range(plant.num_joints()):
+            joint = plant.get_joint(JointIndex(index))
+            if joint.num_positions() == 0 or joint.parent_body().name() not in anchored:
+                continue
+            stage = STAGE_PATTERN.search(joint.name())
+            if stage is None:
+                continue
+            own_stage = f"{stage.group(1).lower()}_fixed"
+            moving = proximity(joint.child_body())
+            surroundings = [
+                geometry_id
+                for geometry_id in proximity(joint.parent_body())
+                if not _leaf(inspector.GetName(geometry_id)).startswith(own_stage)
+            ]
+            if not moving or not surroundings:
+                continue
+            declaration.AllowBetween(GeometrySet(moving), GeometrySet(surroundings))
+            reopened += 1
+        if reopened:
+            scene_context = scene_graph.GetMyContextFromRoot(self.context)
+            scene_graph.collision_filter_manager(scene_context).Apply(declaration)
+        return reopened
 
     @classmethod
     def load(
@@ -223,6 +275,10 @@ def read_part_labels(inventory_path: str | Path) -> dict[str, str]:
 def _pair_key(a: str, b: str) -> tuple[str, str]:
     first, second = sorted((_part_of(a), _part_of(b)))
     return first, second
+
+
+def _leaf(scoped_name: str) -> str:
+    return scoped_name.rsplit("::", 1)[-1].lower()
 
 
 def _part_of(geometry_name: str) -> str:

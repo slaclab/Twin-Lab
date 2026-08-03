@@ -32,17 +32,20 @@ STATUS_RGB = {
 # Off while the parts themselves carry the state; the tint fought the highlight colours.
 PAINT_STATUS_BACKGROUND = False
 # Highlights sit on top of the reviewed colours, so they are saturated rather than tinted.
+# They must be fully opaque: three.js draws translucent meshes in a depth-sorted pass, so a
+# translucent highlight inside the translucent enclosure appears or vanishes with the camera.
 HIGHLIGHT_RGBA = {
-    "close": (1.0, 0.80, 0.0, 0.85),
-    "interference": (0.95, 0.10, 0.10, 0.9),
+    "close": (1.0, 0.80, 0.0, 1.0),
+    "interference": (0.95, 0.10, 0.10, 1.0),
 }
 # Drake's MeshcatVisualizer publishes each body at this prefix, with "::" written as "/".
 VISUALIZER_PREFIX = "/drake/visualizer"
 # Highlights hang under the body they belong to, so they follow it without per-frame updates.
 HIGHLIGHT_GROUP = "clearance"
-# One offending part carries dozens of hulls, and uploading them costs about 3 ms each;
-# 40 covers the whole default 5 mm band at the reviewed home without stalling the loop.
-HIGHLIGHT_LIMIT = 40
+# One offending part carries dozens of hulls, and uploading them costs about 3 ms each. The
+# reviewed assembly puts ~150 hulls inside the default 5 mm band, so a lower cap left real
+# offenders unpainted; only a repaint uploads, so the steady-state cost stays near zero.
+HIGHLIGHT_LIMIT = 200
 # Drake's own sky gradient, restored when clearance checking is switched off.
 DEFAULT_TOP_RGB = [0.53, 0.81, 0.98]
 DEFAULT_BOTTOM_RGB = [0.10, 0.10, 0.44]
@@ -144,6 +147,10 @@ def run_collision_viewer(
     print(
         f"Loaded {_proximity_geometry_count(model)} collision geometries "
         f"in {time.monotonic() - load_start:.0f} s"
+    )
+    print(
+        f"Reopened the surroundings of {model.reopened_joints} joints that Drake's "
+        "joint-adjacency filter had hidden from the static environment."
     )
 
     for joint in joints:
@@ -316,10 +323,15 @@ class _Highlighter:
         from pydrake.geometry import Rgba
 
         states = report.geometry_states()
-        # Clearances arrive worst first, so truncating keeps the pairs worth looking at.
-        wanted = dict(list(states.items())[:HIGHLIGHT_LIMIT])
+        # Contact outranks a near miss, and clearances arrive worst first, so a stable sort
+        # by state spends the budget on the pairs worth looking at.
+        ranked = sorted(
+            ((name, state) for name, state in states.items() if name in self._geometries),
+            key=lambda item: item[1] != "interference",
+        )
+        wanted = dict(ranked[:HIGHLIGHT_LIMIT])
         for name, state in wanted.items():
-            if self._shown.get(name) == state or name not in self._geometries:
+            if self._shown.get(name) == state:
                 continue
             path, shape, pose = self._geometries[name]
             self._meshcat.SetObject(path, shape, Rgba(*HIGHLIGHT_RGBA[state]))
