@@ -340,14 +340,16 @@ def view_stage_cad(scene_path: str | Path, *, fps: float = 30.0) -> None:
     from pydrake.geometry import Mesh, Meshcat, MeshcatParams, Rgba
     from pydrake.math import RigidTransform, RotationMatrix
 
-    from .meshcat_ui import serve_ui
+    from .meshcat_ui import patch_meshcat_page
 
     scene = yaml.safe_load(Path(scene_path).read_text(encoding="utf-8"))
     instances = scene["instances"]
-    params = MeshcatParams(host="*")
+    # Nothing here publishes a realtime rate, so the stats plot only ever covers the view.
+    params = MeshcatParams(host="*", show_stats_plot=False)
     wsl_address = _wsl_ipv4_address()
     if wsl_address is not None:
         params.web_url_pattern = f"http://{wsl_address}:{{port}}"
+    patch_meshcat_page()
     meshcat = Meshcat(params)
     role_paths: dict[tuple[str, str], str] = {}
     joint_paths: dict[str, str] = {}
@@ -436,8 +438,7 @@ def view_stage_cad(scene_path: str | Path, *, fps: float = 30.0) -> None:
     meshcat.AddButton("Stop viewer", "Escape")
     # Added last so the relabel-on-toggle always lands back in the same slot.
     motion_label = _set_motion_button(meshcat, None, False)
-    ui_url = serve_ui(meshcat)
-    print(f"Reusable stage CAD: {ui_url or meshcat.web_url()}")
+    print(f"Reusable stage CAD: {meshcat.web_url()}")
     print(
         f"Showing {len(instances)} real stages and {scene['attached_part_count']} attached "
         "non-fastener parts."

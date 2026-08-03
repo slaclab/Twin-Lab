@@ -544,10 +544,14 @@ def status_lines(status: dict[str, Any]) -> list[str]:
 def view_step_preview(preview_path: str | Path) -> None:
     """Display the STEP-derived glTF in Meshcat until Enter is pressed."""
 
-    from pydrake.geometry import Mesh, Meshcat
+    from pydrake.geometry import Mesh, Meshcat, MeshcatParams
+
+    from .meshcat_ui import patch_meshcat_page
 
     preview = Path(preview_path).resolve()
-    meshcat = Meshcat()
+    patch_meshcat_page()
+    # Nothing here publishes a realtime rate, so the stats plot only ever covers the view.
+    meshcat = Meshcat(MeshcatParams(show_stats_plot=False))
     # OCCT's glTF writer converts its millimetre working units to glTF metres.
     meshcat.SetObject("/STEP assembly", Mesh(preview, 1.0))
     # Start close enough for compact positioning hardware to be unmistakable.

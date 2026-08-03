@@ -117,7 +117,7 @@ def run_collision_viewer(
 
     from pydrake.geometry import Meshcat, MeshcatParams
 
-    from .meshcat_ui import serve_ui
+    from .meshcat_ui import patch_meshcat_page
     from .scene import load_scene
     from .stage_cad_viewer import _wsl_ipv4_address
 
@@ -127,16 +127,15 @@ def run_collision_viewer(
     )
     joints = read_joint_metadata(package)
 
-    params = MeshcatParams(host="*")
+    # Nothing here publishes a realtime rate, so the stats plot only ever covers the view.
+    params = MeshcatParams(host="*", show_stats_plot=False)
     wsl_address = _wsl_ipv4_address()
     if wsl_address is not None:
         params.web_url_pattern = f"http://{wsl_address}:{{port}}"
+    patch_meshcat_page()
     meshcat = Meshcat(params)
 
-    ui_url = serve_ui(meshcat)
-    print(f"Collision viewer: {ui_url or meshcat.web_url()}")
-    if ui_url is not None:
-        print(f"Drake's unmodified page: {meshcat.web_url()}")
+    print(f"Collision viewer: {meshcat.web_url()}")
     print(f"Model: {sdf_path}")
     print("Loading collision geometry into Drake; the viewer stays blank until this finishes.")
     load_start = time.monotonic()

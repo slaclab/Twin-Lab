@@ -1,126 +1,126 @@
-"""Serve Drake's Meshcat page with a control panel that scrolls on its own.
+"""Give Drake's own Meshcat page a control panel in its own scrolling column.
 
-Drake appends dat.GUI to ``<body>`` as a ``position: absolute`` block, so a panel
-taller than the window grows the document instead of scrolling itself: the wheel
-then drags the whole page - canvas included - off screen. Drake exposes no hook for
-restyling its page, so this module serves a patched copy of Drake's own two assets
-from a second port and points the copy back at the live Meshcat websocket.
+Drake gives the canvas the whole viewport and floats dat.GUI on top of it as a
+``position: absolute`` block, so a panel taller than the window grows the document
+instead of scrolling itself: the wheel then drags the whole page - canvas included -
+off screen, and the canvas' ``width: 100vw`` overflows sideways by the width of the
+scrollbar it just created. Drake has no hook for restyling the page, but it does honour
+``DRAKE_RESOURCE_ROOT``, so we hand it a patched copy of its own ``meshcat.html``. The
+fix then lands on Drake's own port and there is only ever one URL to open.
 """
 
 from __future__ import annotations
 
-import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import os
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
+
+from .paths import CACHE_ROOT
 
 # dat.GUI's own rules are `.dg li:not(.folder)`, so the overrides need `!important`.
 PANEL_CSS = """
-html, body { height: 100%; overflow: hidden; }
-.dg.main { position: fixed !important; top: 0 !important; right: 0 !important; }
-.dg.main > ul { max-height: calc(100vh - 20px); overflow-y: auto; overflow-x: hidden; }
+html, body { height: 100%; width: 100%; overflow: hidden; }
+/* The panel column is shorter than the window, so the gap below it needs dat.GUI's black. */
+body { background: #1a1a1a; }
+/* Drake sizes the canvas at 100vw, which counts the scrollbar and overflows sideways. */
+#meshcat-pane { width: auto !important; max-width: 100%; height: 100vh !important;
+                margin-right: var(--twinlab-panel-width, 0px); }
+.dg.main { position: fixed !important; top: 0 !important; right: 0 !important;
+           font-size: 13px !important; }
+/* Subtract the close button, which sits below the list rather than inside it. */
+.dg.main > ul { max-height: calc(100vh - 24px); overflow-y: auto; overflow-x: hidden; }
 .dg.main > ul::-webkit-scrollbar { width: 8px; }
 .dg.main > ul::-webkit-scrollbar-thumb { background: #4d4d4d; }
-.dg.main li:not(.folder) { height: 20px !important; line-height: 20px !important; }
-.dg.main li.title { height: 20px !important; line-height: 20px !important; }
-.dg.main .cr .property-name { height: 20px !important; line-height: 20px !important; }
-.dg.main .c { line-height: 20px !important; }
-.dg.main .c input[type=text] { height: 18px !important; line-height: 18px !important; }
-.dg.main .c .slider { height: 20px !important; }
-.dg.main .c select { height: 18px !important; }
+.dg.main li:not(.folder) { height: 24px !important; line-height: 24px !important; }
+.dg.main li.title { height: 24px !important; line-height: 24px !important; }
+.dg.main .cr .property-name { height: 24px !important; line-height: 24px !important; }
+.dg.main .c { line-height: 24px !important; }
+.dg.main .c input[type=text] { height: 22px !important; line-height: 22px !important;
+                               font-size: 13px !important; }
+.dg.main .c .slider { height: 24px !important; }
+.dg.main .c select { height: 22px !important; font-size: 13px !important; }
+.dg.main .close-button { height: 24px !important; line-height: 24px !important; }
 """
 
-# Meshcat opens the scene tree by default, which alone costs about a third of the window.
 PANEL_JS = """
 window.addEventListener("load", function () {
-  var panel = document.querySelector(".dg.main > ul");
-  if (!panel) return;
-  Array.prototype.forEach.call(panel.children, function (item) {
+  var panel = document.querySelector(".dg.main");
+  var list = panel && panel.querySelector(":scope > ul");
+  if (!list) return;
+
+  // Meshcat opens the scene tree by default, which alone costs a third of the window.
+  Array.prototype.forEach.call(list.children, function (item) {
     if (!item.classList.contains("folder")) return;
     var body = item.querySelector(":scope > div > ul");
     var title = body && body.querySelector(":scope > li.title");
     if (title && !body.classList.contains("closed")) title.click();
   });
+
+  // dat.GUI hard-codes 245px, which truncates slider names once the rows are scaled up.
+  panel.style.width = Math.round(panel.offsetWidth * 1.2) + "px";
+
+  // The canvas keeps the width the panel is not using, so neither one overlaps or
+  // pushes the other, and the document never grows past the window.
+  function fit() {
+    var reserved = list.classList.contains("closed") ? 0 : panel.offsetWidth;
+    document.documentElement.style.setProperty(
+      "--twinlab-panel-width", reserved + "px");
+    viewer.set_3d_pane_size();
+  }
+  new ResizeObserver(fit).observe(panel);
+  new MutationObserver(fit).observe(list, { attributes: true,
+                                            attributeFilter: ["class"] });
+  fit();
 });
 """
 
-_CONNECT_ANCHOR = "    url = location.toString();"
+RESOURCE_ROOT = CACHE_ROOT / "drake-resource-root"
 
 
-def serve_ui(meshcat, *, host: str = "0.0.0.0") -> str | None:
-    """Start the patched viewer next to ``meshcat`` and return its URL, or None.
+def patch_meshcat_page() -> None:
+    """Redirect Drake's resource lookup at a patched page. Call before ``Meshcat()``."""
 
-    Returns None when Drake's page no longer matches what we patch, so the caller can
-    fall back to ``meshcat.web_url()`` instead of losing the viewer to a Drake upgrade.
-    """
-
+    if os.environ.get("DRAKE_RESOURCE_ROOT"):
+        return
     try:
-        html = _patched_html(meshcat.port())
-        script = _drake_asset("meshcat.js")
+        os.environ["DRAKE_RESOURCE_ROOT"] = str(_build_resource_root())
     except (RuntimeError, OSError) as error:
         print(f"Meshcat UI patch unavailable ({error}); using Drake's page.")
-        return None
-
-    routes = {
-        "/index.html": ("text/html; charset=utf-8", html.encode("utf-8")),
-        "/meshcat.js": ("text/javascript; charset=utf-8", script),
-    }
-    handler = type("_PatchedMeshcatHandler", (_Handler,), {"routes": routes})
-    server = _bind(handler, host, meshcat.port() + 100)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    return _swap_port(meshcat.web_url(), server.server_address[1])
 
 
-def _drake_asset(name: str) -> bytes:
+def _build_resource_root() -> Path:
+    """Mirror Drake's resource tree with symlinks, swapping in our own meshcat.html."""
+
     from pydrake.common import FindResourceOrThrow
 
-    return Path(FindResourceOrThrow(f"drake/geometry/{name}")).read_bytes()
+    source = Path(FindResourceOrThrow("drake/geometry/meshcat.html")).resolve()
+    drake = RESOURCE_ROOT / "drake"
+    (drake / "geometry").mkdir(parents=True, exist_ok=True)
+    for entry in source.parents[1].iterdir():
+        if entry.name != "geometry":
+            _link(drake / entry.name, entry)
+    for entry in source.parent.iterdir():
+        if entry.name != source.name:
+            _link(drake / "geometry" / entry.name, entry)
+    # Written via a temporary so a second viewer starting at the same time never reads
+    # a half-written page.
+    patched = drake / "geometry" / "meshcat.html.new"
+    patched.write_text(_patched_html(source), encoding="utf-8")
+    patched.replace(drake / "geometry" / source.name)
+    return RESOURCE_ROOT
 
 
-def _patched_html(meshcat_port: int) -> str:
-    html = _drake_asset("meshcat.html").decode("utf-8")
-    if _CONNECT_ANCHOR not in html or "</body>" not in html:
-        raise RuntimeError("Drake's meshcat.html no longer has the expected anchors")
-    # The page derives the websocket URL from its own location, which is now our port.
-    html = html.replace(
-        _CONNECT_ANCHOR,
-        f'    url = location.protocol + "//" + location.hostname + ":{meshcat_port}/";',
-    )
+def _link(link: Path, target: Path) -> None:
+    if link.is_symlink() and link.readlink() == target:
+        return
+    link.unlink(missing_ok=True)
+    link.symlink_to(target)
+
+
+def _patched_html(source: Path) -> str:
+    html = source.read_text(encoding="utf-8")
+    if "</body>" not in html:
+        raise RuntimeError("Drake's meshcat.html no longer has a </body> to patch")
     patch = f"<style>{PANEL_CSS}</style>\n<script>{PANEL_JS}</script>\n"
-    return html.replace("</body>", f"{patch}</body>")
-
-
-def _bind(handler: type[BaseHTTPRequestHandler], host: str, preferred_port: int):
-    try:
-        return ThreadingHTTPServer((host, preferred_port), handler)
-    except OSError:
-        return ThreadingHTTPServer((host, 0), handler)
-
-
-def _swap_port(url: str, port: int) -> str:
-    parts = urlsplit(url)
-    return urlunsplit((parts.scheme, f"{parts.hostname}:{port}", parts.path, "", ""))
-
-
-class _Handler(BaseHTTPRequestHandler):
-    """Serves a fixed route table only, so no request can reach the file system."""
-
-    routes: dict[str, tuple[str, bytes]] = {}
-
-    def do_GET(self) -> None:  # noqa: N802 - name fixed by BaseHTTPRequestHandler
-        path = self.path.split("?", 1)[0]
-        if path in ("/", "/meshcat.html"):
-            path = "/index.html"
-        entry = self.routes.get(path)
-        if entry is None:
-            self.send_error(404)
-            return
-        content_type, body = entry
-        self.send_response(200)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def log_message(self, *args) -> None:
-        pass
+    html = html.replace("</body>", f"{patch}</body>")
+    # The tab title is how you tell a patched page from a stale Drake one.
+    return html.replace("<title>Drake MeshCat</title>", "<title>Twin-Lab Meshcat</title>")
