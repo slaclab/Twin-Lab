@@ -340,6 +340,8 @@ def view_stage_cad(scene_path: str | Path, *, fps: float = 30.0) -> None:
     from pydrake.geometry import Mesh, Meshcat, MeshcatParams, Rgba
     from pydrake.math import RigidTransform, RotationMatrix
 
+    from .meshcat_ui import serve_ui
+
     scene = yaml.safe_load(Path(scene_path).read_text(encoding="utf-8"))
     instances = scene["instances"]
     params = MeshcatParams(host="*")
@@ -434,7 +436,8 @@ def view_stage_cad(scene_path: str | Path, *, fps: float = 30.0) -> None:
     meshcat.AddButton("Stop viewer", "Escape")
     # Added last so the relabel-on-toggle always lands back in the same slot.
     motion_label = _set_motion_button(meshcat, None, False)
-    print(f"Reusable stage CAD: {meshcat.web_url()}")
+    ui_url = serve_ui(meshcat)
+    print(f"Reusable stage CAD: {ui_url or meshcat.web_url()}")
     print(
         f"Showing {len(instances)} real stages and {scene['attached_part_count']} attached "
         "non-fastener parts."
