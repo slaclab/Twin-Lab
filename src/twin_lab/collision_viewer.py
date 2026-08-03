@@ -117,6 +117,7 @@ def run_collision_viewer(
 
     from pydrake.geometry import Meshcat, MeshcatParams
 
+    from .meshcat_ui import serve_ui
     from .scene import load_scene
     from .stage_cad_viewer import _wsl_ipv4_address
 
@@ -132,7 +133,10 @@ def run_collision_viewer(
         params.web_url_pattern = f"http://{wsl_address}:{{port}}"
     meshcat = Meshcat(params)
 
-    print(f"Collision viewer: {meshcat.web_url()}")
+    ui_url = serve_ui(meshcat)
+    print(f"Collision viewer: {ui_url or meshcat.web_url()}")
+    if ui_url is not None:
+        print(f"Drake's unmodified page: {meshcat.web_url()}")
     print(f"Model: {sdf_path}")
     print("Loading collision geometry into Drake; the viewer stays blank until this finishes.")
     load_start = time.monotonic()
