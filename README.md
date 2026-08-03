@@ -10,151 +10,300 @@ three polycapillary stacks with 22 controllable joints.
 
 ## Setup
 
-The framework is Linux-based. Windows users run it inside WSL 2 rather than
-natively; every step after the first subsection is identical on both.
+Everything below happens in a single VS Code window. Step 1 is Windows-only
+groundwork; on Linux, open this repository in VS Code and start at step 2. From
+there on, every command goes into the VS Code integrated terminal, which you
+open with `` Ctrl+Shift+` ``.
 
-### Windows: install WSL 2 first
+Run every unlabelled command block, in order. Anything that is not part of the
+normal path is labelled in the text introducing it, or at the top of its
+section: **Only if** / **Only when** for something you run in one specific case,
+**Optional** for something you can skip, **Fallback** for a workaround, and
+**Reference** for a command listed for lookup rather than for following along.
 
-From an administrator PowerShell prompt, install Ubuntu if WSL is not already
-set up:
+### 1. Windows only: move VS Code into Ubuntu
+
+**Do this before anything else.** Twin Lab is a Linux project: Drake publishes no
+Windows wheels, and every command in this README is a bash command. VS Code on
+Windows opens PowerShell by default, and PowerShell cannot run them. A
+copy-paste of `sudo apt update` into PowerShell fails with
+`sudo : The term 'sudo' is not recognized`, and `source ~/.bashrc` fails the
+same way, because those are Unix shell commands, not Windows ones. WSL 2 gives
+you a real Ubuntu system where they work.
+
+The goal is one VS Code window whose terminals, extensions, file explorer, and
+search all run inside Ubuntu. Getting there costs one elevated command and one
+reboot; after that you never open a separate terminal application again. You
+need [VS Code](https://code.visualstudio.com/) installed on Windows, not inside
+WSL.
+
+**a. Install WSL.** `wsl --install` requires administrator rights and VS Code's
+terminal cannot elevate itself, so for this one step start VS Code elevated:
+close it, press the Windows key, type `code`, and choose **Run as administrator**
+on **Visual Studio Code**. Open the integrated terminal with `` Ctrl+Shift+` ``.
+It is PowerShell, which is the right shell here and nowhere else. Run:
 
 ```powershell
 wsl --install -d Ubuntu
 ```
 
-Restart when asked, open Ubuntu, and continue with the steps below. Work inside
-the WSL filesystem (for example `~/src`) rather than under `/mnt/c`; file access
-and Python environments are markedly faster there.
+**b. Reboot.** WSL does not work until Windows restarts. From the same terminal:
 
-The viewers print a Meshcat URL that opens in a normal Windows browser. WSL 2
-forwards `localhost` automatically, so no Linux desktop or X server is needed.
+```powershell
+Restart-Computer
+```
 
-### Install the prerequisites
+**c. Create your Linux user.** Reopen VS Code normally this time; the
+administrator rights were only for step a. Open a terminal, which is PowerShell
+again, and start Ubuntu inside it:
+
+```powershell
+wsl -d Ubuntu
+```
+
+The first launch asks for a UNIX username and password. These are new
+credentials for Linux, unrelated to your Windows login, and nothing appears on
+screen while you type the password. You need it for `sudo` later, so pick
+something memorable. When it finishes, the prompt becomes something like
+`you@LCLS-PC12345:~$`: that is bash, running in Ubuntu, inside VS Code. Type
+`exit` to return to PowerShell.
+
+**d. Connect the whole window to Ubuntu.** Open the Extensions view with
+`Ctrl+Shift+X`, search for
+[WSL](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-wsl),
+and install it. Then press `Ctrl+Shift+P`, run **WSL: Connect to WSL**, and wait
+for the status bar at the bottom left to read `WSL: Ubuntu`.
+
+That is the whole point of the setup. Every terminal you open from now on
+(`` Ctrl+Shift+` ``) is Ubuntu bash rather than PowerShell, and everything else
+the editor does — editing, search, extensions, debugging — happens on the Linux
+side too. You should not need PowerShell again. Confirm in a fresh terminal:
+
+```bash
+uname -srm
+```
+
+It should print something like `Linux 5.15.167.4-microsoft-standard-WSL2
+x86_64`. A `PS C:\>` prompt or a `not recognized` error means the window is not
+connected; check the status bar and re-run **WSL: Connect to WSL**.
+
+One thing still leaves the window: the viewers print a `localhost` URL that you
+open in your normal Windows browser. WSL forwards the port for you, so no Linux
+desktop or X server is involved.
+
+#### Where your files live, and where to clone
+
+WSL gives you two separate filesystems, and knowing which one you are standing
+in is most of what makes WSL confusing at first.
+
+Ubuntu has its own disk with its own root, `/`. Your account lives at
+`/home/<your-linux-username>`, which bash abbreviates as `~`. Linux paths use
+forward slashes, have no drive letters, and are case-sensitive, so `Source.stp`
+and `source.stp` are different files. **Reference**, for whenever you lose track
+of where you are:
+
+```bash
+pwd     # print the directory you are in
+cd ~    # go back to your Linux home
+```
+
+Your Windows drives are still reachable, mounted under `/mnt`. `C:\` appears as
+`/mnt/c`, so a browser download at `C:\Users\you\Downloads\DSG-000040389.stp` is
+`/mnt/c/Users/you/Downloads/DSG-000040389.stp` from Ubuntu. That is how you hand
+a Windows file to a Linux command without copying it anywhere.
+
+**Clone into the Linux side, not `/mnt/c`.** Step 3 below uses `~/src/Twin-Lab`,
+which is on Ubuntu's own disk. Working under `/mnt/c` instead means every file
+read crosses a Windows-to-Linux translation layer: builds and Git operations run
+many times slower, and Linux file permissions do not survive the trip. The rule
+of thumb is that Linux tools want Linux files.
+
+Because the window is connected to WSL, VS Code's own **File > Open Folder**
+dialog browses the Ubuntu filesystem, so the repository is reachable from the
+GUI like any other project. If you ever need it from Windows itself, File
+Explorer can browse to `\\wsl$\Ubuntu\home\<your-linux-username>`.
+
+### 2. Install the prerequisites
+
+In the VS Code terminal, which is now Ubuntu bash:
 
 ```bash
 sudo apt update
-sudo apt install -y git git-lfs python3 python3-venv
+sudo apt install -y git git-lfs pipx
 git lfs install
-```
-
-Run `git lfs install` before cloning. The STEP sources are stored as LFS
-objects, and a clone made without it yields small pointer files instead of CAD.
-See [Large files](#large-files) for the full picture.
-
-### Get the code
-
-```bash
-mkdir -p ~/src && cd ~/src
-git clone <repository-url> twin-lab
-cd twin-lab
-```
-
-If the clone predates your Git LFS setup, `cad/DSG-000040389/source.stp` will be
-a few hundred bytes rather than 88 MiB. Run `git lfs install` and then
-`git lfs pull` to fill in the real content.
-
-### Create the environment
-
-Either tool works and a team can mix them freely, since both produce the same
-`.venv`. [uv](https://docs.astral.sh/uv/) is faster and pins the interpreter:
-
-```bash
-sudo apt install -y pipx
 pipx install uv
 pipx ensurepath
-```
-
-`pipx ensurepath` adds `~/.local/bin` to your `PATH`, but only for shells you
-open afterward. To use `uv` in the shell you already have, reload it once:
-
-```bash
 source ~/.bashrc
 ```
 
-Opening a brand-new terminal works too. Either way, `uv --version` should now
-print a version. Then build the environment:
+Three things happen here. `git lfs install` must run **before** you clone: the
+88 MiB STEP files are stored in Git LFS, and a clone made without it silently
+gives you small text pointers instead of CAD. `pipx install uv` installs
+[uv](https://docs.astral.sh/uv/), the tool that manages this project's Python
+version and packages. `source ~/.bashrc` reloads the shell so `uv` is on your
+`PATH` right away instead of only in the next terminal you open.
+
+Confirm before continuing:
 
 ```bash
-uv venv --seed
-uv pip install -r requirements.txt
+uv --version
 ```
 
-Installing `pipx` just to install `uv` looks like a detour, but the one-step
-alternatives are worse here. `uv` is not in the Ubuntu or Debian repositories,
-so `apt install uv` fails; the only snap is a stale, unofficial rebuild rather
-than an Astral release; and `curl -LsSf https://astral.sh/uv/install.sh | sh`,
-which uv's own documentation suggests, runs a downloaded script before anyone
-can read it, so a hijacked host or a bad DNS answer executes arbitrary code as
-your user. `pipx` is a small bootstrap that installs the official release from
-PyPI into its own isolated environment on any Linux distro, records a version
-you can audit with `pipx list`, and removes cleanly with `pipx uninstall uv`.
-If you do want the official installer, save it and read it before running it:
+<details>
+<summary>Why <code>pipx</code> rather than the one-line uv installer</summary>
+
+`uv` is not packaged in the Ubuntu repositories, and the uv documentation's
+`curl ... | sh` line pipes a downloaded script straight into a shell, so a
+hijacked host or bad DNS answer would run arbitrary code as your user. `pipx`
+installs the official PyPI release into its own isolated environment, records a
+version you can audit with `pipx list`, and removes cleanly with
+`pipx uninstall uv`.
+
+</details>
+
+### 3. Clone the repository, then open it
+
+**Optional, only if you intend to model a stack other than the XCS
+polycapillary assembly.** Fork first and clone your fork, so your catalog
+entries, inventories, and STEP files stay yours to change and the reviewed 43841
+model is not in your way. Open
+[github.com/slaclab/Twin-Lab](https://github.com/slaclab/Twin-Lab), click
+**Fork**, and create the fork under your own account or organisation. Then use
+your fork's URL in place of the `slaclab` one in the clone below.
+
+[What to edit](#what-to-edit) lists the two reviewed inputs that describe an
+assembly: `config/stage-catalog.yaml` for the stage models themselves, and a
+per-drawing inventory under `cad/<drawing>/reviews/`. The tooling is not
+specific to 43841; that inventory is simply the one assembly reviewed so far.
+
+Clone:
 
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh -o uv-install.sh
-less uv-install.sh
-sh uv-install.sh && rm uv-install.sh
+mkdir -p ~/src && cd ~/src
+git clone https://github.com/slaclab/Twin-Lab.git
+cd Twin-Lab
 ```
 
-`uv venv` reads `.python-version` and fetches the interpreter this project is
-tested against instead of using whatever the system provides, which matters
-because Drake publishes wheels only for specific Python versions. The `--seed`
-flag installs `pip` into the environment; without it anything that shells out to
-`pip` fails, including the VS Code Python extension's package list.
+`~/src` is just a folder for checkouts inside your Linux home, so the clone lands
+at `~/src/Twin-Lab`.
 
-The stock tooling works too:
+**Only if you cloned a fork**, keep a link back to the original so you can still
+pull fixes:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
+git remote add upstream https://github.com/slaclab/Twin-Lab.git
+git fetch upstream
 ```
 
-Use `python3` for that first command. A fresh Ubuntu has no `python` until a
-virtual environment is active, and under WSL a bare `python` may resolve to a
-Windows interpreter on the shared PATH, which cannot build a working Linux
-environment here.
+Check that the CAD came down as real geometry rather than an LFS pointer:
+
+```bash
+ls -lh cad/DSG-000040389/source.stp
+```
+
+The size should be about 88M, in which case carry on. A few hundred bytes means
+Git LFS was not active for this clone. See [Large files](#large-files) for the
+background.
+
+**Only if the size is wrong:**
+
+```bash
+git lfs install
+git lfs pull
+```
+
+Now point the window at the repository so the file explorer, search, and every
+new terminal start there:
+
+```bash
+code -r ~/src/Twin-Lab
+```
+
+`-r` reuses the current window rather than opening a second one. VS Code reloads
+with the project open and its terminal already at the repository root, which is
+where the remaining commands expect to run. **File > Open Folder** does the same
+thing through the GUI.
+
+### 4. Create the environment
+
+```bash
+uv sync --all-extras
+```
+
+That one command reads `.python-version` and `uv.lock`, downloads the exact
+Python this project is tested against, creates `.venv`, and installs the pinned
+CAD, Drake, collision, and dev dependencies. It takes a few minutes the first
+time. Drake only publishes wheels for specific Python versions, which is why the
+interpreter is pinned rather than taken from the system.
+
+### 5. Let VS Code pick the environment up automatically
+
+Install the [Python extension](https://marketplace.visualstudio.com/items?itemName=ms-python.python)
+from the Extensions view (`Ctrl+Shift+X`). Because the window is connected to
+WSL, install it into `WSL: Ubuntu` rather than locally; VS Code offers the right
+target automatically. Then reload the window with `Ctrl+Shift+P` >
+**Developer: Reload Window**.
+
+That is the whole step. The repository ships a `.vscode/settings.json` that
+pins the interpreter to `${workspaceFolder}/.venv/bin/python` and turns on
+terminal activation, so from now on opening this folder is enough: the status
+bar shows the `.venv` interpreter, and every new terminal (`` Ctrl+Shift+` ``)
+opens with `(.venv)` already in the prompt. There is nothing to activate by
+hand, in this shell or any future one.
+
+Confirm in a fresh terminal:
+
+```bash
+which python
+```
+
+It should print `/home/<your-linux-username>/src/Twin-Lab/.venv/bin/python`. If
+it prints `/usr/bin/python3`, or nothing at all, the pinned interpreter has not
+been applied: run `Python: Select Interpreter` from the Command Palette and
+choose the one at `./.venv/bin/python`.
+
+What this buys you is editor-side: working imports, go-to-definition, and
+inline errors for `twin_lab` and Drake. Commands stay written as `uv run …`
+throughout this README, which works whether or not the environment is active, so
+there is only ever one form to copy.
+
+### 6. Verify
+
+```bash
+uv run pytest -q
+```
+
+Expect `53 passed` in roughly 15 seconds. The suite exercises the CAD manifest,
+inventory remap, SDF compiler, and collision plumbing without opening a viewer.
+If this passes, setup is done.
 
 ### Running commands
 
-Every command in this README assumes the environment is active, which is one
-step per new shell:
-
-```bash
-source .venv/bin/activate
-```
-
-With uv you can skip activation entirely and prefix any command with `uv run`:
-
-```bash
-uv run slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
-```
-
-### Verify
-
-```bash
-pytest -q
-```
-
-The suite exercises the CAD manifest, inventory remap, SDF compiler, and
-collision plumbing without opening a viewer.
+Every command below is prefixed with `uv run`. Step 5 already puts you in the
+environment, but the prefix is kept everywhere so a copied line also works in a
+plain terminal, on a machine without the Python extension, or in a script — and
+so there is never a question of whether the right Python is selected. Run them
+in the VS Code terminal, which already opens at the repository root.
 
 ## Collision detection
 
 This is the point of the model. Quick start, from the repository root:
 
 ```bash
-slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
+uv run slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
 ```
 
-Open the Meshcat URL it prints. First load takes about 20 seconds; the window is
-blank until the console says the geometry is loaded. Drag any joint slider and
-the background colour tells you the state of the pose immediately.
+The command prints a `http://localhost:7000` Meshcat URL; `Ctrl+Click` it in the
+VS Code terminal to open it in your normal browser. First load takes about 20
+seconds, and the window stays blank until the console says the geometry is
+loaded. Note that the very first run also has to build the collision hulls,
+which takes far longer; see
+[what the first build costs](#what-the-first-build-costs). Drag any joint slider
+and the background colour tells you the state of the pose immediately.
 
 The collision viewer drives a Drake plant compiled from the same reviewed
 inventory, so the geometry drawn on screen and the geometry checked for
-interference are the same kinematics. The module form
-`python -m twin_lab.collision_viewer <inventory>` is equivalent.
+interference are the same kinematics.
 
 Checking can be switched off at any time with the
 `Collision detection: ON (click to disable)` toggle button, which turns the
@@ -164,7 +313,7 @@ the state for the current pose.
 
 The `Animation: OFF (click to start)` toggle and the two `Auto motion` sliders
 described under [animated motion](#animated-motion) are available here too, so a
-whole sweep can be swept for interference without touching a slider. With
+whole sweep can be checked for interference without touching a slider. With
 checking left on, each animation frame is evaluated, which is the fastest way to
 find the poses that actually collide.
 
@@ -203,11 +352,13 @@ packed, so home is reported as close rather than clean.
 | `hull` | One convex hull per part mesh | Fast, but a hull of a concave part such as the enclosure fills its interior, so it reports contact everywhere. Useful only as a smoke test |
 | `convex` | CoACD convex decomposition, one `<collision>` per hull with `<drake:declare_convex/>` | Default for the viewer. Tracks true concavity, so clearance numbers are meaningful |
 
-Meshes can also be decomposed ahead of time with `slac-decompose`, and the
-compiler accepts the same options:
+The viewer builds `convex` geometry for you, so nothing extra is required.
+
+**Optional**, only when you want a collision-enabled SDF package rather than the
+viewer:
 
 ```bash
-python -m twin_lab.sdf_compiler \
+uv run slac-compile-sdf \
   cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
   --with-collisions --collision-mode convex
 ```
@@ -230,18 +381,21 @@ honest distances.
 
 #### Why CoACD, and why Drake has no equivalent
 
-Drake ships no decomposition tool. `pydrake.geometry` provides the `Convex`
-shape, which *consumes* a piece and takes the hull of whatever it is given.
-That is deliberate: decomposition is slow, offline, and wants caching, which is
-the opposite of what belongs in a simulation loop. Drake owns the runtime half
-and leaves the asset-pipeline half to the model author. So the question is which
-external tool to use, not whether to use one.
+Drake ships no decomposition tool: `pydrake.geometry` provides the `Convex`
+shape, which *consumes* a piece and takes the hull of whatever it is given. That
+is deliberate, since decomposition is slow, offline, and wants caching. So the
+question is which external tool to use, not whether to use one.
+
+<details>
+<summary>How the candidates compare</summary>
 
 | Option | Assessment |
 | --- | --- |
 | V-HACD | The long-standing default, bundled with Bullet. Voxel-based, so it needs more hulls for the same fidelity, and thin CAD features such as brackets and shields blur out at practical voxel resolutions |
 | Hand-authored primitives | What production robot models do, and the fastest at runtime. Rejected here because the geometry is CAD-driven: every STEP revision would invalidate the hand work |
 | CoACD | **Chosen.** Its concavity metric is collision-aware, so hulls are spent where contact can actually occur, giving fewer and better-placed hulls than V-HACD on the same part. It also ships `abi3` wheels, so collaborators get a binary instead of a C++ build |
+
+</details>
 
 #### What the first build costs
 
@@ -266,10 +420,12 @@ by nearly 4x, because the largest parts are dispatched first.
 Workers are sized automatically from CPU count and free memory. CoACD
 parallelizes internally with OpenMP, so one worker is not one core; two threads
 per worker measured fastest, and the run keeps workers times threads inside the
-machine. Override with `--decomposition-workers` if you want the machine back:
+machine.
+
+**Optional**, only if you want the machine back while the build runs:
 
 ```bash
-slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
+uv run slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
   --decomposition-workers 2
 ```
 
@@ -300,7 +456,8 @@ editing a per-part override reaches the viewer without `--rebuild`.
 Drake automatically ignores pairs that share a body, sit either side of one
 joint, or belong to the same welded subgraph, so a reported pair is a real
 finding rather than bookkeeping noise. Parts that are in contact by design go in
-the `ignored_pairs` block of the stage inventory:
+the `ignored_pairs` block of the stage inventory, which already exists and looks
+like this:
 
 ```yaml
 ignored_pairs:
@@ -315,15 +472,17 @@ reserves red for interference the stages actually create. Those seven pairs have
 **not** been individually validated as by-design, so re-review them if a stack is
 re-modelled.
 
-Pass `--ignore-file` to read the block from another YAML file instead.
+**Optional**, only when the pairs you want to exclude live elsewhere: pass
+`--ignore-file` to read the block from another YAML file instead.
 
 ## Viewing and moving the assembly
 
-For kinematics work without the collision plant, the cached CAD viewer is
-lighter and starts faster:
+**Optional.** This viewer is an alternative to the collision viewer, not a step
+after it. Reach for it when you want kinematics without the collision plant,
+since it is lighter and starts faster:
 
 ```bash
-python -m twin_lab.stage_cad_viewer \
+uv run slac-stage-cad \
   cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
 ```
 
@@ -355,29 +514,20 @@ viewer above, which evaluates every frame.
 
 ## Updating the 43841 STEP
 
-For this reviewed polycap assembly, use the dedicated helper instead of running
-manifest refresh, remap, and cache rebuild manually.
-
-If the new STEP is already copied into
-`cad/DSG-000040389/source.stp`:
-
-```bash
-python -m twin_lab.update_43841_step --rebuild-viewer-cache
-```
-
-If the new STEP is still somewhere else on disk, pass that file path and let
-the helper copy it into the repo first:
+**Only when a new STEP revision arrives.** Nothing in this section is part of
+first-time setup. For this reviewed polycap assembly, use the dedicated helper
+instead of running manifest refresh, remap, and cache rebuild manually. Pass the
+path to the new STEP file and the helper copies it into the repository for you:
 
 ```bash
-python -m twin_lab.update_43841_step \
+uv run slac-refresh-43841 \
   /path/to/DSG-000040389.stp \
   --rebuild-viewer-cache
 ```
 
-Under WSL a file downloaded on the Windows side is reachable at
-`/mnt/c/Users/<your-user>/Downloads/DSG-000040389.stp`.
-
-The console-script equivalent is `slac-refresh-43841`.
+Omit the path if the replacement STEP is already sitting at
+`cad/DSG-000040389/source.stp`. Under WSL, a file downloaded on the Windows side
+is reachable at `/mnt/c/Users/<your-user>/Downloads/DSG-000040389.stp`.
 
 What this command does:
 
@@ -385,19 +535,20 @@ What this command does:
 2. Backs up the previous manifest to `cad/DSG-000040389/manifest.previous.json`.
 3. Regenerates `cad/DSG-000040389/manifest.json` from the new STEP.
 4. Remaps `cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml` using `cad/DSG-000040389/reviews/43841-stage-stack.aliases.yaml`.
-5. Optionally rebuilds the cached viewer scene.
+5. Rebuilds the cached viewer scene, because `--rebuild-viewer-cache` was passed.
 
 After it finishes, verify the result with:
 
 ```bash
-python -m twin_lab.stage_cad_viewer \
+uv run slac-stage-cad \
   cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
 ```
 
-Build the portable SDF package:
+**Optional**, only when you need to hand the model to someone outside this
+repository. Build the portable SDF package:
 
 ```bash
-python -m twin_lab.sdf_compiler \
+uv run slac-compile-sdf \
   cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
 ```
 
@@ -432,8 +583,10 @@ size 92523231
 ```
 
 Because the rule is a pattern rather than a per-file entry, a replacement STEP
-is handled automatically: copy it into place and commit as usual. Confirm it
-landed in LFS rather than in git proper:
+is handled automatically: copy it into place and commit as usual.
+
+**Only when you have committed a new STEP**, confirm it landed in LFS rather
+than in git proper:
 
 ```bash
 git lfs ls-files
@@ -463,6 +616,8 @@ export meshes; regenerate them instead.
 
 ```text
 .gitattributes               routes *.stp to Git LFS
+.python-version              interpreter this project is tested against
+uv.lock                      pinned dependency set installed by `uv sync`
 cad/
   DSG-000040389/
     source.stp                 original full assembly
@@ -494,7 +649,8 @@ exports/                       generated share and collision packages (ignored)
 
 ## Command reference
 
-Console-script entry points, all installed with the package:
+**Reference.** Nothing in this section needs to be run in order. Console-script
+entry points, all installed with the package. Prefix each with `uv run`:
 
 | Command | Module | Purpose |
 | --- | --- | --- |
@@ -509,26 +665,27 @@ Console-script entry points, all installed with the package:
 Inspect a STEP tree or generate a focused preview:
 
 ```bash
-slac-cad-manifest cad/DSG-000040389/source.stp --show-tree --manifest-only
-slac-cad-manifest cad/DSG-000040389/source.stp --view --focus A035 --manifest-only
+uv run slac-cad-manifest cad/DSG-000040389/source.stp --show-tree --manifest-only
+uv run slac-cad-manifest cad/DSG-000040389/source.stp --view --focus A035 --manifest-only
 ```
 
-The low-level remap command is still available if you need to debug the helper:
+**Fallback**, only if you need to debug the refresh helper. The low-level remap
+command it wraps is still available:
 
 ```bash
-slac-cad-manifest cad/DSG-000040389/source.stp \
+uv run slac-cad-manifest cad/DSG-000040389/source.stp \
   --refresh-manifest --manifest-only --no-preview \
   --remap-stage-inventory cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
   --previous-manifest cad/DSG-000040389/manifest.previous.json \
   --alias-map cad/DSG-000040389/reviews/43841-stage-stack.aliases.yaml
 ```
 
-Validate the code and reviewed data:
+**Only before committing changes**, validate the code and reviewed data:
 
 ```bash
-pytest -q
-ruff check .
-ruff format --check .
+uv run pytest -q
+uv run ruff check .
+uv run ruff format --check .
 ```
 
 ## Model status
