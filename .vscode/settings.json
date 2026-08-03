@@ -3,6 +3,11 @@
   // that WSL puts on PATH; that interpreter cannot import this project's deps.
   "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
 
+  // Activate .venv in every new integrated terminal, so opening the folder is
+  // the only setup step. Default is true; pinned here so a user-level override
+  // cannot silently break the documented workflow.
+  "python.terminal.activateEnvironment": true,
+
   // Large generated/vendored trees in this repo (measured): .venv 1.5G, .cache 499M,
   // exports 173M, cad 98M. Excluding them from watching/searching/indexing keeps the
   // extension host (especially over WSL Remote) from walking ~25k files on every load.
