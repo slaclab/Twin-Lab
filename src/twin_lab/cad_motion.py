@@ -104,10 +104,14 @@ def prepare_motion_setup(
 def run_motion_viewer(setup: MotionSetup) -> None:
     """Show reviewed CAD groups with nested prismatic motion sliders."""
 
-    from pydrake.geometry import Mesh, Meshcat, Rgba
+    from pydrake.geometry import Mesh, Meshcat, MeshcatParams, Rgba
     from pydrake.math import RigidTransform
 
-    meshcat = Meshcat()
+    from .meshcat_ui import patch_meshcat_page
+
+    patch_meshcat_page()
+    # Nothing here publishes a realtime rate, so the stats plot only ever covers the view.
+    meshcat = Meshcat(MeshcatParams(show_stats_plot=False))
     group_paths = _group_paths(setup)
     colors = [
         Rgba(0.55, 0.58, 0.62, 1.0),
