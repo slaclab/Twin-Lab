@@ -88,6 +88,7 @@ window.addEventListener("load", function () {
   var HELPERS = { Grid: 1, Axes: 1, Background: 1, Lights: 1, Cameras: 1 };
   var radius = 0;
   var measuredAt = 0;
+  var override = { "Zoom limit override": false };
 
   // Bounding the model walks every mesh, so the result is reused between wheel ticks
   // while Drake is still streaming geometry in.
@@ -108,6 +109,11 @@ window.addEventListener("load", function () {
     if (!controls || !camera || !camera.isPerspectiveCamera) return;
     controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.ROTATE,
                               RIGHT: THREE.MOUSE.PAN };
+    if (override["Zoom limit override"]) {
+      controls.minDistance = 0;
+      controls.maxDistance = Infinity;
+      return;
+    }
     var size = modelRadius();
     if (size <= 0) return;
     // Past the near plane geometry clips anyway, and at four times the distance that
@@ -118,6 +124,8 @@ window.addEventListener("load", function () {
     controls.update();
     viewer.set_dirty();
   }
+
+  if (viewer.gui) viewer.gui.add(override, "Zoom limit override").onChange(apply);
 
   // Drake builds a fresh OrbitControls whenever the server sets a camera.
   var set_camera = viewer.set_camera.bind(viewer);
