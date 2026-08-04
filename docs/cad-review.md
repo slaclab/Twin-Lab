@@ -207,6 +207,53 @@ source mtime, size, and settings, so the full assembly is a one-time cost and
 milliseconds thereafter. Hull count barely affects that runtime: CoACD's search
 dominates, so `max_hulls` trades query cost and package size, not build time.
 
+`slac-hull-audit` measures what that decomposition costs in accuracy, comparing every
+cached hull against the tessellated part it replaces:
+
+```bash
+slac-hull-audit                       # every cached decomposition, worst fit first
+slac-hull-audit static_A003 --view    # one mesh, with the hulls drawn over the CAD
+```
+
+Three numbers per part: `vol x` is hull volume over CAD volume, where the hull volume
+is the union rather than the sum, so overlapping pieces are not counted twice; `bulge`
+is the furthest a hull vertex sits *outside* the CAD surface, which is the added
+material that produces phantom contact; `gap` is the furthest a CAD vertex sits outside
+every hull, which is real material CoACD's voxel remesh shaved off and Drake will
+therefore never collide with. `--view` opens the same parts in Meshcat with the hulls
+drawn translucent over the grey CAD mesh, so a bad row can be looked at rather than
+guessed at. Sorting by `gap` finds parts that are too small, sorting by `volume` finds
+the parts worth a per-part `threshold` or `max_hulls` override.
+
+Bulge is measured against a *signed* distance to the surface. Hulls fill solid regions,
+so their vertices routinely sit deep inside the part, and an unsigned distance counts
+that depth as added material: `static_A003/P024` reported 4.42 mm of bulge while its
+hulls fit it to 8% by volume, and the offending vertex turned out to be 4.42 mm inside
+the solid, with a true outward bulge of 0.28 mm. Signing the distance moved the median
+worst-case bulge from 1.61 mm to 0.69 mm and the 90th percentile from 5.51 mm to
+1.96 mm across the assembly.
+
+Auditing all 215 parts of the `43841` assembly measured 3.5 minutes and reported 1.536x
+volume overall, median 1.229 per part, worst 2.688, with the largest gap at 0.45 mm,
+below the 0.5 mm tessellation deflection, so no part is meaningfully undersized. Bulge
+runs 0.69 mm at the median, 1.96 mm at the 90th percentile and 7.39 mm at the worst,
+and it tracks the *voxel* size rather than the part: CoACD's `preprocess_resolution`
+divides each part's own bounding box, so the fixed default of 50 gives a 1.6 mm voxel
+on a median 82 mm part but a 15.9 mm voxel on the 796 mm rails. Raising it to 800 on
+one such rail took its bulge from 5.55 mm to 0.28 mm. Lowering `threshold` and doubling
+`max_hulls` did not help at all -- `static_A003/P024` held at 4.42 mm with 32 and with
+64 hulls -- so resolution, not hull budget, is the lever that moves bulge.
+
+The tail is what matters: the parts above 2x saturate `max_hulls` at 32 while still
+holding an unfilled cavity, and those are the ones worth an override rather than the
+median.
+
+Volume is integrated about each part's own centroid rather than the world origin. The
+tessellation is not watertight -- about 1% of its welded edges bound a sliver crack --
+and the term that leaks through those cracks grows with the distance from the reference
+point, so a world-origin integral reports a different volume for the same part at
+different placements.
+
 Work is dispatched per sub-part rather than per file, longest first, so one large mesh
 cannot set the makespan. Each finished sub-part writes a resume marker, so a build that
 is interrupted picks up where it stopped instead of starting over.
