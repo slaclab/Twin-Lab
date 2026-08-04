@@ -73,6 +73,70 @@ window.addEventListener("load", function () {
 });
 """
 
+# Solid Edge is the CAD everyone here already knows, so its view bindings win: wheel
+# zooms, wheel button orbits, shift plus wheel button pans. OrbitControls already sends
+# a shifted ROTATE drag to pan, so the mapping is one assignment.
+CONTROLS_JS = """
+window.addEventListener("load", function () {
+  var THREE = window.MeshCat && window.MeshCat.THREE;
+  if (!THREE) {
+    console.warn("Twin-Lab: MeshCat.THREE is unavailable; view controls left as Drake's.");
+    return;
+  }
+  // Meshcat's own helpers are sized independently of the model, and the grid alone is
+  // tens of metres across, so they must not drag the zoom limit out with them.
+  var HELPERS = { Grid: 1, Axes: 1, Background: 1, Lights: 1, Cameras: 1 };
+  var radius = 0;
+  var measuredAt = 0;
+
+  // Bounding the model walks every mesh, so the result is reused between wheel ticks
+  // while Drake is still streaming geometry in.
+  function modelRadius() {
+    if (radius > 0 && Date.now() - measuredAt < 5000) return radius;
+    measuredAt = Date.now();
+    var box = new THREE.Box3();
+    viewer.scene.children.forEach(function (child) {
+      if (!HELPERS[child.name]) box.expandByObject(child);
+    });
+    if (!box.isEmpty()) radius = box.getSize(new THREE.Vector3()).length() / 2;
+    return radius;
+  }
+
+  function apply() {
+    var controls = viewer.controls;
+    var camera = viewer.camera;
+    if (!controls || !camera || !camera.isPerspectiveCamera) return;
+    controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.ROTATE,
+                              RIGHT: THREE.MOUSE.PAN };
+    var size = modelRadius();
+    if (size <= 0) return;
+    // Past the near plane geometry clips anyway, and at four times the distance that
+    // fits the model it still covers a quarter of the window.
+    var fit = size / Math.sin(THREE.MathUtils.degToRad(camera.fov) / 2);
+    controls.minDistance = camera.near * 2;
+    controls.maxDistance = Math.min(camera.far / 2, fit * 4);
+    controls.update();
+    viewer.set_dirty();
+  }
+
+  // Drake builds a fresh OrbitControls whenever the server sets a camera.
+  var set_camera = viewer.set_camera.bind(viewer);
+  viewer.set_camera = function (camera) { set_camera(camera); apply(); };
+
+  var pane = viewer.dom_element;
+  // Chrome opens its autoscroll widget on a middle press, which eats the orbit drag.
+  pane.addEventListener("pointerdown", function (event) {
+    if (event.button === 1) event.preventDefault();
+  });
+  pane.addEventListener("auxclick", function (event) {
+    if (event.button === 1) event.preventDefault();
+  });
+  // The limit has to keep up with a model that is still arriving.
+  pane.addEventListener("wheel", apply, true);
+  apply();
+});
+"""
+
 RESOURCE_ROOT = CACHE_ROOT / "drake-resource-root"
 
 
@@ -120,7 +184,11 @@ def _patched_html(source: Path) -> str:
     html = source.read_text(encoding="utf-8")
     if "</body>" not in html:
         raise RuntimeError("Drake's meshcat.html no longer has a </body> to patch")
-    patch = f"<style>{PANEL_CSS}</style>\n<script>{PANEL_JS}</script>\n"
+    patch = (
+        f"<style>{PANEL_CSS}</style>\n"
+        f"<script>{PANEL_JS}</script>\n"
+        f"<script>{CONTROLS_JS}</script>\n"
+    )
     html = html.replace("</body>", f"{patch}</body>")
     # The tab title is how you tell a patched page from a stale Drake one.
     return html.replace("<title>Drake MeshCat</title>", "<title>Twin-Lab Meshcat</title>")
