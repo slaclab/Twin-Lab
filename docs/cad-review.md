@@ -187,6 +187,15 @@ slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
 `Log clearance report` prints the full sorted table to the terminal for a design
 review; the live status line only reports the worst pair.
 
+Offending parts light up on the model itself: yellow inside the warning band, red
+where they touch. `Showing: whole assembly` marks every offending part at once, which
+is the view for judging whether a pose is safe. Clicking it switches to `Showing:
+worst pair only`, which hides the illustration meshes and leaves just the two parts of
+the worst pair on screen, for looking at one interface without the rest of the
+assembly in the way. What remains in that mode are the convex hulls rather than the
+CAD meshes, because the compiled package carries one visual mesh per sub-assembly and
+only the collision geometry is split per reviewed part.
+
 Collision geometry is built one of two ways, selected by `--collision-mode`:
 
 - `hull` wraps each merged mesh in a single convex hull. It compiles in seconds but
@@ -213,6 +222,7 @@ cached hull against the tessellated part it replaces:
 ```bash
 slac-hull-audit                       # every cached decomposition, worst fit first
 slac-hull-audit static_A003 --view    # one mesh, with the hulls drawn over the CAD
+slac-hull-audit --assembly            # every part in place, hulls over the CAD mesh
 ```
 
 Three numbers per part: `vol x` is hull volume over CAD volume, where the hull volume
@@ -224,6 +234,30 @@ therefore never collide with. `--view` opens the same parts in Meshcat with the 
 drawn translucent over the grey CAD mesh, so a bad row can be looked at rather than
 guessed at. Sorting by `gap` finds parts that are too small, sorting by `volume` finds
 the parts worth a per-part `threshold` or `max_hulls` override.
+
+`--view` answers *how* badly one part fits; `--assembly` answers *which* parts fit
+badly, which is where a settings pass starts. It draws every audited part at its
+assembly position with the hulls layered translucent over the CAD mesh, so the pieces
+Drake collides with are read against the geometry they stand in for rather than in
+isolation. The hull button cycles three states: piece colours, which give each hull of
+a decomposition its own colour so the cut lines are visible; bulge shading, which
+recolours every hull vertex grey where it lies on the CAD surface and red at
+`--bulge-scale-mm` (2 mm by default) of outward bulge, so a spanned concavity shows up
+as a red patch on the part that has it; and hidden, leaving the CAD alone. Both
+colourings are uploaded once and switched by visibility, so the toggle is instant.
+`Show worst N parts` hides the good parts and leaves the bad ones standing in the
+assembly, and `Focus part index` flies the camera to one part and prints which it is.
+
+The bulge ramp holds grey out to a quarter of its scale rather than starting at zero.
+Every hull vertex bulges a little -- the median across `static_A003` is 0.17 mm, at the
+tessellation deflection rather than at anything CoACD did -- so a ramp anchored at zero
+paints the whole assembly amber and separates nothing.
+
+Nearly all of that runtime is the two distance fields, so each part's measurements are
+cached in an `audit.npz` beside the hulls they judge, keyed to the source mesh's digest
+and the decomposition settings. Re-running the audit costs a second rather than
+minutes, and a re-decomposed part is the only one re-measured. `--refresh` forces the
+measurement anyway, which is what to reach for after changing the metrics themselves.
 
 Bulge is measured against a *signed* distance to the surface. Hulls fill solid regions,
 so their vertices routinely sit deep inside the part, and an unsigned distance counts

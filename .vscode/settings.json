@@ -50,5 +50,10 @@
   "files.readonlyInclude": {
     "**/*.stp": true
   },
-  "editor.largeFileOptimizations": true
+  "editor.largeFileOptimizations": true,
+  "python.testing.pytestArgs": [
+    "tests"
+  ],
+  "python.testing.unittestEnabled": false,
+  "python.testing.pytestEnabled": true
 }

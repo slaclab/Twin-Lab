@@ -12,8 +12,8 @@ from twin_lab.collision import (
     Clearance,
     ClearanceReport,
     _pair_key,
-    _part_of,
     _short,
+    part_of,
     read_ignored_pairs,
 )
 from twin_lab.collision_viewer import SliderJoint, read_joint_metadata
@@ -84,7 +84,7 @@ def test_decomposition_settings_round_trip_through_the_cache_key():
     ],
 )
 def test_part_of_finds_references_that_are_delimited_by_underscores(geometry_name, expected):
-    assert _part_of(geometry_name) == expected
+    assert part_of(geometry_name) == expected
 
 
 def test_short_names_a_geometry_by_its_link_and_part():

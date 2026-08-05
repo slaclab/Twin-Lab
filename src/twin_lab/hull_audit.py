@@ -10,11 +10,13 @@ against.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -50,6 +52,25 @@ HULLS_WIRE = "Hulls: WIREFRAME (click to hide)"
 HULLS_OFF = "Hulls: HIDDEN (click for solid)"
 SOURCE_ON = "CAD mesh: ON (click to hide)"
 SOURCE_OFF = "CAD mesh: OFF (click to show)"
+FOCUS_LABEL = "Focus part index"
+WORST_LABEL = "Show worst N parts"
+HULLS_PIECE = "Hulls: PIECE COLOURS (click for bulge shading)"
+HULLS_BULGE = "Hulls: BULGE SHADING (click to hide)"
+HULLS_HIDDEN = "Hulls: HIDDEN (click for piece colours)"
+# Grey where the hull lies on the CAD surface, through amber, to red at the full scale.
+BULGE_RAMP_RGB = ((0.62, 0.64, 0.66), (0.95, 0.62, 0.05), (0.88, 0.05, 0.05))
+# Where each of those sits on the scale. The grey stop is held out to the tessellation
+# deflection because bulge under it is meshing noise, not material CoACD added: the
+# median hull vertex of static_A003 bulges 0.17 mm, so a ramp starting at zero paints
+# the whole assembly amber and separates nothing.
+BULGE_RAMP_STOPS = (0.25, 0.6, 1.0)
+DEFAULT_BULGE_SCALE_MM = 2.0
+
+# Measuring a part costs seconds and reading its hulls costs milliseconds, so the
+# distances are cached beside the decomposition they judge and die with it.
+AUDIT_CACHE_NAME = "audit.npz"
+# Bump when a measurement changes meaning, so old numbers are redone rather than trusted.
+AUDIT_SCHEMA = 1
 
 
 @dataclass(frozen=True)
@@ -93,6 +114,14 @@ class PartAudit:
 
 
 @dataclass(frozen=True)
+class PartFit:
+    """Where a part misfits rather than by how much: the per-vertex errors behind the audit."""
+
+    bulge_m: np.ndarray
+    gap_m: np.ndarray
+
+
+@dataclass(frozen=True)
 class PartGeometry:
     """The reference mesh and hulls for one part, kept for the viewer."""
 
@@ -100,6 +129,7 @@ class PartGeometry:
     vertices: np.ndarray
     faces: np.ndarray
     hulls: tuple[Hull, ...]
+    fit: PartFit
 
 
 def load_hull(path: Path) -> Hull:
@@ -249,15 +279,10 @@ def _brute_surface_distance(
     return out
 
 
-def audit_part(
-    source: Path,
-    part_ref: str,
-    vertices: np.ndarray,
-    faces: np.ndarray,
-    hulls: Sequence[Hull],
-    rng: np.random.Generator,
-) -> PartAudit:
-    """Compare one reviewed part against the hulls that replace it."""
+def part_fit(
+    vertices: np.ndarray, faces: np.ndarray, hulls: Sequence[Hull]
+) -> PartFit:
+    """Per-vertex misfit: outward bulge per hull vertex, uncovered gap per mesh vertex."""
 
     # Per hull rather than all at once: each hull is local, so the prefilter inside
     # surface_distance can discard most of the part's triangles. Only the outward side
@@ -271,7 +296,22 @@ def audit_part(
         if hulls
         else np.zeros(0)
     )
-    gap = outside_distance(hulls, vertices)
+    return PartFit(bulge_m=bulge, gap_m=outside_distance(hulls, vertices))
+
+
+def audit_part(
+    source: Path,
+    part_ref: str,
+    vertices: np.ndarray,
+    faces: np.ndarray,
+    hulls: Sequence[Hull],
+    rng: np.random.Generator,
+    fit: PartFit | None = None,
+) -> PartAudit:
+    """Compare one reviewed part against the hulls that replace it."""
+
+    fit = fit if fit is not None else part_fit(vertices, faces, hulls)
+    bulge, gap = fit.bulge_m, fit.gap_m
     return PartAudit(
         source=source,
         part_ref=part_ref,
@@ -293,10 +333,10 @@ def audit_cache(
     part_pattern: str | None = None,
     seed: int = 0,
     progress: bool = False,
+    refresh: bool = False,
 ) -> list[PartGeometry]:
     """Audit every decomposed part recorded under a decomposition cache directory."""
 
-    rng = np.random.default_rng(seed)
     matcher = re.compile(part_pattern, re.IGNORECASE) if part_pattern else None
     wanted = {name.lower() for name in sources} if sources else None
     results: list[PartGeometry] = []
@@ -320,8 +360,17 @@ def audit_cache(
         }
         if not entries:
             continue
+        cache_path = manifest_path.parent / AUDIT_CACHE_NAME
+        key = _audit_key(manifest, seed)
+        cached = {} if refresh else _read_audit_cache(cache_path, key, source)
+        pending = sum(1 for part_ref in entries if part_ref not in cached)
         if progress:
-            print(f"  [{number}/{len(manifests)}] {source.stem}: {len(entries)} parts", flush=True)
+            state = f"measuring {pending}" if pending else "cached"
+            print(
+                f"  [{number}/{len(manifests)}] {source.stem}: {len(entries)} parts, {state}",
+                flush=True,
+            )
+        measured = dict(cached)
         for part_ref, part_vertices, part_faces in read_obj_parts(source):
             names = entries.get(part_ref)
             if names is None:
@@ -329,15 +378,87 @@ def audit_cache(
             vertices = np.asarray(part_vertices, dtype=np.float64)
             faces = np.asarray(part_faces, dtype=np.int32)
             hulls = tuple(load_hull(manifest_path.parent / name) for name in names)
+            found = cached.get(part_ref)
+            if found is None:
+                fit = part_fit(vertices, faces, hulls)
+                rng = _part_rng(seed, source, part_ref)
+                found = (audit_part(source, part_ref, vertices, faces, hulls, rng, fit), fit)
+                measured[part_ref] = found
+            audit, fit = found
             results.append(
                 PartGeometry(
-                    audit=audit_part(source, part_ref, vertices, faces, hulls, rng),
+                    audit=audit,
                     vertices=vertices,
                     faces=faces,
                     hulls=hulls,
+                    fit=fit,
                 )
             )
+        if len(measured) > len(cached):
+            _write_audit_cache(cache_path, key, measured)
     return results
+
+
+def _part_rng(seed: int, source: Path, part_ref: str) -> np.random.Generator:
+    """Seeded per part, so a part measures the same whether or not its neighbours were cached."""
+
+    digest = hashlib.blake2b(f"{source}\0{part_ref}".encode(), digest_size=8).digest()
+    return np.random.default_rng([seed, int.from_bytes(digest, "big")])
+
+
+def _audit_key(manifest: dict[str, Any], seed: int) -> str:
+    """Everything the numbers depend on: which mesh, which hulls, and how they were measured."""
+
+    return json.dumps(
+        {
+            "schema": AUDIT_SCHEMA,
+            "source_sha256": manifest.get("source_sha256"),
+            "source_size": manifest.get("source_size"),
+            "parts_settings_sig": manifest.get("parts_settings_sig"),
+            "seed": seed,
+            "overlap_samples": OVERLAP_SAMPLES,
+        },
+        sort_keys=True,
+    )
+
+
+def _read_audit_cache(path: Path, key: str, source: Path) -> dict[str, tuple[PartAudit, PartFit]]:
+    """Measurements from an earlier run, or nothing at all if any input to them changed."""
+
+    if not path.exists():
+        return {}
+    try:
+        with np.load(path, allow_pickle=False) as data:
+            if str(data["key"]) != key:
+                return {}
+            header = json.loads(str(data["header"]))
+            return {
+                record["part_ref"]: (
+                    PartAudit(source=source, **record),
+                    PartFit(bulge_m=data[f"{index}.bulge"], gap_m=data[f"{index}.gap"]),
+                )
+                for index, record in enumerate(header)
+            }
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+        # A truncated or outdated file is worth nothing and worth no more thought.
+        return {}
+
+
+def _write_audit_cache(
+    path: Path, key: str, measured: dict[str, tuple[PartAudit, PartFit]]
+) -> None:
+    arrays: dict[str, np.ndarray] = {}
+    header = []
+    for index, (audit, fit) in enumerate(measured.values()):
+        record = asdict(audit)
+        record.pop("source")
+        header.append(record)
+        arrays[f"{index}.bulge"] = fit.bulge_m
+        arrays[f"{index}.gap"] = fit.gap_m
+    temporary = path.with_name(path.name + ".tmp")
+    with temporary.open("wb") as stream:
+        np.savez_compressed(stream, key=key, header=json.dumps(header), **arrays)
+    temporary.replace(path)
 
 
 def format_table(audits: Sequence[PartAudit]) -> str:
@@ -520,13 +641,150 @@ def _describe(index: int, audit: PartAudit) -> str:
     )
 
 
+def run_assembly_viewer(parts: Sequence[PartGeometry], *, bulge_scale_mm: float) -> None:
+    """Draw every audited part where it actually sits, hulls layered over the CAD mesh.
+
+    The one-at-a-time viewer answers "how bad is this part"; this one answers "which
+    parts are bad", which is the question a decomposition-settings pass starts from.
+    """
+
+    import time
+
+    from pydrake.geometry import Meshcat, MeshcatParams
+
+    from .stage_cad_viewer import _wsl_ipv4_address
+
+    params = MeshcatParams(host="*")
+    address = _wsl_ipv4_address()
+    if address is not None:
+        params.web_url_pattern = f"http://{address}:{{port}}"
+    meshcat = Meshcat(params)
+    print(f"Assembly hull viewer: {meshcat.web_url()}")
+
+    hulls = sum(part.audit.hull_count for part in parts)
+    print(f"Uploading {len(parts)} parts and {hulls} hulls; this takes a moment.")
+    for index, part in enumerate(parts):
+        _upload_part(meshcat, f"/assembly/part{index:04d}", part, bulge_scale_mm)
+
+    meshcat.AddSlider(FOCUS_LABEL, 0.0, float(len(parts) - 1), 1.0, 0.0)
+    meshcat.AddSlider(WORST_LABEL, 1.0, float(len(parts)), 1.0, float(len(parts)))
+    meshcat.AddButton("Stop viewer", "Escape")
+    hull_button, source_button = HULLS_PIECE, SOURCE_ON
+    meshcat.AddButton(hull_button)
+    meshcat.AddButton(source_button)
+
+    print()
+    print("Every part is drawn at its assembly position, worst fit first by index.")
+    print("Grey is the CAD mesh; the translucent shells over it are the hulls Drake sees.")
+    print(
+        "Piece colours separate one hull from the next; bulge shading recolours them "
+        f"grey where they lie on the CAD surface and red at {bulge_scale_mm:.1f} mm of "
+        "outward bulge, which is material Drake will collide with that is not there."
+    )
+    print("'Show worst N parts' hides the good parts and leaves the bad ones in place.")
+    print("'Focus part index' flies the camera to one part and prints which it is.")
+
+    _frame_assembly(meshcat, parts)
+    hull_style = 0
+    source_visible = True
+    shown = len(parts)
+    # Starts matched to the slider so the opening view stays wide, not on one part.
+    focused = 0
+    hull_clicks = 0
+    source_clicks = 0
+    while meshcat.GetButtonClicks("Stop viewer") == 0:
+        new_hull = meshcat.GetButtonClicks(hull_button)
+        new_source = meshcat.GetButtonClicks(source_button)
+        restyle = False
+        if new_hull != hull_clicks:
+            hull_clicks = new_hull
+            hull_style = (hull_style + 1) % 3
+            meshcat.DeleteButton(hull_button)
+            hull_button = (HULLS_PIECE, HULLS_BULGE, HULLS_HIDDEN)[hull_style]
+            meshcat.AddButton(hull_button)
+            restyle = True
+        if new_source != source_clicks:
+            source_clicks = new_source
+            source_visible = not source_visible
+            meshcat.DeleteButton(source_button)
+            source_button = SOURCE_ON if source_visible else SOURCE_OFF
+            meshcat.AddButton(source_button)
+            restyle = True
+        if restyle:
+            for index in range(shown):
+                root = f"/assembly/part{index:04d}"
+                meshcat.SetProperty(f"{root}/pieces", "visible", hull_style == 0)
+                meshcat.SetProperty(f"{root}/bulge", "visible", hull_style == 1)
+                meshcat.SetProperty(f"{root}/mesh", "visible", source_visible)
+
+        wanted = min(max(int(round(meshcat.GetSliderValue(WORST_LABEL))), 1), len(parts))
+        if wanted != shown:
+            for index in range(min(wanted, shown), max(wanted, shown)):
+                meshcat.SetProperty(f"/assembly/part{index:04d}", "visible", index < wanted)
+            shown = wanted
+
+        index = min(max(int(round(meshcat.GetSliderValue(FOCUS_LABEL))), 0), len(parts) - 1)
+        if index != focused:
+            focused = index
+            _frame_camera(meshcat, parts[index])
+            print(_describe(index, parts[index].audit))
+        time.sleep(0.05)
+
+
+def _upload_part(meshcat, root: str, part: PartGeometry, bulge_scale_mm: float) -> None:
+    """Both colourings at once: swapping them later is a visibility flip, not a re-upload."""
+
+    from pydrake.geometry import Rgba
+
+    meshcat.SetTriangleMesh(
+        f"{root}/mesh", _columns(part.vertices), _indices(part.faces), Rgba(*SOURCE_RGBA)
+    )
+    start = 0
+    for hull_index, hull in enumerate(part.hulls):
+        stop = start + len(hull.vertices)
+        colors = _columns(_bulge_colors(part.fit.bulge_m[start:stop], bulge_scale_mm))
+        start = stop
+        vertices, faces = _columns(hull.vertices), _indices(hull.faces)
+        red, green, blue = HULL_RGBA[hull_index % len(HULL_RGBA)]
+        meshcat.SetTriangleMesh(
+            f"{root}/pieces/{hull_index:03d}",
+            vertices,
+            faces,
+            Rgba(red, green, blue, HULL_ALPHA),
+        )
+        meshcat.SetTriangleColorMesh(f"{root}/bulge/{hull_index:03d}", vertices, faces, colors)
+    meshcat.SetProperty(f"{root}/bulge", "visible", False)
+
+
+def _bulge_colors(bulge_m: np.ndarray, scale_mm: float) -> np.ndarray:
+    if len(bulge_m) == 0:
+        return np.zeros((0, 3))
+    fraction = np.clip(bulge_m * MM_PER_M / max(scale_mm, 1e-6), 0.0, 1.0)
+    stops = np.asarray(BULGE_RAMP_RGB)
+    positions = np.asarray(BULGE_RAMP_STOPS)
+    return np.stack(
+        [np.interp(fraction, positions, stops[:, channel]) for channel in range(3)], axis=1
+    )
+
+
+def _frame_assembly(meshcat, parts: Sequence[PartGeometry]) -> None:
+    lower = np.min([part.vertices.min(axis=0) for part in parts], axis=0)
+    upper = np.max([part.vertices.max(axis=0) for part in parts], axis=0)
+    center = (lower + upper) / 2.0
+    span = max(float(np.linalg.norm(upper - lower)), 1e-3)
+    _look_at(meshcat, center + np.array([0.5, -0.7, 0.4]) * span, center)
+
+
+def _look_at(meshcat, eye: np.ndarray, target: np.ndarray) -> None:
+    # pydrake's stub gives SetCameraPose a malformed Eigen shape; lists convert at runtime.
+    meshcat.SetCameraPose(eye.tolist(), target.tolist())  # pyright: ignore[reportArgumentType]
+
+
 def _frame_camera(meshcat, part: PartGeometry) -> None:
     lower, upper = part.vertices.min(axis=0), part.vertices.max(axis=0)
     center = (lower + upper) / 2.0
     span = max(float(np.linalg.norm(upper - lower)), 1e-3)
-    eye = center + np.array([0.7, -0.9, 0.6]) * span
-    # pydrake's stub gives SetCameraPose a malformed Eigen shape; lists convert at runtime.
-    meshcat.SetCameraPose(eye.tolist(), center.tolist())  # pyright: ignore[reportArgumentType]
+    _look_at(meshcat, center + np.array([0.7, -0.9, 0.6]) * span, center)
 
 
 def _columns(vertices: np.ndarray) -> np.ndarray:
@@ -668,7 +926,23 @@ def main() -> None:
     parser.add_argument(
         "--view-limit", type=int, default=12, help="Parts to upload to the viewer"
     )
+    parser.add_argument(
+        "--assembly",
+        action="store_true",
+        help="Show every audited part at its assembly position, hulls over the CAD mesh",
+    )
+    parser.add_argument(
+        "--bulge-scale-mm",
+        type=float,
+        default=DEFAULT_BULGE_SCALE_MM,
+        help="Outward bulge that saturates the red end of the assembly viewer's colour ramp",
+    )
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help="Re-measure every part instead of reusing the cached distances",
+    )
     args = parser.parse_args()
 
     cache_dir = (
@@ -681,6 +955,7 @@ def main() -> None:
         part_pattern=args.part,
         seed=args.seed,
         progress=True,
+        refresh=args.refresh,
     )
     if not parts:
         raise SystemExit("No decomposed parts matched")
@@ -708,5 +983,7 @@ def main() -> None:
         destination = Path(args.csv)
         write_csv(destination, audits)
         print(f"Wrote {destination}")
-    if args.view:
+    if args.assembly:
+        run_assembly_viewer(parts, bulge_scale_mm=args.bulge_scale_mm)
+    elif args.view:
         run_hull_viewer(parts[: args.view_limit])
