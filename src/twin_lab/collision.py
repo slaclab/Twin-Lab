@@ -34,7 +34,7 @@ class Clearance:
 
     @property
     def parts(self) -> tuple[str, str]:
-        return (_part_of(self.a), _part_of(self.b))
+        return (part_of(self.a), part_of(self.b))
 
     @property
     def names(self) -> tuple[str, str]:
@@ -294,7 +294,7 @@ def read_part_labels(inventory_path: str | Path) -> dict[str, str]:
 
 
 def _pair_key(a: str, b: str) -> tuple[str, str]:
-    first, second = sorted((_part_of(a), _part_of(b)))
+    first, second = sorted((part_of(a), part_of(b)))
     return first, second
 
 
@@ -302,7 +302,7 @@ def _leaf(scoped_name: str) -> str:
     return scoped_name.rsplit("::", 1)[-1].lower()
 
 
-def _part_of(geometry_name: str) -> str:
+def part_of(geometry_name: str) -> str:
     """Recover the reviewed occurrence reference baked into a collision geometry name."""
 
     matches = PART_PATTERN.findall(geometry_name)
@@ -324,5 +324,5 @@ def _short(geometry_name: str, labels: Mapping[str, str] | None = None) -> str:
 
     segments = geometry_name.split("::")
     link = segments[1] if len(segments) > 2 else segments[0]
-    ref = _part_of(geometry_name)
+    ref = part_of(geometry_name)
     return f"{link}/{labels.get(ref, ref) if labels else ref}"

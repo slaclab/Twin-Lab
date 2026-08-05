@@ -12,11 +12,16 @@ from twin_lab.collision import (
     Clearance,
     ClearanceReport,
     _pair_key,
-    _part_of,
     _short,
+    part_of,
     read_ignored_pairs,
 )
-from twin_lab.collision_viewer import SliderJoint, _offender_labels, read_joint_metadata
+from twin_lab.collision_viewer import (
+    OFFENDER_LIMIT,
+    SliderJoint,
+    _offender_labels,
+    read_joint_metadata,
+)
 from twin_lab.convex_collision import (
     CACHE_SCHEMA,
     ConvexPart,
@@ -84,7 +89,7 @@ def test_decomposition_settings_round_trip_through_the_cache_key():
     ],
 )
 def test_part_of_finds_references_that_are_delimited_by_underscores(geometry_name, expected):
-    assert _part_of(geometry_name) == expected
+    assert part_of(geometry_name) == expected
 
 
 def test_short_names_a_geometry_by_its_link_and_part():
@@ -155,7 +160,7 @@ def test_offender_labels_state_each_pair_by_its_own_clearance():
         warn_m=0.005,
     )
 
-    assert _offender_labels(report) == [
+    assert _offender_labels(report, OFFENDER_LIMIT) == [
         "TOUCHING 1: A001 <-> A002",
         "CLOSE 1: A003 <-> A004",
         "CLOSE 2: A005 <-> A006",
@@ -175,7 +180,7 @@ def test_offender_labels_admit_the_pairs_they_leave_out():
         warn_m=0.005,
     )
 
-    labels = _offender_labels(report)
+    labels = _offender_labels(report, 3)
 
     assert len(labels) == 4
     assert labels[-1] == "+2 more part pairs (see Log clearance report)"

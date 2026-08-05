@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from .collision import CollisionModel
+from .collision import CollisionModel, part_of
 from .paths import EXPORT_ROOT, resolve_repo_path, review_artifact_stem
 
 WARN_LABEL = "Clearance warning band (mm)"
@@ -24,6 +24,7 @@ AUTO_PERIOD_LABEL = "Auto motion period (s)"
 # meshcat_ui.TOGGLE_JS swaps a real checkbox into their row.
 COLLISION_LABEL = "Collision detection"
 ANIMATION_LABEL = "Animation"
+ISOLATE_LABEL = "Isolate worst pair"
 STATUS_RGB = {
     "clear": [0.13, 0.42, 0.18],
     "close": [0.72, 0.60, 0.05],
@@ -42,14 +43,10 @@ HIGHLIGHT_RGBA = {
 VISUALIZER_PREFIX = "/drake/visualizer"
 # Highlights hang under the body they belong to, so they follow it without per-frame updates.
 HIGHLIGHT_GROUP = "clearance"
-# One offending part carries dozens of hulls, and uploading them costs about 3 ms each. The
-# reviewed assembly puts ~150 hulls inside the default 5 mm band, so a lower cap left real
-# offenders unpainted; only a repaint uploads, so the steady-state cost stays near zero.
-HIGHLIGHT_LIMIT = 200
 # Drake's own sky gradient, restored when clearance checking is switched off.
 DEFAULT_TOP_RGB = [0.53, 0.81, 0.98]
 DEFAULT_BOTTOM_RGB = [0.10, 0.10, 0.44]
-OFFENDER_LIMIT = 3
+OFFENDER_LIMIT = 12
 # The signed-distance query costs ~30 ms, so running it every animated frame would cap the
 # loop near 30 fps; throttle it to this rate so the render can reach the requested fps.
 DETECTOR_HZ = 20.0
@@ -158,6 +155,7 @@ def run_collision_viewer(
         meshcat.AddSlider(joint.label, lower, upper, 0.05, home)
     meshcat.AddSlider(COLLISION_LABEL, 0.0, 1.0, 1.0, 1.0)
     meshcat.AddSlider(WARN_LABEL, 0.0, 50.0, 0.5, warn_mm)
+    meshcat.AddSlider(ISOLATE_LABEL, 0.0, 1.0, 1.0, 0.0)
     meshcat.AddSlider(ANIMATION_LABEL, 0.0, 1.0, 1.0, 0.0)
     meshcat.AddSlider(AUTO_RANGE_LABEL, 0.0, 100.0, 1.0, 25.0)
     meshcat.AddSlider(AUTO_PERIOD_LABEL, 2.0, 60.0, 0.5, 12.0)
@@ -169,6 +167,7 @@ def run_collision_viewer(
     print(f"{len(joints)} joints")
     print("Offending parts light up: YELLOW inside the warning band, RED where they touch.")
     print("Clear 'Collision detection' to turn checking off and use this as a plain viewer.")
+    print("Tick 'Isolate worst pair' to hide the assembly and leave only that pair on screen.")
     print("Tick 'Animation' to cycle every joint about its reviewed home.")
     print("Press Escape in Meshcat or Ctrl-C here to stop.")
 
@@ -178,6 +177,7 @@ def run_collision_viewer(
     log_clicks = 0
     collision_on = True
     animating = False
+    show_all = True
     phase = 0.0
     previous_tick = time.monotonic()
     previous_pose: tuple[list[float], float] | None = None
@@ -192,6 +192,7 @@ def run_collision_viewer(
 
         wanted_collision = meshcat.GetSliderValue(COLLISION_LABEL) >= 0.5
         wanted_animating = meshcat.GetSliderValue(ANIMATION_LABEL) >= 0.5
+        wanted_show_all = meshcat.GetSliderValue(ISOLATE_LABEL) < 0.5
         new_reset = meshcat.GetButtonClicks("Reset to home")
         if new_reset != reset_clicks:
             reset_clicks = new_reset
@@ -201,14 +202,24 @@ def run_collision_viewer(
             for joint in joints:
                 meshcat.SetSliderValue(joint.label, joint.slider_bounds()[2])
 
-        if (wanted_collision, wanted_animating) != (collision_on, animating):
+        if (wanted_collision, wanted_animating, wanted_show_all) != (
+            collision_on,
+            animating,
+            show_all,
+        ):
             if wanted_collision != collision_on:
                 print(f"Collision detection {'ON' if wanted_collision else 'OFF'}.")
             if not wanted_collision:
                 _reset_status(meshcat)
                 highlighter.clear()
                 readout = _clear_readout(meshcat, readout)
-            collision_on, animating = wanted_collision, wanted_animating
+            if not wanted_collision or wanted_show_all:
+                highlighter.isolate(False)
+            collision_on, animating, show_all = (
+                wanted_collision,
+                wanted_animating,
+                wanted_show_all,
+            )
             previous_pose = None
             previous_status = None
             previous_summary = ""
@@ -249,8 +260,10 @@ def run_collision_viewer(
                 if report.status != previous_status:
                     previous_status = report.status
                     _set_status(meshcat, report.status)
-                highlighter.update(report)
-                readout = _set_offender_readout(meshcat, report, readout)
+                selected = None if show_all else _isolated_parts(report)
+                highlighter.isolate(selected is not None)
+                highlighter.update(report, selected)
+                readout = _set_offender_readout(meshcat, report, readout, show_all=show_all)
                 if new_log != log_clicks:
                     log_clicks = new_log
                     _print_report(report)
@@ -291,32 +304,61 @@ class _Highlighter:
                 inspector.GetShape(geometry_id),
                 inspector.GetPoseInFrame(geometry_id),
             )
+        self._visuals: list[str] = []
+        for geometry_id in inspector.GetAllGeometryIds(Role.kIllustration):
+            frame_path = inspector.GetName(inspector.GetFrameId(geometry_id)).replace("::", "/")
+            # Drake publishes the scoped geometry name as further path levels, not one leaf.
+            leaf = inspector.GetName(geometry_id).replace("::", "/")
+            self._visuals.append(f"{VISUALIZER_PREFIX}/{frame_path}/{leaf}")
         self._shown: dict[str, str] = {}
+        self._uploaded: dict[str, str] = {}
+        self._hidden: frozenset[str] = frozenset()
 
-    def update(self, report) -> None:
+    def _paint(self, name: str, state: str) -> str:
+        """Upload a hull only when its colour is wrong; uploads cost ~3 ms each."""
+
         from pydrake.geometry import Rgba
 
-        states = report.geometry_states()
-        # Contact outranks a near miss, and clearances arrive worst first, so a stable sort
-        # by state spends the budget on the pairs worth looking at.
-        ranked = sorted(
-            ((name, state) for name, state in states.items() if name in self._geometries),
-            key=lambda item: item[1] != "interference",
-        )
-        wanted = dict(ranked[:HIGHLIGHT_LIMIT])
-        for name, state in wanted.items():
-            if self._shown.get(name) == state:
-                continue
-            path, shape, pose = self._geometries[name]
+        path, shape, pose = self._geometries[name]
+        if self._uploaded.get(name) != state:
             self._meshcat.SetObject(path, shape, Rgba(*HIGHLIGHT_RGBA[state]))
             self._meshcat.SetTransform(path, pose)
+            self._uploaded[name] = state
+        return path
+
+    def update(self, report, parts: frozenset[str] | None = None) -> None:
+        """Light up every offending hull, or only those of ``parts`` when given."""
+
+        wanted = {
+            name: state
+            for name, state in report.geometry_states().items()
+            if name in self._geometries and (parts is None or part_of(name) in parts)
+        }
         for name in self._shown.keys() - wanted.keys():
-            self._meshcat.Delete(self._geometries[name][0])
+            self._meshcat.SetProperty(self._geometries[name][0], "visible", False)
+        for name, state in wanted.items():
+            path = self._paint(name, state)
+            if name not in self._shown:
+                self._meshcat.SetProperty(path, "visible", True)
         self._shown = wanted
+
+    def isolate(self, isolated: bool) -> None:
+        """Drop the illustration meshes so only the highlighted hulls are left on screen.
+
+        The compiled visuals are one mesh per sub-assembly OBJ, not per reviewed part, so
+        hiding them all and leaving the per-part hulls is the only exact way to isolate.
+        """
+
+        hidden = frozenset(self._visuals) if isolated else frozenset()
+        for path in hidden - self._hidden:
+            self._meshcat.SetProperty(path, "visible", False)
+        for path in self._hidden - hidden:
+            self._meshcat.SetProperty(path, "visible", True)
+        self._hidden = hidden
 
     def clear(self) -> None:
         for name in self._shown:
-            self._meshcat.Delete(self._geometries[name][0])
+            self._meshcat.SetProperty(self._geometries[name][0], "visible", False)
         self._shown = {}
 
 
@@ -332,7 +374,14 @@ def _set_status(meshcat, status: str) -> None:
     meshcat.SetProperty("/Background/<object>", "bottom_color", color)
 
 
-def _offender_labels(report) -> list[str]:
+def _isolated_parts(report) -> frozenset[str] | None:
+    """The worst offending pair, or the whole assembly when nothing is inside the band."""
+
+    worst = report.offenders(1)
+    return frozenset(worst[0].parts) if worst else None
+
+
+def _offender_labels(report, limit: int) -> list[str]:
     """Name the worst part pairs as Meshcat control labels, worst first.
 
     Each label carries its own state: a pose can hold one pair in contact while the rest of
@@ -347,7 +396,7 @@ def _offender_labels(report) -> list[str]:
         return [f"clear: nothing within {report.warn_m * 1000:.0f} mm"]
     labels = []
     counts = {"TOUCHING": 0, "CLOSE": 0}
-    for item in report.offenders(OFFENDER_LIMIT):
+    for item in report.offenders(limit):
         heading = "TOUCHING" if item.distance_m <= 0.0 else "CLOSE"
         counts[heading] += 1
         first, second = report.labeled_parts(item)
@@ -360,10 +409,10 @@ def _offender_labels(report) -> list[str]:
     return labels
 
 
-def _set_offender_readout(meshcat, report, previous: list[str]) -> list[str]:
+def _set_offender_readout(meshcat, report, previous: list[str], *, show_all: bool) -> list[str]:
     """Republish the offending part IDs as buttons, the only text Meshcat can show."""
 
-    labels = _offender_labels(report)
+    labels = _offender_labels(report, OFFENDER_LIMIT if show_all else 1)
     if labels == previous:
         return previous
     _clear_readout(meshcat, previous)
