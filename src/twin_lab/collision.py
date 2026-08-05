@@ -70,6 +70,27 @@ class ClearanceReport:
         return tuple(item for item in self.clearances if 0.0 < item.distance_m <= self.warn_m)
 
     @property
+    def touching_pairs(self) -> tuple[tuple[str, str], ...]:
+        """Distinct part pairs in contact.
+
+        One part carries dozens of hulls, so a raw clearance count says nothing about how
+        many interfaces there are to look at.
+        """
+
+        return tuple(dict.fromkeys(item.parts for item in self.touching))
+
+    @property
+    def warning_pairs(self) -> tuple[tuple[str, str], ...]:
+        """Distinct part pairs inside the band that are not already in contact."""
+
+        touching = set(self.touching_pairs)
+        return tuple(
+            pair
+            for pair in dict.fromkeys(item.parts for item in self.warnings)
+            if pair not in touching
+        )
+
+    @property
     def interference(self) -> bool:
         """True when any reviewed pair is in contact or penetrating at this pose."""
 
@@ -120,8 +141,8 @@ class ClearanceReport:
         return (
             f"{state}: {worst.distance_m * 1000:+.2f} mm "
             f"{first} <-> {second} "
-            f"({len(self.touching)} touching, {len(self.warnings)} within "
-            f"{self.warn_m * 1000:.0f} mm)"
+            f"({len(self.touching_pairs)} part pairs touching, "
+            f"{len(self.warning_pairs)} more within {self.warn_m * 1000:.0f} mm)"
         )
 
 

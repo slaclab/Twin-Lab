@@ -16,7 +16,7 @@ from twin_lab.collision import (
     _short,
     read_ignored_pairs,
 )
-from twin_lab.collision_viewer import SliderJoint, read_joint_metadata
+from twin_lab.collision_viewer import SliderJoint, _offender_labels, read_joint_metadata
 from twin_lab.convex_collision import (
     CACHE_SCHEMA,
     ConvexPart,
@@ -112,6 +112,75 @@ def test_clearance_report_splits_touching_from_warnings():
     assert [item.distance_m for item in report.warnings] == [0.003]
     assert report.worst_m == -0.002
     assert "TOUCHING" in report.summary()
+
+
+def test_clearance_counts_are_reported_per_part_pair_not_per_hull():
+    # Two hulls of A001 touch one hull of A002, which is one interface, not two.
+    report = ClearanceReport(
+        clearances=(
+            Clearance("a::l::a::a001_000_collision", "a::l::a::a002_000_collision", -0.002),
+            Clearance("a::l::a::a001_001_collision", "a::l::a::a002_000_collision", -0.001),
+            Clearance("a::l::a::a003_000_collision", "a::l::a::a004_000_collision", 0.003),
+        ),
+        warn_m=0.005,
+    )
+
+    assert report.touching_pairs == (("A001", "A002"),)
+    assert report.warning_pairs == (("A003", "A004"),)
+    assert "1 part pairs touching, 1 more within 5 mm" in report.summary()
+
+
+def test_a_part_pair_inside_the_band_is_not_counted_again_as_a_warning():
+    report = ClearanceReport(
+        clearances=(
+            Clearance("a::l::a::a001_000_collision", "a::l::a::a002_000_collision", -0.002),
+            Clearance("a::l::a::a001_001_collision", "a::l::a::a002_001_collision", 0.003),
+        ),
+        warn_m=0.005,
+    )
+
+    assert report.touching_pairs == (("A001", "A002"),)
+    assert report.warning_pairs == ()
+
+
+def test_offender_labels_state_each_pair_by_its_own_clearance():
+    """A near miss listed under a contact used to read TOUCHING and never turn red."""
+
+    report = ClearanceReport(
+        clearances=(
+            Clearance("a::l::a::a001_000_collision", "a::l::a::a002_000_collision", -0.002),
+            Clearance("a::l::a::a003_000_collision", "a::l::a::a004_000_collision", 0.003),
+            Clearance("a::l::a::a005_000_collision", "a::l::a::a006_000_collision", 0.004),
+        ),
+        warn_m=0.005,
+    )
+
+    assert _offender_labels(report) == [
+        "TOUCHING 1: A001 <-> A002",
+        "CLOSE 1: A003 <-> A004",
+        "CLOSE 2: A005 <-> A006",
+    ]
+
+
+def test_offender_labels_admit_the_pairs_they_leave_out():
+    report = ClearanceReport(
+        clearances=tuple(
+            Clearance(
+                f"a::l::a::a{index:03d}_000_collision",
+                f"a::l::a::b{index:03d}_000_collision",
+                -0.001 * (index + 1),
+            )
+            for index in range(5)
+        ),
+        warn_m=0.005,
+    )
+
+    labels = _offender_labels(report)
+
+    assert len(labels) == 4
+    assert labels[-1] == "+2 more part pairs (see Log clearance report)"
+    # Drake pastes a control name into a single-quoted JS literal and evals it.
+    assert not any("'" in label for label in labels)
 
 
 def test_empty_clearance_report_reads_as_clear():

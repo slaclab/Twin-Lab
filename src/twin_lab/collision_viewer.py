@@ -20,10 +20,10 @@ from .paths import EXPORT_ROOT, resolve_repo_path, review_artifact_stem
 WARN_LABEL = "Clearance warning band (mm)"
 AUTO_RANGE_LABEL = "Auto motion range (% of travel)"
 AUTO_PERIOD_LABEL = "Auto motion period (s)"
-COLLISION_ON = "Collision detection: ON (click to disable)"
-COLLISION_OFF = "Collision detection: OFF (click to enable)"
-ANIMATION_ON = "Animation: ON (click to stop)"
-ANIMATION_OFF = "Animation: OFF (click to start)"
+# Drake can publish a slider but not a checkbox, so the on/off controls step 0 to 1 and
+# meshcat_ui.TOGGLE_JS swaps a real checkbox into their row.
+COLLISION_LABEL = "Collision detection"
+ANIMATION_LABEL = "Animation"
 STATUS_RGB = {
     "clear": [0.13, 0.42, 0.18],
     "close": [0.72, 0.60, 0.05],
@@ -156,28 +156,26 @@ def run_collision_viewer(
     for joint in joints:
         lower, upper, home = joint.slider_bounds()
         meshcat.AddSlider(joint.label, lower, upper, 0.05, home)
+    meshcat.AddSlider(COLLISION_LABEL, 0.0, 1.0, 1.0, 1.0)
     meshcat.AddSlider(WARN_LABEL, 0.0, 50.0, 0.5, warn_mm)
+    meshcat.AddSlider(ANIMATION_LABEL, 0.0, 1.0, 1.0, 0.0)
     meshcat.AddSlider(AUTO_RANGE_LABEL, 0.0, 100.0, 1.0, 25.0)
     meshcat.AddSlider(AUTO_PERIOD_LABEL, 2.0, 60.0, 0.5, 12.0)
     meshcat.AddButton("Reset to home")
     meshcat.AddButton("Log clearance report")
     meshcat.AddButton("Stop viewer", "Escape")
-    # Added after the fixed buttons so the offender readout always stays below them.
-    toggles = _set_toggles(meshcat, [], collision_on=True, animating=False)
     highlighter = _Highlighter(meshcat, model)
 
     print(f"{len(joints)} joints")
     print("Offending parts light up: YELLOW inside the warning band, RED where they touch.")
-    print("Click 'Collision detection' to turn checking off and use this as a plain viewer.")
-    print("Click 'Animation' to cycle every joint about its reviewed home.")
+    print("Clear 'Collision detection' to turn checking off and use this as a plain viewer.")
+    print("Tick 'Animation' to cycle every joint about its reviewed home.")
     print("Press Escape in Meshcat or Ctrl-C here to stop.")
 
     frame_period = 1.0 / max(fps, 1.0)
     detector_period = 1.0 / DETECTOR_HZ
     reset_clicks = 0
     log_clicks = 0
-    collision_clicks = 0
-    animation_clicks = 0
     collision_on = True
     animating = False
     phase = 0.0
@@ -192,14 +190,13 @@ def run_collision_viewer(
         elapsed = tick - previous_tick
         previous_tick = tick
 
-        new_collision = meshcat.GetButtonClicks(toggles[0])
-        new_animation = meshcat.GetButtonClicks(toggles[1])
+        wanted_collision = meshcat.GetSliderValue(COLLISION_LABEL) >= 0.5
+        wanted_animating = meshcat.GetSliderValue(ANIMATION_LABEL) >= 0.5
         new_reset = meshcat.GetButtonClicks("Reset to home")
-        wanted_collision = collision_on ^ (new_collision != collision_clicks)
-        wanted_animating = animating ^ (new_animation != animation_clicks)
         if new_reset != reset_clicks:
             reset_clicks = new_reset
             wanted_animating = False
+            meshcat.SetSliderValue(ANIMATION_LABEL, 0.0)
             phase = 0.0
             for joint in joints:
                 meshcat.SetSliderValue(joint.label, joint.slider_bounds()[2])
@@ -210,13 +207,8 @@ def run_collision_viewer(
             if not wanted_collision:
                 _reset_status(meshcat)
                 highlighter.clear()
+                readout = _clear_readout(meshcat, readout)
             collision_on, animating = wanted_collision, wanted_animating
-            toggles = _set_toggles(
-                meshcat, toggles + readout, collision_on=collision_on, animating=animating
-            )
-            readout = []
-            collision_clicks = 0
-            animation_clicks = 0
             previous_pose = None
             previous_status = None
             previous_summary = ""
@@ -269,24 +261,6 @@ def run_collision_viewer(
                 log_clicks = new_log
         frame_cost = time.monotonic() - tick
         time.sleep(max(0.0, frame_period - frame_cost) if animating else 0.1)
-
-
-def _set_toggles(meshcat, previous: list[str], *, collision_on: bool, animating: bool) -> list[str]:
-    """Meshcat has no checkbox, so relabelled buttons carry the on/off state.
-
-    The offender readout is torn down with them because dat.GUI only appends, and the
-    toggles have to end up above it again.
-    """
-
-    for name in previous:
-        meshcat.DeleteButton(name)
-    labels = [
-        COLLISION_ON if collision_on else COLLISION_OFF,
-        ANIMATION_ON if animating else ANIMATION_OFF,
-    ]
-    for name in labels:
-        meshcat.AddButton(name)
-    return labels
 
 
 def _reset_status(meshcat) -> None:
@@ -361,17 +335,28 @@ def _set_status(meshcat, status: str) -> None:
 def _offender_labels(report) -> list[str]:
     """Name the worst part pairs as Meshcat control labels, worst first.
 
+    Each label carries its own state: a pose can hold one pair in contact while the rest of
+    the list is merely inside the band, and calling those TOUCHING too made the readout
+    disagree with the highlights on screen.
+
     Distances are deliberately left out so the labels only change when the offending
     pairs change; a live number would rebuild the controls on every slider step.
     """
 
     if report.status == "clear":
         return [f"clear: nothing within {report.warn_m * 1000:.0f} mm"]
-    heading = "TOUCHING" if report.status == "interference" else "CLOSE"
     labels = []
-    for index, item in enumerate(report.offenders(OFFENDER_LIMIT), start=1):
+    counts = {"TOUCHING": 0, "CLOSE": 0}
+    for item in report.offenders(OFFENDER_LIMIT):
+        heading = "TOUCHING" if item.distance_m <= 0.0 else "CLOSE"
+        counts[heading] += 1
         first, second = report.labeled_parts(item)
-        labels.append(f"{heading} {index}: {first} <-> {second}")
+        labels.append(f"{heading} {counts[heading]}: {first} <-> {second}")
+    hidden = len(report.touching_pairs) + len(report.warning_pairs) - len(labels)
+    if hidden > 0:
+        # No apostrophes: Drake builds each control's JS callback by pasting the name into
+        # a single-quoted string literal and eval-ing it, so a quote drops the control.
+        labels.append(f"+{hidden} more part pairs (see Log clearance report)")
     return labels
 
 
@@ -381,11 +366,16 @@ def _set_offender_readout(meshcat, report, previous: list[str]) -> list[str]:
     labels = _offender_labels(report)
     if labels == previous:
         return previous
-    for name in previous:
-        meshcat.DeleteButton(name)
+    _clear_readout(meshcat, previous)
     for name in labels:
         meshcat.AddButton(name)
     return labels
+
+
+def _clear_readout(meshcat, previous: list[str]) -> list[str]:
+    for name in previous:
+        meshcat.DeleteButton(name)
+    return []
 
 
 def _read_ignored(ignore_file: str | Path | None) -> frozenset[tuple[str, str]]:
@@ -445,8 +435,9 @@ def _print_report(report) -> None:
             f"   ({first}  <->  {second})"
         )
     print(
-        f"  {len(report.touching)} touching, {len(report.warnings)} within band, "
-        f"{len(report.clearances)} reported"
+        f"  {len(report.touching_pairs)} part pairs touching, "
+        f"{len(report.warning_pairs)} more within band, "
+        f"{len(report.clearances)} hull pairs reported"
     )
 
 
