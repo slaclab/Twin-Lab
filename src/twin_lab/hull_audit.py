@@ -57,6 +57,11 @@ WORST_LABEL = "Show worst N parts"
 HULLS_PIECE = "Hulls: PIECE COLOURS (click for bulge shading)"
 HULLS_BULGE = "Hulls: BULGE SHADING (click to hide)"
 HULLS_HIDDEN = "Hulls: HIDDEN (click for piece colours)"
+TOUR_NEXT = "Next part (right arrow)"
+TOUR_PREVIOUS = "Previous part (left arrow)"
+# A review driven part by part gets abandoned if it is long; ten is what a reviewer will
+# actually click through, and the tail past it is rarely where the problems are.
+TOUR_DEFAULT_COUNT = 10
 # Grey where the hull lies on the CAD surface, through amber, to red at the full scale.
 BULGE_RAMP_RGB = ((0.62, 0.64, 0.66), (0.95, 0.62, 0.05), (0.88, 0.05, 0.05))
 # Where each of those sits on the scale. The grey stop is held out to the tessellation
@@ -539,21 +544,26 @@ def write_csv(path: Path, audits: Sequence[PartAudit]) -> None:
             )
 
 
+def _start_meshcat(label: str):
+    """A Meshcat server announced with a URL that also works from the Windows browser."""
+
+    from pydrake.geometry import Meshcat
+
+    from .meshcat_ui import announce_viewer, viewer_params
+
+    meshcat = Meshcat(viewer_params(show_stats_plot=True))
+    announce_viewer(label, meshcat)
+    return meshcat
+
+
 def run_hull_viewer(parts: Sequence[PartGeometry]) -> None:
     """Show one part at a time with its hulls drawn over the CAD mesh."""
 
     import time
 
-    from pydrake.geometry import Meshcat, MeshcatParams, Rgba
+    from pydrake.geometry import Rgba
 
-    from .stage_cad_viewer import _wsl_ipv4_address
-
-    params = MeshcatParams(host="*")
-    address = _wsl_ipv4_address()
-    if address is not None:
-        params.web_url_pattern = f"http://{address}:{{port}}"
-    meshcat = Meshcat(params)
-    print(f"Hull audit viewer: {meshcat.web_url()}")
+    meshcat = _start_meshcat("Hull audit viewer")
     print(f"Uploading {len(parts)} parts")
 
     paths: list[str] = []
@@ -612,18 +622,20 @@ def run_hull_viewer(parts: Sequence[PartGeometry]) -> None:
             _frame_camera(meshcat, parts[index])
             print(_describe(index, parts[index].audit))
         if new_hull != hull_clicks:
-            hull_clicks = new_hull
             hull_style = (hull_style + 1) % 3
             meshcat.DeleteButton(hull_button)
             hull_button = (HULLS_ON, HULLS_WIRE, HULLS_OFF)[hull_style]
             meshcat.AddButton(hull_button)
+            # Relabelling makes a new button, whose count starts at zero again; carrying
+            # the old count over re-fires the toggle on the next poll.
+            hull_clicks = 0
             changed = True
         if new_source != source_clicks:
-            source_clicks = new_source
             source_visible = not source_visible
             meshcat.DeleteButton(source_button)
             source_button = SOURCE_ON if source_visible else SOURCE_OFF
             meshcat.AddButton(source_button)
+            source_clicks = 0
             changed = True
         if changed:
             root = paths[current]
@@ -650,16 +662,7 @@ def run_assembly_viewer(parts: Sequence[PartGeometry], *, bulge_scale_mm: float)
 
     import time
 
-    from pydrake.geometry import Meshcat, MeshcatParams
-
-    from .stage_cad_viewer import _wsl_ipv4_address
-
-    params = MeshcatParams(host="*")
-    address = _wsl_ipv4_address()
-    if address is not None:
-        params.web_url_pattern = f"http://{address}:{{port}}"
-    meshcat = Meshcat(params)
-    print(f"Assembly hull viewer: {meshcat.web_url()}")
+    meshcat = _start_meshcat("Assembly hull viewer")
 
     hulls = sum(part.audit.hull_count for part in parts)
     print(f"Uploading {len(parts)} parts and {hulls} hulls; this takes a moment.")
@@ -697,18 +700,20 @@ def run_assembly_viewer(parts: Sequence[PartGeometry], *, bulge_scale_mm: float)
         new_source = meshcat.GetButtonClicks(source_button)
         restyle = False
         if new_hull != hull_clicks:
-            hull_clicks = new_hull
             hull_style = (hull_style + 1) % 3
             meshcat.DeleteButton(hull_button)
             hull_button = (HULLS_PIECE, HULLS_BULGE, HULLS_HIDDEN)[hull_style]
             meshcat.AddButton(hull_button)
+            # Relabelling makes a new button, whose count starts at zero again; carrying
+            # the old count over re-fires the toggle on the next poll.
+            hull_clicks = 0
             restyle = True
         if new_source != source_clicks:
-            source_clicks = new_source
             source_visible = not source_visible
             meshcat.DeleteButton(source_button)
             source_button = SOURCE_ON if source_visible else SOURCE_OFF
             meshcat.AddButton(source_button)
+            source_clicks = 0
             restyle = True
         if restyle:
             for index in range(shown):
@@ -729,6 +734,108 @@ def run_assembly_viewer(parts: Sequence[PartGeometry], *, bulge_scale_mm: float)
             _frame_camera(meshcat, parts[index])
             print(_describe(index, parts[index].audit))
         time.sleep(0.05)
+
+
+def run_tour_viewer(parts: Sequence[PartGeometry], *, bulge_scale_mm: float) -> None:
+    """Walk the least accurate parts one at a time, advancing on a click.
+
+    The other two viewers ask which part you want to see; this one answers that from the
+    audit itself, so the review needs no index and no slider, only Next.
+    """
+
+    import time
+
+    meshcat = _start_meshcat("Hull tour viewer")
+    print(f"Uploading the {len(parts)} least accurate parts")
+    for index, part in enumerate(parts):
+        root = f"/tour/part{index:03d}"
+        _upload_part(meshcat, root, part, bulge_scale_mm)
+        meshcat.SetProperty(root, "visible", False)
+
+    meshcat.AddButton(TOUR_NEXT, "ArrowRight")
+    meshcat.AddButton(TOUR_PREVIOUS, "ArrowLeft")
+    hull_button, source_button = HULLS_PIECE, SOURCE_ON
+    meshcat.AddButton(hull_button)
+    meshcat.AddButton(source_button)
+    meshcat.AddButton("Stop viewer", "Escape")
+
+    print()
+    print(f"The {len(parts)} worst-fitting parts, worst first, one per click.")
+    print("Grey is the CAD mesh; the translucent shells over it are the hulls Drake sees.")
+    print("Next and Previous step through them and wrap round; the arrow keys do the same.")
+    print("The panel repeats the audited numbers for the part on screen.")
+    print("Press Escape in Meshcat or Ctrl-C here to stop.")
+
+    hull_style = 0
+    source_visible = True
+    current = -1
+    hull_clicks = 0
+    source_clicks = 0
+    readout: list[str] = []
+    while meshcat.GetButtonClicks("Stop viewer") == 0:
+        # Derived from the counters rather than tracked, so a click between polls is never
+        # lost and either end of the tour wraps on its own.
+        step = meshcat.GetButtonClicks(TOUR_NEXT) - meshcat.GetButtonClicks(TOUR_PREVIOUS)
+        index = step % len(parts)
+        new_hull = meshcat.GetButtonClicks(hull_button)
+        new_source = meshcat.GetButtonClicks(source_button)
+        changed = False
+        if index != current:
+            if current >= 0:
+                meshcat.SetProperty(f"/tour/part{current:03d}", "visible", False)
+            current = index
+            meshcat.SetProperty(f"/tour/part{current:03d}", "visible", True)
+            _frame_camera(meshcat, parts[current])
+            print(_describe(current, parts[current].audit))
+            changed = True
+        if new_hull != hull_clicks:
+            hull_style = (hull_style + 1) % 3
+            meshcat.DeleteButton(hull_button)
+            hull_button = (HULLS_PIECE, HULLS_BULGE, HULLS_HIDDEN)[hull_style]
+            meshcat.AddButton(hull_button)
+            hull_clicks = 0
+            changed = True
+        if new_source != source_clicks:
+            source_visible = not source_visible
+            meshcat.DeleteButton(source_button)
+            source_button = SOURCE_ON if source_visible else SOURCE_OFF
+            meshcat.AddButton(source_button)
+            source_clicks = 0
+            changed = True
+        if changed:
+            root = f"/tour/part{current:03d}"
+            meshcat.SetProperty(f"{root}/pieces", "visible", hull_style == 0)
+            meshcat.SetProperty(f"{root}/bulge", "visible", hull_style == 1)
+            meshcat.SetProperty(f"{root}/mesh", "visible", source_visible)
+            # Republished after any change so the numbers stay under the buttons rather
+            # than above whichever one a toggle just re-added.
+            readout = _set_readout(
+                meshcat, readout, tour_labels(current, len(parts), parts[current].audit)
+            )
+        time.sleep(0.05)
+
+
+def tour_labels(index: int, total: int, audit: PartAudit) -> list[str]:
+    """The audited numbers for one part, phrased for the panel rather than the table."""
+
+    # No apostrophes: Drake builds each control's JS callback by pasting the name into a
+    # single-quoted string literal and eval-ing it, so a quote drops the control.
+    return [
+        f"Part {index + 1} of {total}: {audit.label}",
+        f"volume {audit.volume_ratio:.2f}x CAD, {audit.hull_count} hulls",
+        f"bulge {audit.max_bulge_mm:.2f} mm of material that is not there",
+        f"gap {audit.max_gap_mm:.3f} mm of material Drake cannot see",
+    ]
+
+
+def _set_readout(meshcat, previous: Sequence[str], labels: Sequence[str]) -> list[str]:
+    """Republish text as buttons, which is the only text Meshcat can show."""
+
+    for name in previous:
+        meshcat.DeleteButton(name)
+    for name in labels:
+        meshcat.AddButton(name)
+    return list(labels)
 
 
 def _upload_part(meshcat, root: str, part: PartGeometry, bulge_scale_mm: float) -> None:
@@ -932,6 +1039,17 @@ def main() -> None:
         help="Show every audited part at its assembly position, hulls over the CAD mesh",
     )
     parser.add_argument(
+        "--tour",
+        action="store_true",
+        help="Step through the least accurate parts in Meshcat, one per click",
+    )
+    parser.add_argument(
+        "--tour-count",
+        type=int,
+        default=TOUR_DEFAULT_COUNT,
+        help="Parts in the tour, worst fit first",
+    )
+    parser.add_argument(
         "--bulge-scale-mm",
         type=float,
         default=DEFAULT_BULGE_SCALE_MM,
@@ -983,7 +1101,13 @@ def main() -> None:
         destination = Path(args.csv)
         write_csv(destination, audits)
         print(f"Wrote {destination}")
-    if args.assembly:
+    if args.tour:
+        run_tour_viewer(parts[: max(args.tour_count, 1)], bulge_scale_mm=args.bulge_scale_mm)
+    elif args.assembly:
         run_assembly_viewer(parts, bulge_scale_mm=args.bulge_scale_mm)
     elif args.view:
         run_hull_viewer(parts[: args.view_limit])
+
+
+if __name__ == "__main__":
+    main()

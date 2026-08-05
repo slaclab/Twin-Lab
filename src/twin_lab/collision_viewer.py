@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import cast
 
 from .collision import CollisionModel, part_of
-from .paths import EXPORT_ROOT, resolve_repo_path, review_artifact_stem
+from .paths import CACHE_ROOT, EXPORT_ROOT, resolve_repo_path, review_artifact_stem
 
 WARN_LABEL = "Clearance warning band (mm)"
 AUTO_RANGE_LABEL = "Auto motion range (% of travel)"
@@ -25,6 +25,9 @@ AUTO_PERIOD_LABEL = "Auto motion period (s)"
 COLLISION_LABEL = "Collision detection"
 ANIMATION_LABEL = "Animation"
 ISOLATE_LABEL = "Isolate worst pair"
+# Deliberately a button rather than a toggle: the CAD re-check costs milliseconds per pair
+# and is a review step, not a per-frame reading. No apostrophes; Drake evals control names.
+VERIFY_LABEL = "Verify contact against CAD"
 STATUS_RGB = {
     "clear": [0.13, 0.42, 0.18],
     "close": [0.72, 0.60, 0.05],
@@ -111,15 +114,15 @@ def run_collision_viewer(
     warn_mm: float = 5.0,
     ignore_file: str | Path | None = None,
     label_source: str | Path | None = None,
+    decomposition_dir: str | Path | None = None,
     fps: float = 30.0,
 ) -> None:
     """Drive the compiled assembly from sliders and report clearance at every pose."""
 
-    from pydrake.geometry import Meshcat, MeshcatParams
+    from pydrake.geometry import Meshcat
 
-    from .meshcat_ui import patch_meshcat_page
+    from .meshcat_ui import announce_viewer, patch_meshcat_page, viewer_params
     from .scene import load_scene
-    from .stage_cad_viewer import _wsl_ipv4_address
 
     package = Path(package_dir).resolve()
     sdf_path = next(
@@ -128,19 +131,20 @@ def run_collision_viewer(
     joints = read_joint_metadata(package)
 
     # Nothing here publishes a realtime rate, so the stats plot only ever covers the view.
-    params = MeshcatParams(host="*", show_stats_plot=False)
-    wsl_address = _wsl_ipv4_address()
-    if wsl_address is not None:
-        params.web_url_pattern = f"http://{wsl_address}:{{port}}"
     patch_meshcat_page()
-    meshcat = Meshcat(params)
+    meshcat = Meshcat(viewer_params())
 
-    print(f"Collision viewer: {meshcat.web_url()}")
+    announce_viewer("Collision viewer", meshcat)
     print(f"Model: {sdf_path}")
     print("Loading collision geometry into Drake; the viewer stays blank until this finishes.")
     load_start = time.monotonic()
     scene = load_scene(sdf_path, meshcat=meshcat)
-    model = CollisionModel(scene, _read_ignored(ignore_file), _read_part_labels(label_source))
+    model = CollisionModel(
+        scene,
+        _read_ignored(ignore_file),
+        _read_part_labels(label_source),
+        decomposition_dir,
+    )
     print(
         f"Loaded {_proximity_geometry_count(model)} collision geometries "
         f"in {time.monotonic() - load_start:.0f} s"
@@ -153,14 +157,19 @@ def run_collision_viewer(
     for joint in joints:
         lower, upper, home = joint.slider_bounds()
         meshcat.AddSlider(joint.label, lower, upper, 0.05, home)
+    # Panel order: the two clearance toggles sit together above the band they act on, then
+    # the animation toggle above the motion it drives. CONTROLS_JS drops the zoom-limit
+    # toggle in behind ANIMATION_LABEL.
     meshcat.AddSlider(COLLISION_LABEL, 0.0, 1.0, 1.0, 1.0)
-    meshcat.AddSlider(WARN_LABEL, 0.0, 50.0, 0.5, warn_mm)
     meshcat.AddSlider(ISOLATE_LABEL, 0.0, 1.0, 1.0, 0.0)
+    meshcat.AddSlider(WARN_LABEL, 0.0, 50.0, 0.5, warn_mm)
     meshcat.AddSlider(ANIMATION_LABEL, 0.0, 1.0, 1.0, 0.0)
     meshcat.AddSlider(AUTO_RANGE_LABEL, 0.0, 100.0, 1.0, 25.0)
     meshcat.AddSlider(AUTO_PERIOD_LABEL, 2.0, 60.0, 0.5, 12.0)
     meshcat.AddButton("Reset to home")
     meshcat.AddButton("Log clearance report")
+    if model.refiner is not None:
+        meshcat.AddButton(VERIFY_LABEL)
     meshcat.AddButton("Stop viewer", "Escape")
     highlighter = _Highlighter(meshcat, model)
 
@@ -169,12 +178,15 @@ def run_collision_viewer(
     print("Clear 'Collision detection' to turn checking off and use this as a plain viewer.")
     print("Tick 'Isolate worst pair' to hide the assembly and leave only that pair on screen.")
     print("Tick 'Animation' to cycle every joint about its reviewed home.")
+    if model.refiner is not None:
+        print(f"'{VERIFY_LABEL}' re-checks the touching pairs against the CAD behind the hulls.")
     print("Press Escape in Meshcat or Ctrl-C here to stop.")
 
     frame_period = 1.0 / max(fps, 1.0)
     detector_period = 1.0 / DETECTOR_HZ
     reset_clicks = 0
     log_clicks = 0
+    verify_clicks = 0
     collision_on = True
     animating = False
     show_all = True
@@ -237,8 +249,12 @@ def run_collision_viewer(
         values = [meshcat.GetSliderValue(joint.label) for joint in joints]
         warn_m = max(meshcat.GetSliderValue(WARN_LABEL), 0.0) / 1000.0
         new_log = meshcat.GetButtonClicks("Log clearance report")
+        new_verify = (
+            meshcat.GetButtonClicks(VERIFY_LABEL) if model.refiner is not None else verify_clicks
+        )
+        asked = new_log != log_clicks or new_verify != verify_clicks
         pose = (values, warn_m)
-        if pose != previous_pose or new_log != log_clicks:
+        if pose != previous_pose or asked:
             previous_pose = pose
             model.set_positions(
                 {
@@ -249,11 +265,7 @@ def run_collision_viewer(
             scene.diagram.ForcedPublish(model.context)
             # The render above runs every frame; the query below is throttled so its cost
             # stutters the detector rather than the motion.
-            detect_due = (
-                not animating
-                or new_log != log_clicks
-                or tick - last_detect >= detector_period
-            )
+            detect_due = not animating or asked or tick - last_detect >= detector_period
             if collision_on and detect_due:
                 last_detect = tick
                 report = model.report(warn_m=warn_m)
@@ -264,6 +276,9 @@ def run_collision_viewer(
                 highlighter.isolate(selected is not None)
                 highlighter.update(report, selected)
                 readout = _set_offender_readout(meshcat, report, readout, show_all=show_all)
+                if new_verify != verify_clicks:
+                    verify_clicks = new_verify
+                    _print_refinements(model, report)
                 if new_log != log_clicks:
                     log_clicks = new_log
                     _print_report(report)
@@ -272,6 +287,7 @@ def run_collision_viewer(
                     print(report.summary())
             elif not collision_on:
                 log_clicks = new_log
+                verify_clicks = new_verify
         frame_cost = time.monotonic() - tick
         time.sleep(max(0.0, frame_period - frame_cost) if animating else 0.1)
 
@@ -490,6 +506,22 @@ def _print_report(report) -> None:
     )
 
 
+def _print_refinements(model: CollisionModel, report) -> None:
+    """Re-check the touching pairs against the CAD and print what the correction found."""
+
+    print("\n--- CAD re-check of touching pairs ---")
+    if not report.touching:
+        print("  nothing touching to check")
+        return
+    refinements = model.refine(report, limit=OFFENDER_LIMIT)
+    for refinement in refinements:
+        print(f"  {refinement.describe()}")
+    print(
+        "  'explained' means the overlap fits inside the decomposition error and the CAD "
+        "underneath is clear; it is evidence for review, not a clearance measurement."
+    )
+
+
 def main() -> None:
     import argparse
 
@@ -540,12 +572,16 @@ def main() -> None:
             decomposition_workers=args.decomposition_workers,
             archive=False,
         )
+    # Same directory sdf_compiler decomposed into, so the re-check reads the very hulls
+    # that produced the contact rather than a re-run of CoACD.
+    decomposition_dir = CACHE_ROOT / "convex-collision" / scene_path.parent.name
     try:
         run_collision_viewer(
             package_dir,
             warn_mm=args.warn_mm,
             ignore_file=args.ignore_file or inventory,
             label_source=inventory,
+            decomposition_dir=decomposition_dir if decomposition_dir.is_dir() else None,
             fps=args.fps,
         )
     except KeyboardInterrupt:

@@ -91,6 +91,21 @@ One thing still leaves the window: the viewers print a `localhost` URL that you
 open in your normal Windows browser. WSL forwards the port for you, so no Linux
 desktop or X server is involved.
 
+If no notification offers to open the port, check the **Ports** panel next to the
+terminal; the viewer registers there as *Meshcat viewer*. VS Code finds the server
+two ways - by scanning for new listening sockets, and by spotting the `localhost`
+URL in terminal output - so both are kept working deliberately. `viewer_params()`
+in [src/twin_lab/meshcat_ui.py](src/twin_lab/meshcat_ui.py) binds the IPv4 wildcard
+because Drake's default binds IPv6-only, which the socket scan never sees, and
+`announce_viewer()` prints the URL literally rather than echoing the bound host.
+Build viewer settings through those two helpers and the prompt keeps working.
+
+The prompt itself only fires the first time a port is forwarded, so
+[.vscode/settings.json](.vscode/settings.json) turns off `remote.restoreForwardedPorts`;
+otherwise 7000 is restored silently when the window opens and every later viewer
+launch has nothing new to announce. Either way the URL in the terminal is clickable,
+and under WSL it also works pasted straight into a Windows browser.
+
 #### Where your files live, and where to clone
 
 WSL gives you two separate filesystems, and knowing which one you are standing
@@ -345,6 +360,14 @@ pass/fail. At the reviewed home pose the assembly is `close` at the default 5 mm
 band and only goes `clear` below about 0.9 mm; the stack really is that tightly
 packed, so home is reported as close rather than clean.
 
+Shallow interference is not automatically real. Drake collides with the convex
+hulls, which are always slightly larger than the parts, so a penetration of a
+millimetre or two can be the decomposition's own error. See
+[how wrong are the hulls?](#how-wrong-are-the-hulls-slac-hull-audit) for the
+tool that measures that error budget per part, and press
+[**`Verify contact against CAD`**](#correcting-for-the-hull-error-verify-contact-against-cad)
+to take that error back off the pairs in front of you.
+
 ### Collision modes
 
 | Mode | How geometry is built | Use |
@@ -451,6 +474,209 @@ meshes, the collision mode, and the inventory `decomposition` block it was built
 from. `slac-collision` recompiles whenever that stamp no longer matches, so
 editing a per-part override reaches the viewer without `--rebuild`.
 
+### How wrong are the hulls? (`slac-hull-audit`)
+
+A convex piece can only ever be at least as big as the material it wraps, so
+every decomposition overshoots: bolt holes fill in, small concavities get
+spanned, and the hull surface sits slightly proud of the CAD surface. Drake
+collides with that overshoot, not with the part, so a reported contact of a
+millimetre or two may be entirely the decomposition's own error. This command
+measures that error per part, which is what turns a red readout into either a
+false positive or a real finding:
+
+```bash
+uv run slac-hull-audit
+```
+
+It reads the decomposition cache directly, so it needs no viewer and no compiled
+package — only a build that has already run. Each cached hull is compared
+against the tessellated part it replaces, and the parts are printed worst fit
+first.
+
+#### The three numbers
+
+| Column | Meaning | Read it as |
+| --- | --- | --- |
+| `vol x` | Hull volume over CAD volume, `1.00` being an exact fit | Bulk overshoot of the part. The union of the hulls is used, not their sum, so overlapping pieces are not double-counted |
+| `bulge mm` | Furthest a hull vertex sits *outside* the CAD surface | **The false-positive budget.** Material Drake will collide with that is not physically there |
+| `gap mm` | Furthest a CAD vertex sits outside every hull | Real material the hulls fail to cover, which Drake can never collide with |
+| `outside` | Share of CAD vertices left uncovered | How widespread that missing material is, rather than how deep |
+
+Bulge is signed against the CAD surface, so hull vertices buried inside solid
+material count as zero rather than as error; without that, a well-fitted part
+reads as badly bulged. Volume overlap is estimated by sampling, so `vol x` moves
+in the third decimal between runs.
+
+The practical rule when triaging a clearance report: a touching pair whose
+penetration is smaller than the sum of the two parts' `bulge` values, plus the
+2 mm tessellation deflection already in the meshes, is inside the model's error
+budget and is a candidate for `ignored_pairs` rather than an interference
+finding. A pair that penetrates well past that budget is real.
+
+#### Seeing it in Meshcat
+
+The table says how badly a part fits; the three viewers say *where*. They are
+flags on the same command, and each prints a `http://localhost:7000` URL to
+`Ctrl+Click`, exactly like the collision viewer. Press `Escape` in the browser
+or `Ctrl-C` in the terminal to stop.
+
+**The ten worst parts, one per click**, which is the review to run if you run
+only one:
+
+```bash
+uv run slac-hull-audit --tour
+```
+
+No index and no slider: the audit already knows which parts fit worst, so it
+picks them and shows them in order, one at a time, framed by the camera.
+`Next part (right arrow)` advances and wraps round at the end;
+`Previous part (left arrow)` goes back. The arrow keys do the same, so a whole
+review is ten keystrokes. The panel repeats the numbers for the part on screen —
+its rank, its volume ratio and hull count, its bulge, and its gap — so the shape
+and the row that flagged it are read together. `--tour-count` changes how many
+parts are toured, and `--sort` decides what "worst" means, so
+`--tour --sort gap` tours the parts with the most missing material instead.
+
+**Every part where it actually sits**, for a whole-assembly overview:
+
+```bash
+uv run slac-hull-audit --assembly
+```
+
+The whole assembly is drawn with the translucent hulls layered over the grey CAD
+mesh, worst fit first by index.
+
+| Control | Effect |
+| --- | --- |
+| `Hulls: PIECE COLOURS (click for bulge shading)` | Cycles piece colours, bulge shading, hidden. Piece colours give each hull its own colour, so the cut lines CoACD chose are visible |
+| (second click) `Hulls: BULGE SHADING` | Recolours every hull vertex grey where it lies on the CAD surface through amber to red at the full scale, so a spanned concavity shows up as a red patch on the part that has it |
+| `CAD mesh: ON (click to hide)` | Hides the grey reference mesh, leaving only what Drake sees |
+| `Show worst N parts` | Hides the good parts and leaves the bad ones standing in place |
+| `Focus part index` | Flies the camera to one part and prints its row in the terminal |
+
+The tour carries the same two hull buttons, so bulge shading is available there
+too. Both colourings are uploaded once and swapped by visibility, so the toggle
+is instant. The red end of the ramp defaults to 2 mm of outward bulge and moves
+with `--bulge-scale-mm`. The grey end is deliberately held out to a quarter of
+that scale: every hull vertex bulges a little at the tessellation deflection, so
+a ramp anchored at zero paints the whole assembly amber and separates nothing.
+
+**One part at a time by index**, when you already know the row you want:
+
+```bash
+uv run slac-hull-audit static_A003 --view
+```
+
+The `Part index` slider steps through the worst parts in isolation, framing the
+camera on each, and the hull button cycles solid, wireframe, hidden. Use
+`--view-limit` to change how many parts are uploaded (12 by default).
+
+#### Narrowing and exporting
+
+| Flag | Effect |
+| --- | --- |
+| `meshes` (positional) | Restrict to named cached source OBJs, by name or stem |
+| `--part` | Regular expression matching part refs |
+| `--sort volume\|bulge\|gap\|hulls` | Which metric defines "worst". Sort by `gap` to find parts that came out too small, by `volume` to find the parts worth a per-part `threshold` or `max_hulls` override |
+| `--top` | Rows to print, 25 by default |
+| `--csv` | Write every audited part to a CSV |
+| `--cache-dir` | Audit a decomposition cache other than the default |
+| `--refresh` | Re-measure instead of reusing cached distances |
+
+The measurement itself is the slow part, so each part's distances are cached in
+an `audit.npz` beside the hulls they judge, keyed to the source mesh digest and
+the decomposition settings. A re-run costs about a second, and only
+re-decomposed parts are re-measured. Reach for `--refresh` only after the
+metrics themselves change.
+
+### Correcting for the hull error (`Verify contact against CAD`)
+
+Knowing the hulls are proud is one thing; taking that error back off a specific
+reported contact is another. The collision viewer can do it on demand. Press
+**`Verify contact against CAD`** and every touching pair in the current pose is
+re-checked against geometry closer to the CAD than the hulls Drake collided,
+and the result is printed to the terminal you launched from. This is the real
+output at the reviewed home pose:
+
+```
+--- CAD re-check of touching pairs ---
+  P1170 <-> P1112: hulls -2.69 mm; CAD meshes intersect -> CONTACT
+  P1170 <-> P1069: hulls -2.37 mm; CAD meshes intersect -> CONTACT
+  P1170 <-> P1111: hulls -2.10 mm; CAD meshes 1.18 mm apart -> explained by hull proudness
+  P1170 <-> P1075: hulls -1.59 mm; CAD meshes 0.18 mm apart -> explained by hull proudness
+  P780 <-> P805: hulls -1.34 mm; CAD meshes intersect -> CONTACT
+  P056 <-> P1110: hulls -1.15 mm; CAD meshes intersect -> CONTACT
+```
+
+Two other line shapes appear when the exact distance cannot be had: `local
+proudness 0.98 mm -> +0.56 mm` when it falls back to the audited numbers, and
+`nothing cached to check it against -> unverified` when it has neither.
+
+Note what that output actually says: four of the six are real. The proudness
+correction does **not** explain most of the home-pose contacts, so they are
+genuine touching in the assembled CAD rather than decomposition artefacts. Home
+is an assembled state, so by-design contact there is expected — but it has to be
+confirmed part by part and recorded, not assumed to be noise.
+
+The button is a button rather than a live readout on purpose. The check costs
+about 13 ms per pair once the meshes are cached, and roughly 95 ms on the first
+press while they are parsed. That is fine for a review step and not fine for
+every frame of the 20 Hz detector. It is only ever run on pairs already flagged
+as touching. Pairs merely inside the warning band are left alone: the correction
+exists to tell a decomposition artefact from an interference, and a pair with
+clearance is neither.
+
+Two corrections sit behind it, and the stronger one wins:
+
+| Correction | What it uses | What it costs | What it leaves behind |
+| --- | --- | --- | --- |
+| Audited proudness | The `bulge` numbers `slac-hull-audit` already measured, sampled at the three hull vertices nearest the contact | A dictionary lookup | The tessellation deflection, and the fact that a hull face bulges more between its vertices than at them |
+| Exact mesh distance | The two parts' own triangles, in the neighbourhood of the contact | ~13 ms per pair, warm | Only the 2 mm tessellation deflection the meshes were built at |
+
+The first needs `slac-hull-audit` to have been run at least once, since it reads
+the `audit.npz` the audit writes. Without it the pair comes back `unverified`
+rather than silently uncorrected. The second needs nothing but the cached
+tessellations, which the decomposition already depends on, so in practice it is
+the one that answers.
+
+Run against each other on the home-pose contacts, the two agree on four of six
+pairs, and on the other two the audited proudness is the more pessimistic: it
+calls `contact` where the exact distance finds 1.18 mm and 0.18 mm of real
+clearance. That is the expected direction and the safe one. Bulge is sampled at
+hull *vertices*, and a hull face stands off the CAD by more in its interior than
+at its corners, so the correction systematically understates itself. Read a Tier
+0 `explained` as trustworthy and a Tier 0 `contact` as "not yet ruled out".
+
+The exact distance is a true triangle-to-triangle minimum over the triangles
+within 20 mm of the two witness points Drake reported, capped at 400 triangles a
+side so the pair arrays stay bounded. Both limits are comfortable: raising them
+to 2000 triangles and 80 mm on the home-pose contacts does not move a single
+result. Interpenetration is tested for separately, because the closest-feature
+minimum between two triangles is only the distance when they are disjoint — an
+edge passing clean through a face has candidate distances that are all positive.
+
+Read the verdicts as:
+
+| Verdict | Meaning |
+| --- | --- |
+| `CONTACT` | The correction did not account for the overlap. The parts really do meet |
+| `explained by hull proudness` | The overlap fits inside the collision geometry's own error, and the CAD underneath is clear |
+| `unverified` | Nothing cached to check the pair against. Run `slac-hull-audit`, or rebuild the decomposition so the source meshes are present |
+
+`explained` is evidence, not a clearance measurement. It says the flag came from
+the collision geometry rather than the hardware, which is a prompt to look at
+the pair in the viewer and, if it is genuinely by design, to add it to
+`ignored_pairs` with the reason recorded. It is not a statement that the parts
+clear each other by the printed amount: that number still inherits the 2 mm
+tessellation deflection, and a mesh built by inscribing facets is slightly
+undersized on convex surfaces. Treat sub-millimetre results as "too close to
+call from the model" and go to the CAD.
+
+If a pair keeps coming back `CONTACT` and the CAD says otherwise, the
+decomposition is too coarse there rather than too proud, and the lever is
+`preprocess_resolution` on that part — see [convex decomposition](#convex-decomposition-coacd)
+above.
+
 ### Filtering expected contact
 
 Drake automatically ignores pairs that share a body, sit either side of one
@@ -470,7 +696,11 @@ is an assembled state, so contact there is pre-existing rather than something
 motion caused; baselining it is what keeps the indicator off red at home and
 reserves red for interference the stages actually create. Those seven pairs have
 **not** been individually validated as by-design, so re-review them if a stack is
-re-modelled.
+re-modelled. Run
+[**`Verify contact against CAD`**](#correcting-for-the-hull-error-verify-contact-against-cad)
+at home before adding to this block: a pair that comes back `explained` is an
+artefact of the collision geometry, and recording it as expected contact hides a
+decomposition problem instead of a design one.
 
 **Optional**, only when the pairs you want to exclude live elsewhere: pass
 `--ignore-file` to read the block from another YAML file instead.
@@ -658,6 +888,7 @@ entry points, all installed with the package. Prefix each with `uv run`:
 | `slac-collision` | `collision_viewer` | Drake viewer with live clearance reporting |
 | `slac-compile-sdf` | `sdf_compiler` | Portable SDF share package |
 | `slac-decompose` | `convex_collision` | Convex-decompose cached meshes ahead of time |
+| `slac-hull-audit` | `hull_audit` | Measure how far the collision hulls overshoot the CAD |
 | `slac-cad-manifest` | `constraints_wizard` | STEP tree, manifest, remap, preview |
 | `slac-refresh-43841` | `update_43841_step` | Update the reviewed STEP revision |
 | `slac-view` | `scene` | Plain Drake model visualizer for any SDF/URDF |

@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
+import numpy as np
 from pydrake.all import (
     AddMultibodyPlantSceneGraph,
     Diagram,
@@ -24,11 +25,22 @@ PACKAGE_XML = REPOSITORY_ROOT / "package.xml"
 
 @dataclass(frozen=True)
 class SignedDistanceReport:
-    """Signed clearance between a pair of named collision geometries."""
+    """Signed clearance between a pair of named collision geometries.
+
+    The witness points and geometry poses ride along with the distance because
+    re-checking a flagged pair against the CAD needs to know where on the two hulls the
+    contact was found, and they are free here but unrecoverable afterwards.
+    """
 
     a: str
     b: str
     distance_m: float
+    # Kept out of equality: an array has no truth value, and the three fields above
+    # already identify the pair.
+    witness_a_m: np.ndarray | None = field(default=None, compare=False)
+    witness_b_m: np.ndarray | None = field(default=None, compare=False)
+    pose_a: np.ndarray | None = field(default=None, compare=False)
+    pose_b: np.ndarray | None = field(default=None, compare=False)
 
 
 @dataclass
@@ -74,14 +86,21 @@ class DrakeScene:
         query = cast(QueryObject, self.scene_graph.get_query_output_port().Eval(scene_context))
         inspector = query.inspector()
         pairs = query.ComputeSignedDistancePairwiseClosestPoints(max_distance_m)
-        reports = [
-            SignedDistanceReport(
-                a=self.geometry_name(inspector, pair.id_A),
-                b=self.geometry_name(inspector, pair.id_B),
-                distance_m=float(pair.distance),
+        reports = []
+        for pair in pairs:
+            pose_a = query.GetPoseInWorld(pair.id_A).GetAsMatrix4()
+            pose_b = query.GetPoseInWorld(pair.id_B).GetAsMatrix4()
+            reports.append(
+                SignedDistanceReport(
+                    a=self.geometry_name(inspector, pair.id_A),
+                    b=self.geometry_name(inspector, pair.id_B),
+                    distance_m=float(pair.distance),
+                    witness_a_m=_to_world(pose_a, pair.p_ACa),
+                    witness_b_m=_to_world(pose_b, pair.p_BCb),
+                    pose_a=pose_a,
+                    pose_b=pose_b,
+                )
             )
-            for pair in pairs
-        ]
         return sorted(reports, key=lambda item: (item.distance_m, item.a, item.b))
 
     def geometry_name(self, inspector, geometry_id) -> str:
@@ -89,6 +108,10 @@ class DrakeScene:
         body = self.plant.GetBodyFromFrameId(frame_id)
         model_name = self.plant.GetModelInstanceName(body.model_instance())
         return f"{model_name}::{body.name()}::{inspector.GetName(geometry_id)}"
+
+
+def _to_world(pose: np.ndarray, point) -> np.ndarray:
+    return pose[:3, :3] @ np.asarray(point, dtype=float).reshape(3) + pose[:3, 3]
 
 
 def load_scene(path: str | Path, *, meshcat=None) -> DrakeScene:

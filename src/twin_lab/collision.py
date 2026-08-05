@@ -14,8 +14,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import numpy as np
 import yaml
 
+from .clearance_refine import ClearanceRefiner, Refinement
 from .paths import resolve_repo_path
 from .scene import DrakeScene, load_scene
 
@@ -31,6 +33,12 @@ class Clearance:
     a: str
     b: str
     distance_m: float
+    # Where on the two hulls the distance was measured, and how those hulls sit in the
+    # world. Both are needed to re-check the pair against the CAD; see clearance_refine.
+    witness_a_m: np.ndarray | None = field(default=None, compare=False)
+    witness_b_m: np.ndarray | None = field(default=None, compare=False)
+    pose_a: np.ndarray | None = field(default=None, compare=False)
+    pose_b: np.ndarray | None = field(default=None, compare=False)
 
     @property
     def parts(self) -> tuple[str, str]:
@@ -154,12 +162,16 @@ class CollisionModel:
         scene: DrakeScene,
         ignored_pairs: frozenset[tuple[str, str]] = frozenset(),
         part_labels: Mapping[str, str] | None = None,
+        decomposition_dir: str | Path | None = None,
     ):
         self.scene = scene
         self.ignored_pairs = ignored_pairs
         self.part_labels = dict(part_labels or {})
         self.context = scene.create_context()
         self.reopened_joints = self._reopen_anchored_pairs()
+        self.refiner = (
+            ClearanceRefiner(decomposition_dir) if decomposition_dir is not None else None
+        )
 
     def _reopen_anchored_pairs(self) -> int:
         """Restore clearance checking between each stage's first moving link and the room.
@@ -217,11 +229,12 @@ class CollisionModel:
         *,
         ignore_file: str | Path | None = None,
         label_source: str | Path | None = None,
+        decomposition_dir: str | Path | None = None,
     ) -> CollisionModel:
         scene = load_scene(sdf_path)
         ignored = read_ignored_pairs(ignore_file) if ignore_file is not None else frozenset()
         labels = read_part_labels(label_source) if label_source is not None else {}
-        return cls(scene, ignored, labels)
+        return cls(scene, ignored, labels, decomposition_dir)
 
     def joint_names(self) -> list[str]:
         from pydrake.multibody.tree import JointIndex
@@ -253,11 +266,40 @@ class CollisionModel:
             self.context, max_distance_m=max_distance_m if max_distance_m is not None else warn_m
         )
         clearances = tuple(
-            Clearance(a=item.a, b=item.b, distance_m=item.distance_m)
+            Clearance(
+                a=item.a,
+                b=item.b,
+                distance_m=item.distance_m,
+                witness_a_m=item.witness_a_m,
+                witness_b_m=item.witness_b_m,
+                pose_a=item.pose_a,
+                pose_b=item.pose_b,
+            )
             for item in distances
             if _pair_key(item.a, item.b) not in self.ignored_pairs
         )
         return ClearanceReport(clearances=clearances, warn_m=warn_m, part_labels=self.part_labels)
+
+    def refine(self, report: ClearanceReport, *, limit: int = 12) -> tuple[Refinement, ...]:
+        """Re-check the touching pairs against the CAD behind the hulls, worst first.
+
+        Only the pairs already reported as touching are checked: the correction exists to
+        tell a decomposition artefact from an interference, and a pair that is merely
+        inside the warning band is neither.
+        """
+
+        if self.refiner is None:
+            return ()
+        seen: set[tuple[str, str]] = set()
+        refinements = []
+        for clearance in report.touching:
+            if clearance.parts in seen:
+                continue
+            seen.add(clearance.parts)
+            refinements.append(self.refiner.refine(clearance))
+            if len(refinements) >= limit:
+                break
+        return tuple(refinements)
 
 
 def read_ignored_pairs(path: str | Path) -> frozenset[tuple[str, str]]:
