@@ -151,6 +151,12 @@ ignored_pairs:
     reason: touching at reviewed CAD home (-1.59 mm)
   - pair: [P056, P1110]
     reason: touching at reviewed CAD home (-1.15 mm)
+  # Validated against the exact tessellated meshes rather than the hulls: the bracket sits
+  # flush on the adapter with a 0.000 mm gap and no vertex inside the other part, and the
+  # reported depth matches the two parts' measured hull inflation (0.95 + 0.40 mm). A CoACD
+  # threshold/max_hulls sweep was run and did not reduce it.
+  - pair: [P780, P805]
+    reason: 4556T43 cable-carrier bracket flush on the 41969 detector adapter at home (-1.34 mm of hull inflation, true gap 0.000 mm)
 
 attachment_overrides:
   fixed:

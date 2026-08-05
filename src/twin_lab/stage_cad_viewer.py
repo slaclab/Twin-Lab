@@ -25,8 +25,7 @@ from .cad_geometry import leaf_occurrences, placed_shape, write_group_obj
 from .constraints_wizard import _occurrence_shape_by_ref, _read_step_document
 from .paths import CACHE_ROOT, resolve_repo_path, review_artifact_stem
 
-AUTO_MOTION_ON = "Animation: ON (click to stop)"
-AUTO_MOTION_OFF = "Animation: OFF (click to start)"
+AUTO_MOTION_LABEL = "Animation"
 AUTO_RANGE_LABEL = "Auto motion range (% of travel)"
 AUTO_PERIOD_LABEL = "Auto motion period (s)"
 
@@ -425,6 +424,9 @@ def view_stage_cad(scene_path: str | Path, *, fps: float = 30.0) -> None:
             0.1,
             joint["home"] * scale,
         )
+    # Drake can publish a slider but not a checkbox, so this steps 0 to 1 and
+    # meshcat_ui.TOGGLE_JS swaps a real checkbox into its row.
+    meshcat.AddSlider(AUTO_MOTION_LABEL, 0.0, 1.0, 1.0, 0.0)
     meshcat.AddSlider(AUTO_RANGE_LABEL, 0.0, 100.0, 1.0, 25.0)
     meshcat.AddSlider(AUTO_PERIOD_LABEL, 2.0, 60.0, 0.5, 12.0)
 
@@ -436,39 +438,29 @@ def view_stage_cad(scene_path: str | Path, *, fps: float = 30.0) -> None:
     meshcat.SetCameraPose(eye, center)  # pyright: ignore[reportArgumentType]
     meshcat.AddButton("Reset to home")
     meshcat.AddButton("Stop viewer", "Escape")
-    # Added last so the relabel-on-toggle always lands back in the same slot.
-    motion_label = _set_motion_button(meshcat, None, False)
     print(f"Reusable stage CAD: {meshcat.web_url()}")
     print(
         f"Showing {len(instances)} real stages and {scene['attached_part_count']} attached "
         "non-fastener parts."
     )
     print(f"Motion sliders: {len(joints)}")
-    print("Click the 'Animation' button to start and stop cyclic motion.")
+    print("Tick 'Animation' to start and stop cyclic motion.")
     print("Press Escape in Meshcat or Ctrl-C here to stop.")
     frame_period = 1.0 / max(fps, 1.0)
     reset_clicks = 0
-    motion_clicks = 0
     phase = 0.0
-    automatic = False
     previous_tick = time.monotonic()
     while meshcat.GetButtonClicks("Stop viewer") == 0:
         tick = time.monotonic()
         elapsed = tick - previous_tick
         previous_tick = tick
-        new_motion_clicks = meshcat.GetButtonClicks(motion_label)
-        if new_motion_clicks != motion_clicks:
-            automatic = not automatic
-            motion_label = _set_motion_button(meshcat, motion_label, automatic)
-            motion_clicks = 0
+        automatic = meshcat.GetSliderValue(AUTO_MOTION_LABEL) >= 0.5
         new_reset_clicks = meshcat.GetButtonClicks("Reset to home")
         if new_reset_clicks != reset_clicks:
             reset_clicks = new_reset_clicks
             phase = 0.0
-            if automatic:
-                automatic = False
-                motion_label = _set_motion_button(meshcat, motion_label, automatic)
-                motion_clicks = 0
+            automatic = False
+            meshcat.SetSliderValue(AUTO_MOTION_LABEL, 0.0)
             for joint in joints:
                 scale, unit = _slider_scale(joint)
                 meshcat.SetSliderValue(_slider_label(joint, unit), joint["home"] * scale)
@@ -603,16 +595,6 @@ def _auto_amplitude(joint: dict[str, Any], span_fraction: float) -> float:
     home = float(joint["home"])
     reach = min(home - float(joint["limits"][0]), float(joint["limits"][1]) - home)
     return max(reach, 0.0) * span_fraction
-
-
-def _set_motion_button(meshcat: Any, previous_label: str | None, running: bool) -> str:
-    """Meshcat has no checkbox, so a relabelled button carries the animation state."""
-
-    if previous_label is not None:
-        meshcat.DeleteButton(previous_label)
-    label = AUTO_MOTION_ON if running else AUTO_MOTION_OFF
-    meshcat.AddButton(label)
-    return label
 
 
 def _joint_displacement(joint: dict[str, Any], slider_value: float) -> float:
