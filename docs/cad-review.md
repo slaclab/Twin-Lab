@@ -187,6 +187,15 @@ slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
 `Log clearance report` prints the full sorted table to the terminal for a design
 review; the live status line only reports the worst pair.
 
+Offending parts light up on the model itself: yellow inside the warning band, red
+where they touch. `Showing: whole assembly` marks every offending part at once, which
+is the view for judging whether a pose is safe. Clicking it switches to `Showing:
+worst pair only`, which hides the illustration meshes and leaves just the two parts of
+the worst pair on screen, for looking at one interface without the rest of the
+assembly in the way. What remains in that mode are the convex hulls rather than the
+CAD meshes, because the compiled package carries one visual mesh per sub-assembly and
+only the collision geometry is split per reviewed part.
+
 Collision geometry is built one of two ways, selected by `--collision-mode`:
 
 - `hull` wraps each merged mesh in a single convex hull. It compiles in seconds but
