@@ -6,7 +6,6 @@ import json
 import math
 import os
 import re
-import socket
 import time
 from pathlib import Path
 from typing import Any
@@ -336,20 +335,16 @@ def prepare_stage_cad(
 def view_stage_cad(scene_path: str | Path, *, fps: float = 30.0) -> None:
     """Show reusable real-CAD meshes with one transform per occurrence."""
 
-    from pydrake.geometry import Mesh, Meshcat, MeshcatParams, Rgba
+    from pydrake.geometry import Mesh, Meshcat, Rgba
     from pydrake.math import RigidTransform, RotationMatrix
 
-    from .meshcat_ui import patch_meshcat_page
+    from .meshcat_ui import announce_viewer, patch_meshcat_page, viewer_params
 
     scene = yaml.safe_load(Path(scene_path).read_text(encoding="utf-8"))
     instances = scene["instances"]
     # Nothing here publishes a realtime rate, so the stats plot only ever covers the view.
-    params = MeshcatParams(host="*", show_stats_plot=False)
-    wsl_address = _wsl_ipv4_address()
-    if wsl_address is not None:
-        params.web_url_pattern = f"http://{wsl_address}:{{port}}"
     patch_meshcat_page()
-    meshcat = Meshcat(params)
+    meshcat = Meshcat(viewer_params())
     role_paths: dict[tuple[str, str], str] = {}
     joint_paths: dict[str, str] = {}
     last_joint_path_by_stage: dict[str, str] = {}
@@ -438,7 +433,7 @@ def view_stage_cad(scene_path: str | Path, *, fps: float = 30.0) -> None:
     meshcat.SetCameraPose(eye, center)  # pyright: ignore[reportArgumentType]
     meshcat.AddButton("Reset to home")
     meshcat.AddButton("Stop viewer", "Escape")
-    print(f"Reusable stage CAD: {meshcat.web_url()}")
+    announce_viewer("Reusable stage CAD", meshcat)
     print(
         f"Showing {len(instances)} real stages and {scene['attached_part_count']} attached "
         "non-fastener parts."
@@ -630,18 +625,6 @@ def _is_current(outputs: list[Path], sources: list[Path]) -> bool:
         return False
     oldest_output = min(output.stat().st_mtime_ns for output in outputs)
     return all(source.exists() and source.stat().st_mtime_ns <= oldest_output for source in sources)
-
-
-def _wsl_ipv4_address() -> str | None:
-    if "WSL_DISTRO_NAME" not in os.environ:
-        return None
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as connection:
-            connection.connect(("1.1.1.1", 53))
-            address = str(connection.getsockname()[0])
-            return address if not address.startswith("127.") else None
-    except OSError:
-        return None
 
 
 def main() -> None:

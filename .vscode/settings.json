@@ -35,13 +35,30 @@
   },
 
   // Pylance: don't index the 1.5G virtualenv or generated mesh/CAD output.
+  // This setting REPLACES Pylance's defaults rather than extending them, so the first
+  // three entries restore them. ".venv" is redundant against "**/.*", but Pylance compares
+  // this list literally rather than as globs, so it warns unless the environment is named.
   "python.analysis.exclude": [
-    "**/.venv/**",
-    "**/.cache/**",
+    "**/node_modules",
+    "**/__pycache__",
+    "**/.*",
+    ".venv",
+    ".git",
     "**/exports/**",
-    "**/cad/**",
-    "**/__pycache__/**"
+    "**/cad/**"
   ],
+
+  // The viewers serve Meshcat on 7000, stepping up when that port is taken, and open the
+  // page themselves. Forwarding the range keeps the Ports panel usable as a way back to a
+  // closed tab; "silent" is what stops that duplicating the browser the viewer just opened.
+  "remote.autoForwardPorts": true,
+  "remote.portsAttributes": {
+    "7000-7010": {
+      "label": "Meshcat viewer",
+      "onAutoForward": "silent",
+      "protocol": "http"
+    }
+  },
 
   // STEP files are LFS-backed and up to ~95 MB; never treat them as editable text.
   "files.associations": {

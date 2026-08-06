@@ -13,34 +13,17 @@ from __future__ import annotations
 
 import base64
 import os
+import shutil
+import socket
+import subprocess
+import webbrowser
 from pathlib import Path
 
 from .paths import CACHE_ROOT
 
-# The LCLS roundel: a cardinal disc, an undulator magnet row above and below, and the
-# electron beam oscillating between them. Drawn as SVG so the tab icon stays sharp, and
-# clipped to the disc so the outer magnets read as wedges against the rim.
-FAVICON_SVG = (
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
-    '<defs><clipPath id="disc"><circle cx="32" cy="32" r="31"/></clipPath></defs>'
-    '<circle cx="32" cy="32" r="31" fill="#8c1515"/>'
-    '<g clip-path="url(#disc)">'
-    '<g fill="#fff">'
-    '<path d="M3 17L16 12.5L16 18.5L3 23Z"/>'
-    '<path d="M18.5 12L30.5 9.6L30.5 15.6L18.5 18Z"/>'
-    '<path d="M33.5 9.6L45.5 12L45.5 18L33.5 15.6Z"/>'
-    '<path d="M48 12.5L61 17L61 23L48 18.5Z"/>'
-    "</g>"
-    '<g fill="#fff" transform="matrix(1 0 0 -1 0 64)">'
-    '<path d="M3 17L16 12.5L16 18.5L3 23Z"/>'
-    '<path d="M18.5 12L30.5 9.6L30.5 15.6L18.5 18Z"/>'
-    '<path d="M33.5 9.6L45.5 12L45.5 18L33.5 15.6Z"/>'
-    '<path d="M48 12.5L61 17L61 23L48 18.5Z"/>'
-    "</g>"
-    '<path d="M2 32q3.75-18 7.5 0t7.5 0t7.5 0t7.5 0t7.5 0t7.5 0t7.5 0" fill="none" '
-    'stroke="#fff" stroke-width="4" stroke-linecap="round"/>'
-    "</g></svg>"
-)
+# The LCLS roundel, trimmed to the disc and matted onto transparency so the tab strip
+# shows through rather than a white square.
+FAVICON_PATH = Path(__file__).parent / "assets" / "lcls-roundel.png"
 
 # dat.GUI's own rules are `.dg li:not(.folder)`, so the overrides need `!important`.
 PANEL_CSS = """
@@ -64,7 +47,10 @@ body { background: #1a1a1a; }
                                font-size: 13px !important; }
 .dg.main .c .slider { height: 24px !important; }
 .dg.main .c select { height: 22px !important; font-size: 13px !important; }
-.dg.main .close-button { height: 24px !important; line-height: 24px !important; }
+/* dat.GUI writes the button's width inline from its own 245px, which our wider panel
+   leaves it short of; !important beats that, and outlasts dat.GUI reapplying it. */
+.dg.main .close-button { height: 24px !important; line-height: 24px !important;
+                         width: 100% !important; }
 """
 
 PANEL_JS = """
@@ -72,6 +58,9 @@ window.addEventListener("load", function () {
   var panel = document.querySelector(".dg.main");
   var list = panel && panel.querySelector(":scope > ul");
   if (!list) return;
+  // dat.GUI calls this "Close Controls", but it collapses the whole side panel rather
+  // than any one group of controls.
+  var closeButton = panel.querySelector(".close-button");
 
   // Meshcat opens the scene tree by default, which alone costs a third of the window.
   Array.prototype.forEach.call(list.children, function (item) {
@@ -87,7 +76,10 @@ window.addEventListener("load", function () {
   // The canvas keeps the width the panel is not using, so neither one overlaps or
   // pushes the other, and the document never grows past the window.
   function fit() {
-    var reserved = list.classList.contains("closed") ? 0 : panel.offsetWidth;
+    var closed = list.classList.contains("closed");
+    // dat.GUI rewrites the caption on every toggle, so ours has to be reapplied here.
+    if (closeButton) closeButton.innerHTML = closed ? "Show panel" : "Hide panel";
+    var reserved = closed ? 0 : panel.offsetWidth;
     document.documentElement.style.setProperty(
       "--twinlab-panel-width", reserved + "px");
     viewer.set_3d_pane_size();
@@ -151,7 +143,26 @@ window.addEventListener("load", function () {
     viewer.set_dirty();
   }
 
-  if (viewer.gui) viewer.gui.add(override, "Zoom limit override").onChange(apply);
+  // dat.GUI only appends, and the server's own controls arrive after this script runs, so
+  // the row lands at the top of the panel and has to be moved down to the toggle it
+  // belongs with once that toggle exists.
+  var overrideRow = null;
+  if (viewer.gui) {
+    overrideRow = viewer.gui.add(override, "Zoom limit override").onChange(apply).__li;
+  }
+
+  function regroup() {
+    var animation = viewer.gui_controllers && viewer.gui_controllers["Animation"];
+    if (!overrideRow || !animation) return;
+    var row = animation.domElement.closest("li");
+    // TOGGLE_JS puts the checkbox immediately before this row, so "after" still reads as
+    // directly below the animation toggle.
+    if (row && row.parentElement) row.parentElement.insertBefore(overrideRow, row.nextSibling);
+  }
+
+  var set_control = viewer.set_control.bind(viewer);
+  viewer.set_control = function () { set_control.apply(null, arguments); regroup(); };
+  regroup();
 
   // Drake builds a fresh OrbitControls whenever the server sets a camera.
   var set_camera = viewer.set_camera.bind(viewer);
@@ -226,6 +237,77 @@ window.addEventListener("load", function () {
 RESOURCE_ROOT = CACHE_ROOT / "drake-resource-root"
 
 
+def viewer_params(*, show_stats_plot: bool = False):
+    """Build the Meshcat settings every viewer shares.
+
+    Drake's default host and ``host="*"`` both bind the IPv6 wildcard, so the socket only
+    shows up in ``/proc/net/tcp6``; VS Code scans the IPv4 table for new servers and so
+    never lists the viewer under Ports. The IPv4 wildcard reaches the same places and lands
+    in the table the editor reads.
+
+    Every viewer must build its params here: when the three of them each configured their
+    own, a change to one silently left the others behind.
+    """
+
+    from pydrake.geometry import MeshcatParams
+
+    return MeshcatParams(host="0.0.0.0", show_stats_plot=show_stats_plot)
+
+
+def announce_viewer(label: str, meshcat, *, open_browser: bool = True) -> None:
+    """Print the viewer's localhost URL and open it.
+
+    The URL is printed as well as opened so there is still something to click when the
+    browser cannot be launched, and it is built here rather than taken from ``web_url()``,
+    which reports whatever host the server bound to.
+    """
+
+    url = f"http://localhost:{meshcat.port()}"
+    print(f"{label}: {url}")
+    address = wsl_ipv4_address()
+    if address is not None:
+        print(f"From another machine: http://{address}:{meshcat.port()}")
+    if open_browser:
+        open_in_browser(url)
+
+
+def open_in_browser(url: str) -> None:
+    """Show ``url`` in the desktop browser, falling back to the printed link in silence.
+
+    WSL has no Linux browser to hand the URL to, so it goes to the Windows default browser
+    instead; ``explorer.exe`` exits non-zero even when it worked, so its status is ignored.
+    """
+
+    if "WSL_DISTRO_NAME" in os.environ:
+        launcher = shutil.which("wslview") or shutil.which("explorer.exe")
+        if launcher is not None:
+            subprocess.run(
+                [launcher, url],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return
+    try:
+        webbrowser.open(url)
+    except (webbrowser.Error, OSError):
+        pass
+
+
+def wsl_ipv4_address() -> str | None:
+    """Return this WSL distro's LAN address, or ``None`` when not running under WSL."""
+
+    if "WSL_DISTRO_NAME" not in os.environ:
+        return None
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as connection:
+            connection.connect(("1.1.1.1", 53))
+            address = str(connection.getsockname()[0])
+            return address if not address.startswith("127.") else None
+    except OSError:
+        return None
+
+
 def patch_meshcat_page() -> None:
     """Redirect Drake's resource lookup at a patched page. Call before ``Meshcat()``."""
 
@@ -277,13 +359,12 @@ def _patched_html(source: Path) -> str:
         f"<script>{TOGGLE_JS}</script>\n"
     )
     html = html.replace("</body>", f"{patch}</body>")
-    # Base64 rather than a raw data URI: the SVG carries `#` colours, which would end the
-    # href at the first one.
-    icon = base64.b64encode(FAVICON_SVG.encode("utf-8")).decode("ascii")
+    # Inlined rather than served as a sibling file: Drake only maps meshcat.html onto its
+    # resource root, so a relative icon href would 404.
+    icon = base64.b64encode(FAVICON_PATH.read_bytes()).decode("ascii")
     html = html.replace(
         "</head>",
-        f'<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,{icon}">\n'
-        "</head>",
+        f'<link rel="icon" type="image/png" href="data:image/png;base64,{icon}">\n</head>',
     )
     # The tab title is how you tell a patched page from a stale Drake one.
     return html.replace("<title>Drake MeshCat</title>", "<title>Twin-Lab Meshcat</title>")

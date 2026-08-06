@@ -221,6 +221,7 @@ cached hull against the tessellated part it replaces:
 
 ```bash
 slac-hull-audit                       # every cached decomposition, worst fit first
+slac-hull-audit --tour                # the ten worst parts, one per click
 slac-hull-audit static_A003 --view    # one mesh, with the hulls drawn over the CAD
 slac-hull-audit --assembly            # every part in place, hulls over the CAD mesh
 ```
@@ -252,6 +253,21 @@ The bulge ramp holds grey out to a quarter of its scale rather than starting at 
 Every hull vertex bulges a little -- the median across `static_A003` is 0.17 mm, at the
 tessellation deflection rather than at anything CoACD did -- so a ramp anchored at zero
 paints the whole assembly amber and separates nothing.
+
+`--tour` is the same rendering as `--assembly` restricted to one part at a time, but it
+chooses the parts itself: the `--tour-count` worst by the active `--sort`, ten by
+default, framed one per click of `Next part`. Both other viewers ask the reviewer for an
+index, and an index is exactly what the audit has already worked out, so the tour is the
+form of the review that gets finished. Position is derived from the Next and Previous
+click counters rather than tracked in the loop, so a click landing between polls is
+never dropped and both ends wrap. The panel republishes the part's audited numbers as
+control labels on every step, which is the only text Meshcat can show.
+
+Note that relabelling a Drake button -- how all three viewers show a toggle's next state
+-- creates a *new* button whose click count starts at zero, so the tracked count has to
+be reset with it. Carrying the old count over made the next poll compare 1 against 0 and
+fire the toggle a second time, which advanced the three-state hull button by two states
+per click and ran the cycle backwards.
 
 Nearly all of that runtime is the two distance fields, so each part's measurements are
 cached in an `audit.npz` beside the hulls they judge, keyed to the source mesh's digest
@@ -321,3 +337,47 @@ tolerances, cable envelopes, and reviewed collision geometry.
 Clearance numbers inherit the tessellation deflection (2 mm) and the convex
 decomposition error, so treat small positive clearances as "needs a closer look"
 rather than as a measurement.
+
+`Verify against CAD` in the collision viewer removes the second of those two
+terms from every pair inside the warning band. It prefers an exact triangle-to-triangle
+distance between the two parts' own tessellations, taken over the triangles within 20 mm
+of the witness points Drake reported and capped at 400 triangles a side; where the
+tessellation cannot be loaded it falls back to subtracting the audited proudness of the
+two hulls, sampled at the three hull vertices nearest the contact. The fallback needs
+`slac-hull-audit` to have written its `audit.npz`, and a pair with neither available is
+reported `unverified` rather than quietly passed.
+
+Both corrections are one-sided. They can only ever grow a reported distance, because the
+hulls they correct are supersets of the parts, so an `explained` verdict genuinely rules
+out the decomposition as the cause. That is what makes it safe to fold them into the live
+reading: the corrected report drives the status colour, the highlights and the offender
+list, and a correction can drop a pair out of the band but never add one. What neither
+does is remove the tessellation deflection: BRepMesh inscribes its facets, so the meshes
+themselves are undersized on convex surfaces by up to the deflection, and a
+sub-millimetre `explained` result is inside that noise. The verdict is a routing decision
+— look at the CAD, or look at the design — not a clearance figure.
+
+The two tiers run on different schedules, because they cost three orders of magnitude
+apart. Subtracting the audited proudness is a table lookup, 1.7-2.0 ms for twelve pairs,
+so it runs on every pose alongside the ~40 ms signed-distance query. The exact mesh
+distance is 5-240 ms per pair (720-860 ms for twelve), which no slider drag can absorb,
+so it waits until the pose has held still for 0.3 s and until then the reading carries
+only the cheaper correction. Both directions of that trade are conservative: the
+uncorrected reading is the one that over-reports.
+
+Measured at the reviewed home pose (5 mm band): 22 part pairs inside the band on the
+hulls alone, 21 after the proudness correction, 18 after the exact distance — for
+instance P662 against P844 reads +0.59 mm on the hulls and 1.98 mm on the CAD. The
+control that proves the correction is not simply clearing everything is A044 driven to
+-25 mm, where P664/P844 and P652/P844 still report `CAD meshes intersect`.
+
+The 20 mm / 400-triangle neighbourhood is not a limiting approximation here: re-running
+the same pairs at 80 mm and 2000 triangles reproduces every distance exactly.
+
+The two tiers were also run against each other on those six pairs. They agree on four; on
+the remaining two the audited proudness returns `contact` where the exact distance finds
+1.18 mm and 0.18 mm of clearance. The bias is one-directional and structural: bulge is
+measured at hull vertices, and a hull face stands off the CAD by more in its interior than
+at its corners, so the vertex-sampled correction always understates the true proudness. A
+Tier 0 `explained` is therefore trustworthy, while a Tier 0 `contact` only means the pair
+has not been ruled out yet.

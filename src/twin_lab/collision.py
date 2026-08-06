@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
-from dataclasses import dataclass, field
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+import numpy as np
 import yaml
 
+from .clearance_refine import ClearanceRefiner, Refinement
 from .paths import resolve_repo_path
 from .scene import DrakeScene, load_scene
 
@@ -31,6 +33,12 @@ class Clearance:
     a: str
     b: str
     distance_m: float
+    # Where on the two hulls the distance was measured, and how those hulls sit in the
+    # world. Both are needed to re-check the pair against the CAD; see clearance_refine.
+    witness_a_m: np.ndarray | None = field(default=None, compare=False)
+    witness_b_m: np.ndarray | None = field(default=None, compare=False)
+    pose_a: np.ndarray | None = field(default=None, compare=False)
+    pose_b: np.ndarray | None = field(default=None, compare=False)
 
     @property
     def parts(self) -> tuple[str, str]:
@@ -104,6 +112,31 @@ class ClearanceReport:
             return "interference"
         return "close" if self.warnings else "clear"
 
+    def corrected(self, refinements: Iterable[Refinement]) -> ClearanceReport:
+        """A copy with the CAD re-check applied, and only ever in the clearing direction.
+
+        A hull encloses the part it stands in for, so a hull distance can only understate
+        the gap. Taking the larger of the two therefore keeps the report a superset of the
+        real interferences: a re-check can drop a pair out of the band, never add one.
+        """
+
+        corrections = {
+            tuple(sorted(ref.parts)): ref.verified_m
+            for ref in refinements
+            if ref.verified_m is not None
+        }
+        if not corrections:
+            return self
+        kept = []
+        for item in self.clearances:
+            verified = corrections.get(tuple(sorted(part.upper() for part in item.parts)))
+            if verified is None or verified <= item.distance_m:
+                kept.append(item)
+            elif verified <= self.warn_m:
+                kept.append(replace(item, distance_m=verified))
+        kept.sort(key=lambda item: (item.distance_m, item.a, item.b))
+        return replace(self, clearances=tuple(kept))
+
     def offenders(self, limit: int = 3) -> tuple[Clearance, ...]:
         """Worst clearance per part pair, so one physical interface is reported once."""
 
@@ -154,12 +187,16 @@ class CollisionModel:
         scene: DrakeScene,
         ignored_pairs: frozenset[tuple[str, str]] = frozenset(),
         part_labels: Mapping[str, str] | None = None,
+        decomposition_dir: str | Path | None = None,
     ):
         self.scene = scene
         self.ignored_pairs = ignored_pairs
         self.part_labels = dict(part_labels or {})
         self.context = scene.create_context()
         self.reopened_joints = self._reopen_anchored_pairs()
+        self.refiner = (
+            ClearanceRefiner(decomposition_dir) if decomposition_dir is not None else None
+        )
 
     def _reopen_anchored_pairs(self) -> int:
         """Restore clearance checking between each stage's first moving link and the room.
@@ -217,11 +254,12 @@ class CollisionModel:
         *,
         ignore_file: str | Path | None = None,
         label_source: str | Path | None = None,
+        decomposition_dir: str | Path | None = None,
     ) -> CollisionModel:
         scene = load_scene(sdf_path)
         ignored = read_ignored_pairs(ignore_file) if ignore_file is not None else frozenset()
         labels = read_part_labels(label_source) if label_source is not None else {}
-        return cls(scene, ignored, labels)
+        return cls(scene, ignored, labels, decomposition_dir)
 
     def joint_names(self) -> list[str]:
         from pydrake.multibody.tree import JointIndex
@@ -253,11 +291,54 @@ class CollisionModel:
             self.context, max_distance_m=max_distance_m if max_distance_m is not None else warn_m
         )
         clearances = tuple(
-            Clearance(a=item.a, b=item.b, distance_m=item.distance_m)
+            Clearance(
+                a=item.a,
+                b=item.b,
+                distance_m=item.distance_m,
+                witness_a_m=item.witness_a_m,
+                witness_b_m=item.witness_b_m,
+                pose_a=item.pose_a,
+                pose_b=item.pose_b,
+            )
             for item in distances
             if _pair_key(item.a, item.b) not in self.ignored_pairs
         )
         return ClearanceReport(clearances=clearances, warn_m=warn_m, part_labels=self.part_labels)
+
+    def refine(
+        self, report: ClearanceReport, *, limit: int = 12, with_mesh: bool = True
+    ) -> tuple[Refinement, ...]:
+        """Re-check the reported pairs against the CAD behind the hulls, worst first.
+
+        Every pair inside the band is checked, not only the ones already in contact: the
+        same hull proudness that turns a clear pair into a contact turns a clear pair into
+        a near miss, and both readings mislead the reviewer.
+        """
+
+        if self.refiner is None:
+            return ()
+        seen: set[tuple[str, str]] = set()
+        refinements = []
+        for clearance in report.clearances:
+            if clearance.parts in seen:
+                continue
+            seen.add(clearance.parts)
+            refinements.append(self.refiner.refine(clearance, with_mesh=with_mesh))
+            if len(refinements) >= limit:
+                break
+        return tuple(refinements)
+
+    def verify(
+        self, report: ClearanceReport, *, limit: int = 12, with_mesh: bool = True
+    ) -> tuple[ClearanceReport, tuple[Refinement, ...]]:
+        """The report with the CAD re-check folded in, alongside the evidence for it.
+
+        ``with_mesh`` false keeps only the proudness correction, which is a table lookup;
+        measuring the tessellated parts themselves costs tens of milliseconds a pair.
+        """
+
+        refinements = self.refine(report, limit=limit, with_mesh=with_mesh)
+        return report.corrected(refinements), refinements
 
 
 def read_ignored_pairs(path: str | Path) -> frozenset[tuple[str, str]]:

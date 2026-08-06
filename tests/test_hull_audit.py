@@ -23,6 +23,7 @@ from twin_lab.hull_audit import (
     outside_distance,
     part_fit,
     surface_distance,
+    tour_labels,
     union_volume,
 )
 
@@ -234,3 +235,19 @@ def test_audit_key_tracks_the_mesh_the_hulls_and_the_seed():
     assert _audit_key({**manifest, "source_sha256": "bb"}, 0) != base
     assert _audit_key({**manifest, "parts_settings_sig": "other"}, 0) != base
     assert _audit_key(manifest, 1) != base
+
+
+def test_tour_labels_count_from_one_and_carry_every_metric():
+    labels = tour_labels(0, 10, _audit("P013"))
+    assert labels[0] == "Part 1 of 10: a003/P013"
+    assert "1.25x" in labels[1] and "2 hulls" in labels[1]
+    assert "2.50 mm" in labels[2]
+    assert "0.125 mm" in labels[3]
+
+
+def test_tour_labels_stay_usable_as_meshcat_control_names():
+    """Drake pastes a control name into a single-quoted JS literal, so a quote drops it."""
+
+    labels = tour_labels(3, 10, _audit("P013"))
+    assert not any("'" in label for label in labels)
+    assert len(set(labels)) == len(labels)
