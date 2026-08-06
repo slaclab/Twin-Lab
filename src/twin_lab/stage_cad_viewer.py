@@ -338,7 +338,12 @@ def view_stage_cad(scene_path: str | Path, *, fps: float = 30.0) -> None:
     from pydrake.geometry import Mesh, Meshcat, Rgba
     from pydrake.math import RigidTransform, RotationMatrix
 
-    from .meshcat_ui import announce_viewer, patch_meshcat_page, viewer_params
+    from .meshcat_ui import (
+        announce_viewer,
+        patch_meshcat_page,
+        print_view_help,
+        viewer_params,
+    )
 
     scene = yaml.safe_load(Path(scene_path).read_text(encoding="utf-8"))
     instances = scene["instances"]
@@ -440,6 +445,7 @@ def view_stage_cad(scene_path: str | Path, *, fps: float = 30.0) -> None:
     )
     print(f"Motion sliders: {len(joints)}")
     print("Tick 'Animation' to start and stop cyclic motion.")
+    print_view_help()
     print("Press Escape in Meshcat or Ctrl-C here to stop.")
     frame_period = 1.0 / max(fps, 1.0)
     reset_clicks = 0

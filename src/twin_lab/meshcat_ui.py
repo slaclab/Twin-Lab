@@ -12,6 +12,8 @@ fix then lands on Drake's own port and there is only ever one URL to open.
 from __future__ import annotations
 
 import base64
+import json
+import math
 import os
 import shutil
 import socket
@@ -24,6 +26,54 @@ from .paths import CACHE_ROOT
 # The LCLS roundel, trimmed to the disc and matted onto transparency so the tab strip
 # shows through rather than a white square.
 FAVICON_PATH = Path(__file__).parent / "assets" / "lcls-roundel.png"
+
+# What makes a view isometric is that the camera sits at equal angles to all three axes.
+# Which of the four top corners reads as "near left" was settled by eye against the CAD
+# package's own isometric, not derived: the enclosure opening is hard to pin to an axis
+# from the geometry alone. Z stays positive so the camera looks down rather than up.
+ISOMETRIC_DIRECTION = (1.0, -1.0, 1.0)
+# A trimetric view is one where all three axes are foreshortened differently, which is
+# what stops two of them reading as the same length in a still image. Swinging further
+# off the front than the isometric's 45 degrees and rising less than its 35 degrees gives
+# foreshortenings of 0.88, 0.58, and 0.94 on X, Y, and Z: three visibly different numbers.
+TRIMETRIC_SWING_DEG = 30.0
+TRIMETRIC_RISE_DEG = 20.0
+# Drake's Meshcat camera has a 75 degree vertical field of view, so a sphere of radius R is
+# wholly in frame from R / sin(37.5 deg) ~= 1.64 R away. The rest is margin, since an
+# assembly is a box rather than a sphere and a photograph wants some air around it.
+FRAMING_DISTANCE = 2.2
+# Big enough to hit a corner cell with the mouse without crowding the render.
+VIEW_CUBE_PX = 132
+
+
+def _swing_and_rise(swing_deg: float, rise_deg: float) -> tuple[float, float, float]:
+    """A unit direction ``swing_deg`` off the front face (-Y) and ``rise_deg`` above it."""
+
+    swing = math.radians(swing_deg)
+    rise = math.radians(rise_deg)
+    return (
+        math.sin(swing) * math.cos(rise),
+        -math.cos(swing) * math.cos(rise),
+        math.sin(rise),
+    )
+
+
+TRIMETRIC_DIRECTION = _swing_and_rise(TRIMETRIC_SWING_DEG, TRIMETRIC_RISE_DEG)
+
+# Written as JSON rather than interpolated into the script body: the directions are
+# derived here, and a second copy in the JavaScript would be free to drift from this one.
+VIEW_SETTINGS_JS = (
+    "window.TWINLAB_VIEWS = "
+    + json.dumps(
+        {
+            "isometric": list(ISOMETRIC_DIRECTION),
+            "trimetric": list(TRIMETRIC_DIRECTION),
+            "fit": FRAMING_DISTANCE,
+            "cube_px": VIEW_CUBE_PX,
+        }
+    )
+    + ";"
+)
 
 # dat.GUI's own rules are `.dg li:not(.folder)`, so the overrides need `!important`.
 PANEL_CSS = """
@@ -51,6 +101,31 @@ body { background: #1a1a1a; }
    leaves it short of; !important beats that, and outlasts dat.GUI reapplying it. */
 .dg.main .close-button { height: 24px !important; line-height: 24px !important;
                          width: 100% !important; }
+/* Bottom left is the one corner neither the control panel nor Drake's stats plot uses,
+   so the cube never has to move out of anything's way. */
+#twinlab-view-cube { position: fixed; left: 12px; bottom: 12px; z-index: 8; }
+#twinlab-view-cube canvas { display: block; cursor: pointer; }
+"""
+
+# Anything that has to measure the model needs the same idea of what the model is, and
+# getting that wrong is invisible until the framing is quietly wrong, so there is one copy.
+SCENE_JS = """
+window.twinlab = window.twinlab || {};
+(function () {
+  // Meshcat's own helpers are sized independently of the model - the grid alone is tens of
+  // metres across - so measuring the model has to leave them out.
+  var HELPERS = { Grid: 1, Axes: 1, Background: 1, Lights: 1, Cameras: 1 };
+  // The box comes back in three.js' own frame, which is the model frame turned Z-up to
+  // Y-up by the scene's rotation.
+  window.twinlab.modelBox = function () {
+    var THREE = window.MeshCat.THREE;
+    var box = new THREE.Box3();
+    viewer.scene.children.forEach(function (child) {
+      if (!HELPERS[child.name]) box.expandByObject(child);
+    });
+    return box;
+  };
+})();
 """
 
 PANEL_JS = """
@@ -103,7 +178,6 @@ window.addEventListener("load", function () {
   }
   // Meshcat's own helpers are sized independently of the model, and the grid alone is
   // tens of metres across, so they must not drag the zoom limit out with them.
-  var HELPERS = { Grid: 1, Axes: 1, Background: 1, Lights: 1, Cameras: 1 };
   var radius = 0;
   var measuredAt = 0;
   var override = { "Zoom limit override": false };
@@ -113,10 +187,7 @@ window.addEventListener("load", function () {
   function modelRadius() {
     if (radius > 0 && Date.now() - measuredAt < 5000) return radius;
     measuredAt = Date.now();
-    var box = new THREE.Box3();
-    viewer.scene.children.forEach(function (child) {
-      if (!HELPERS[child.name]) box.expandByObject(child);
-    });
+    var box = window.twinlab.modelBox();
     if (!box.isEmpty()) radius = box.getSize(new THREE.Vector3()).length() / 2;
     return radius;
   }
@@ -234,6 +305,323 @@ window.addEventListener("load", function () {
 });
 """
 
+# Every CAD package puts a clickable cube in the corner, so this is the navigation people
+# arrive already knowing. Snapping runs entirely in the browser: a round trip to Python for
+# each click would make the cube feel unlike the one it is imitating, and the camera is the
+# one piece of viewer state the server does not otherwise own.
+VIEW_CUBE_JS = """
+window.addEventListener("load", function () {
+  var THREE = window.MeshCat && window.MeshCat.THREE;
+  if (!THREE || typeof viewer === "undefined") {
+    console.warn("Twin-Lab: MeshCat.THREE is unavailable; the view cube is off.");
+    return;
+  }
+  var VIEWS = window.TWINLAB_VIEWS;
+
+  // --- moving the camera ---------------------------------------------------
+  // Meshcat renders the model's Z-up frame through a scene rotated into three.js' Y-up
+  // one, so every direction quoted in model axes has to cross that rotation.
+  function toRender(v) {
+    return new THREE.Vector3(v[0], v[1], v[2]).applyQuaternion(viewer.scene.quaternion);
+  }
+  var MODEL_UP = toRender([0, 0, 1]);
+
+  // The camera hangs under Cameras/default/rotated, and OrbitControls reads its position
+  // and target in that parent's frame rather than the world one.
+  function cameraParent() {
+    var parent = viewer.camera.parent;
+    parent.updateWorldMatrix(true, false);
+    return parent;
+  }
+
+  function eyeInWorld() {
+    return viewer.camera.getWorldPosition(new THREE.Vector3());
+  }
+
+  function targetInWorld() {
+    return cameraParent().localToWorld(viewer.controls.target.clone());
+  }
+
+  function placeCamera(eye, target) {
+    var parent = cameraParent();
+    viewer.camera.position.copy(parent.worldToLocal(eye.clone()));
+    viewer.controls.target.copy(parent.worldToLocal(target.clone()));
+    viewer.controls.update();
+    viewer.set_dirty();
+  }
+
+  // Straight down the up axis OrbitControls has no azimuth left to keep and the view rolls
+  // to wherever it was last. A hair towards the front pins the roll instead, and lands the
+  // front of the model at the bottom of the screen the way a CAD top view does.
+  var POLE_NUDGE = 0.001;
+  function approach(direction) {
+    var dir = toRender(direction).normalize();
+    if (Math.abs(dir.dot(MODEL_UP)) > 0.9999) {
+      dir.addScaledVector(toRender([0, -1, 0]), POLE_NUDGE).normalize();
+    }
+    return dir;
+  }
+
+  // Framing is measured rather than fixed, so it follows the model as the joints move.
+  function framing() {
+    var box = window.twinlab.modelBox();
+    if (box.isEmpty()) return null;
+    var radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 1e-3);
+    return { target: box.getCenter(new THREE.Vector3()), distance: radius * VIEWS.fit };
+  }
+
+  function lookFrom(direction, fit) {
+    if (!viewer.camera || !viewer.controls) return;
+    var target = targetInWorld();
+    var distance = eyeInWorld().distanceTo(target);
+    if (fit) {
+      var framed = framing();
+      if (framed) { target = framed.target; distance = framed.distance; }
+    }
+    if (!(distance > 1e-9)) distance = 1;
+    var eye = target.clone().addScaledVector(approach(direction), distance);
+    glide(eye, target);
+  }
+
+  // A jump cut loses which way the model turned, which is most of what the cube is for.
+  var GLIDE_MS = 260;
+  var glideToken = 0;
+  function glide(eye, target) {
+    var startTarget = targetInWorld();
+    var startOffset = eyeInWorld().sub(startTarget);
+    var endOffset = eye.clone().sub(target);
+    var startLength = startOffset.length();
+    var endLength = endOffset.length();
+    if (startLength < 1e-9 || endLength < 1e-9) { placeCamera(eye, target); return; }
+    var startDirection = startOffset.clone().normalize();
+    var swing = new THREE.Quaternion().setFromUnitVectors(
+      startDirection, endOffset.clone().normalize());
+    var still = new THREE.Quaternion();
+    var token = ++glideToken;
+    var began = performance.now();
+    function step() {
+      if (token !== glideToken) return;
+      var t = Math.min((performance.now() - began) / GLIDE_MS, 1);
+      // Smoothstep, so the camera leaves and arrives at rest instead of starting at speed.
+      var eased = t * t * (3 - 2 * t);
+      var offset = startDirection.clone()
+        .applyQuaternion(still.clone().slerp(swing, eased))
+        .multiplyScalar(startLength + (endLength - startLength) * eased);
+      var here = startTarget.clone().lerp(target, eased);
+      placeCamera(here.clone().add(offset), here);
+      if (t < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
+  // --- the cube ------------------------------------------------------------
+  // The cube spans -1..1 and is cut into 26 cells: a face panel out to BAND on each axis,
+  // then the rim that is left over. That makes the faces, edges, and corners fall out of
+  // one loop, and each cell's own index is the direction to look from.
+  var HALF = 1.0;
+  var BAND = 0.62;
+  var FACE_RGB = 0xe9edf2;
+  var RIM_RGB = 0xc3cad3;
+  var HOVER_RGB = 0xffb128;
+  var OUTLINE_RGB = 0x7b8794;
+  // The front of the assembly faces -Y, as it does in the CAD package, so a view named
+  // here and a view of the same name there look at the same side.
+  var FACE_TEXT = { "1,0,0": "RIGHT", "-1,0,0": "LEFT", "0,1,0": "BACK",
+                    "0,-1,0": "FRONT", "0,0,1": "TOP", "0,0,-1": "BOTTOM" };
+  // BoxGeometry's material slots, in its own order.
+  var SLOTS = [[1,0,0], [-1,0,0], [0,1,0], [0,-1,0], [0,0,1], [0,0,-1]];
+  // Quarter turns that stand each slot's label upright once you are looking at it. They
+  // differ because three.js lays the six faces' texture coordinates out in six directions.
+  var SLOT_TURNS = [1, 3, 2, 0, 0, 2];
+
+  function labelTexture(text, quarterTurns) {
+    var canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 128;
+    var ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#e9edf2";
+    ctx.fillRect(0, 0, 128, 128);
+    ctx.translate(64, 64);
+    // The canvas y axis points down, so a turn that reads counter-clockwise is negative.
+    ctx.rotate(-quarterTurns * Math.PI / 2);
+    ctx.fillStyle = "#243447";
+    ctx.font = "bold 24px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, 0, 0, 110);
+    var texture = new THREE.CanvasTexture(canvas);
+    if (THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+    return texture;
+  }
+
+  var gizmo = new THREE.Scene();
+  // Turned exactly as the model's own scene is, so the cube reads in model axes.
+  var cube = new THREE.Group();
+  cube.quaternion.copy(viewer.scene.quaternion);
+  gizmo.add(cube);
+  var cells = [];
+
+  function addCell(index) {
+    var span = function (n) { return n === 0 ? BAND * 2 : HALF - BAND; };
+    var offset = function (n) { return n === 0 ? 0 : n * (HALF + BAND) / 2; };
+    var geometry = new THREE.BoxGeometry(span(index[0]), span(index[1]), span(index[2]));
+    var rim = Math.abs(index[0]) + Math.abs(index[1]) + Math.abs(index[2]) > 1;
+    var base = rim ? RIM_RGB : FACE_RGB;
+    var materials = SLOTS.map(function (slot, s) {
+      var outward = slot[0] === index[0] && slot[1] === index[1] && slot[2] === index[2];
+      if (!outward) return new THREE.MeshBasicMaterial({ color: base });
+      return new THREE.MeshBasicMaterial(
+        { map: labelTexture(FACE_TEXT[index.join(",")], SLOT_TURNS[s]) });
+    });
+    var cell = new THREE.Mesh(geometry, materials);
+    cell.position.set(offset(index[0]), offset(index[1]), offset(index[2]));
+    cell.userData = { direction: index, base: base };
+    // Without an outline the cells merge into one blank silhouette when seen face on.
+    cell.add(new THREE.LineSegments(new THREE.EdgesGeometry(geometry),
+                                    new THREE.LineBasicMaterial({ color: OUTLINE_RGB })));
+    cube.add(cell);
+    cells.push(cell);
+  }
+
+  for (var i = -1; i <= 1; i++) {
+    for (var j = -1; j <= 1; j++) {
+      for (var k = -1; k <= 1; k++) {
+        if (i || j || k) addCell([i, j, k]);
+      }
+    }
+  }
+
+  // The arrows are what makes the cube worth more than six buttons: they say which way the
+  // model's own axes run in the current view. They are depth tested against the cube, so an
+  // axis pointing away from you is hidden by it rather than drawn through it.
+  var AXIS_RGB = [0xd1495b, 0x3aa06d, 0x3d7ea6];
+  var AXIS_TEXT = ["X", "Y", "Z"];
+  var AXIS_LENGTH = 1.3;
+
+  function axisLabel(text, colour) {
+    var canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 64;
+    var ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#" + ("000000" + colour.toString(16)).slice(-6);
+    ctx.font = "bold 44px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, 32, 32);
+    var texture = new THREE.CanvasTexture(canvas);
+    if (THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+    var sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture }));
+    sprite.scale.set(0.45, 0.45, 0.45);
+    return sprite;
+  }
+
+  [0, 1, 2].forEach(function (axis) {
+    var along = new THREE.Vector3(axis === 0 ? 1 : 0, axis === 1 ? 1 : 0, axis === 2 ? 1 : 0);
+    // Cylinders and cones are born pointing along +Y.
+    var turn = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), along);
+    var material = new THREE.MeshBasicMaterial({ color: AXIS_RGB[axis] });
+    var shaft = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.045, 0.045, AXIS_LENGTH, 12), material);
+    shaft.quaternion.copy(turn);
+    shaft.position.copy(along.clone().multiplyScalar(AXIS_LENGTH / 2));
+    var tip = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.24, 14), material);
+    tip.quaternion.copy(turn);
+    tip.position.copy(along.clone().multiplyScalar(AXIS_LENGTH + 0.12));
+    var label = axisLabel(AXIS_TEXT[axis], AXIS_RGB[axis]);
+    label.position.copy(along.clone().multiplyScalar(AXIS_LENGTH + 0.42));
+    cube.add(shaft, tip, label);
+  });
+
+  var host = document.createElement("div");
+  host.id = "twinlab-view-cube";
+  host.title = "Click a face, edge, or corner to look from it";
+  document.body.appendChild(host);
+  var renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setSize(VIEWS.cube_px, VIEWS.cube_px);
+  host.appendChild(renderer.domElement);
+  // Orthographic, so the cube does not gain a perspective the model does not have. The
+  // frustum clears the arrow labels, which reach furthest.
+  var SPAN = 1.95;
+  var STANDOFF = 10;
+  var gizmoCamera = new THREE.OrthographicCamera(-SPAN, SPAN, SPAN, -SPAN, 0.1, 100);
+
+  // --- picking -------------------------------------------------------------
+  var raycaster = new THREE.Raycaster();
+  var pointer = new THREE.Vector2();
+  var hovered = null;
+  var dirty = true;
+
+  function paint(cell, colour) {
+    cell.material.forEach(function (material) {
+      // A labelled slot tints its texture, so its rest colour is white, not the base one.
+      if (colour !== null) material.color.setHex(colour);
+      else material.color.setHex(material.map ? 0xffffff : cell.userData.base);
+    });
+  }
+
+  function highlight(cell) {
+    if (hovered === cell) return;
+    if (hovered) paint(hovered, null);
+    hovered = cell;
+    if (hovered) paint(hovered, HOVER_RGB);
+    dirty = true;
+  }
+
+  function cellAt(event) {
+    var rect = renderer.domElement.getBoundingClientRect();
+    pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointer, gizmoCamera);
+    // Not recursive: the outlines and arrows are not places to click.
+    var hits = raycaster.intersectObjects(cells, false);
+    return hits.length ? hits[0].object : null;
+  }
+
+  renderer.domElement.addEventListener("pointermove", function (event) {
+    highlight(cellAt(event));
+  });
+  renderer.domElement.addEventListener("pointerleave", function () { highlight(null); });
+  renderer.domElement.addEventListener("click", function (event) {
+    var cell = cellAt(event);
+    // Distance is left alone, so clicking round the cube turns the model rather than
+    // rezooming it; the keyboard views are the ones that reframe.
+    if (cell) lookFrom(cell.userData.direction, false);
+  });
+
+  // --- keeping the cube pointed where the camera is ------------------------
+  var shown = new THREE.Quaternion(0, 0, 0, 0);
+  function tick() {
+    requestAnimationFrame(tick);
+    if (!viewer.camera) return;
+    viewer.camera.updateWorldMatrix(true, false);
+    var orientation = viewer.camera.getWorldQuaternion(new THREE.Quaternion());
+    if (!dirty && orientation.angleTo(shown) < 1e-4) return;
+    shown.copy(orientation);
+    dirty = false;
+    // Same orientation and standoff direction as the real camera, so the cube shows the
+    // model's attitude exactly, roll included.
+    gizmoCamera.quaternion.copy(orientation);
+    gizmoCamera.position.copy(
+      new THREE.Vector3(0, 0, STANDOFF).applyQuaternion(orientation));
+    renderer.render(gizmo, gizmoCamera);
+  }
+  requestAnimationFrame(tick);
+
+  // --- keyboard ------------------------------------------------------------
+  // Ctrl-I and Ctrl-T are the asked-for bindings; the unmodified keys answer too because
+  // Chrome keeps Ctrl-T for its own new tab and never delivers it to the page.
+  window.addEventListener("keydown", function (event) {
+    if (event.altKey || event.metaKey) return;
+    var target = event.target;
+    if (target && (target.isContentEditable || target.tagName === "INPUT" ||
+                   target.tagName === "TEXTAREA")) return;
+    if (event.code === "KeyI") lookFrom(VIEWS.isometric, true);
+    else if (event.code === "KeyT") lookFrom(VIEWS.trimetric, true);
+    else return;
+    event.preventDefault();
+  });
+});
+"""
+
 RESOURCE_ROOT = CACHE_ROOT / "drake-resource-root"
 
 
@@ -269,6 +657,19 @@ def announce_viewer(label: str, meshcat, *, open_browser: bool = True) -> None:
         print(f"From another machine: http://{address}:{meshcat.port()}")
     if open_browser:
         open_in_browser(url)
+
+
+def print_view_help() -> None:
+    """Describe the browser-side navigation, which no Meshcat control advertises."""
+
+    print(
+        "View cube, bottom left: click a face, edge, or corner to swing the camera onto "
+        "it. The red, green, and blue arrows are the model's X, Y, and Z axes."
+    )
+    print(
+        "Ctrl-I frames the model isometrically and Ctrl-T trimetrically. Chrome keeps "
+        "Ctrl-T for its own new tab, so plain I and T do the same and always land."
+    )
 
 
 def open_in_browser(url: str) -> None:
@@ -354,9 +755,12 @@ def _patched_html(source: Path) -> str:
         raise RuntimeError("Drake's meshcat.html no longer has a </body> to patch")
     patch = (
         f"<style>{PANEL_CSS}</style>\n"
+        f"<script>{VIEW_SETTINGS_JS}</script>\n"
+        f"<script>{SCENE_JS}</script>\n"
         f"<script>{PANEL_JS}</script>\n"
         f"<script>{CONTROLS_JS}</script>\n"
         f"<script>{TOGGLE_JS}</script>\n"
+        f"<script>{VIEW_CUBE_JS}</script>\n"
     )
     html = html.replace("</body>", f"{patch}</body>")
     # Inlined rather than served as a sibling file: Drake only maps meshcat.html onto its

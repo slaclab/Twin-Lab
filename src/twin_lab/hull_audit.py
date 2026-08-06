@@ -563,6 +563,8 @@ def run_hull_viewer(parts: Sequence[PartGeometry]) -> None:
 
     from pydrake.geometry import Rgba
 
+    from .meshcat_ui import print_view_help
+
     meshcat = _start_meshcat("Hull audit viewer")
     print(f"Uploading {len(parts)} parts")
 
@@ -602,6 +604,7 @@ def run_hull_viewer(parts: Sequence[PartGeometry]) -> None:
     meshcat.AddButton(source_button)
     print("Use the Part index slider to step through parts, worst fit first.")
     print("Blue/orange shells are the hulls Drake collides with; grey is the CAD mesh.")
+    print_view_help()
     print("Press Escape in Meshcat or Ctrl-C here to stop.")
 
     hull_style = 0
@@ -745,6 +748,8 @@ def run_tour_viewer(parts: Sequence[PartGeometry], *, bulge_scale_mm: float) -> 
 
     import time
 
+    from .meshcat_ui import print_view_help
+
     meshcat = _start_meshcat("Hull tour viewer")
     print(f"Uploading the {len(parts)} least accurate parts")
     for index, part in enumerate(parts):
@@ -764,6 +769,7 @@ def run_tour_viewer(parts: Sequence[PartGeometry], *, bulge_scale_mm: float) -> 
     print("Grey is the CAD mesh; the translucent shells over it are the hulls Drake sees.")
     print("Next and Previous step through them and wrap round; the arrow keys do the same.")
     print("The panel repeats the audited numbers for the part on screen.")
+    print_view_help()
     print("Press Escape in Meshcat or Ctrl-C here to stop.")
 
     hull_style = 0

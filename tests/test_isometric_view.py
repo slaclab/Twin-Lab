@@ -3,7 +3,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from twin_lab.collision_viewer import ISOMETRIC_DISTANCE, isometric_camera
+from twin_lab.collision_viewer import isometric_camera
+from twin_lab.meshcat_ui import (
+    FRAMING_DISTANCE,
+    ISOMETRIC_DIRECTION,
+    TRIMETRIC_DIRECTION,
+)
 
 
 def _standoff(lower, upper) -> float:
@@ -40,9 +45,9 @@ def test_the_camera_stands_back_far_enough_to_frame_the_whole_box():
     lower, upper = np.zeros(3), np.ones(3)
     radius = float(np.linalg.norm(upper - lower)) / 2.0
 
-    assert _standoff(lower, upper) == pytest.approx(radius * ISOMETRIC_DISTANCE)
+    assert _standoff(lower, upper) == pytest.approx(radius * FRAMING_DISTANCE)
     # 1.64 R is where a sphere of radius R just fills Drake's 75 degree field of view.
-    assert ISOMETRIC_DISTANCE > 1.64
+    assert FRAMING_DISTANCE > 1.64
 
 
 def test_a_bigger_assembly_pushes_the_camera_further_out():
@@ -52,3 +57,16 @@ def test_a_bigger_assembly_pushes_the_camera_further_out():
 def test_a_flat_assembly_does_not_put_the_camera_on_top_of_it():
     """A zero-size box would otherwise place the camera exactly at its own target."""
     assert _standoff(np.zeros(3), np.zeros(3)) > 0.0
+
+
+def test_the_trimetric_view_foreshortens_all_three_axes_differently():
+    """Equal foreshortening on any two axes would make it isometric or dimetric instead."""
+    direction = np.abs(np.asarray(TRIMETRIC_DIRECTION, dtype=float))
+
+    assert np.linalg.norm(direction) == pytest.approx(1.0)
+    assert len(set(np.round(direction, 6))) == 3
+
+
+def test_the_trimetric_view_stands_over_the_same_corner_as_the_isometric():
+    """The two views differ in foreshortening, not in which side of the model they show."""
+    assert np.sign(TRIMETRIC_DIRECTION) == pytest.approx(np.sign(ISOMETRIC_DIRECTION))

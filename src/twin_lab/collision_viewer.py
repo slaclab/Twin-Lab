@@ -17,6 +17,7 @@ from typing import cast
 import numpy as np
 
 from .collision import CollisionModel, part_of
+from .meshcat_ui import FRAMING_DISTANCE, ISOMETRIC_DIRECTION
 from .paths import CACHE_ROOT, EXPORT_ROOT, resolve_repo_path, review_artifact_stem
 
 WARN_LABEL = "Clearance warning band (mm)"
@@ -32,15 +33,6 @@ ISOLATE_LABEL = "Isolate worst pair"
 # No apostrophes; Drake evals control names.
 VERIFY_LABEL = "Verify against CAD"
 ISOMETRIC_LABEL = "Isometric view"
-# What makes a view isometric is that the camera sits at equal angles to all three axes.
-# Which of the four top corners reads as "near left" was settled by eye against the CAD
-# package's own isometric, not derived: the enclosure opening is hard to pin to an axis
-# from the geometry alone. Z stays positive so the camera looks down rather than up.
-ISOMETRIC_DIRECTION = (1.0, -1.0, 1.0)
-# Drake's Meshcat camera has a 75 degree vertical field of view, so a sphere of radius R is
-# wholly in frame from R / sin(37.5 deg) ~= 1.64 R away. The rest is margin, since the
-# assembly is a box rather than a sphere and a photograph wants some air around it.
-ISOMETRIC_DISTANCE = 2.2
 STATUS_RGB = {
     "clear": [0.13, 0.42, 0.18],
     "close": [0.72, 0.60, 0.05],
@@ -138,7 +130,12 @@ def run_collision_viewer(
 
     from pydrake.geometry import Meshcat
 
-    from .meshcat_ui import announce_viewer, patch_meshcat_page, viewer_params
+    from .meshcat_ui import (
+        announce_viewer,
+        patch_meshcat_page,
+        print_view_help,
+        viewer_params,
+    )
     from .scene import load_scene
 
     package = Path(package_dir).resolve()
@@ -202,6 +199,7 @@ def run_collision_viewer(
             f"'{VERIFY_LABEL}' re-checks every reported pair against the CAD behind the hulls "
             "and reports the corrected distance; it can only open a gap, never close one."
         )
+    print_view_help()
     print("Press Escape in Meshcat or Ctrl-C here to stop.")
 
     frame_period = 1.0 / max(fps, 1.0)
@@ -534,7 +532,7 @@ def isometric_camera(lower: np.ndarray, upper: np.ndarray) -> tuple[np.ndarray, 
     radius = max(float(np.linalg.norm(upper - lower)) / 2.0, 1e-3)
     direction = np.asarray(ISOMETRIC_DIRECTION, dtype=float)
     direction = direction / np.linalg.norm(direction)
-    return target + direction * radius * ISOMETRIC_DISTANCE, target
+    return target + direction * radius * FRAMING_DISTANCE, target
 
 
 def _assembly_bounds(model: CollisionModel) -> tuple[np.ndarray, np.ndarray] | None:
