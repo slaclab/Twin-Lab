@@ -737,26 +737,41 @@ viewer above, which evaluates every frame.
 
 ### Framing the assembly for a photograph
 
-**Isometric view** in the collision viewer swings the camera onto the corner
-diagonal and pulls back far enough to fit the whole stack in frame. An isometric
-view is one where the camera sits at equal angles to all three axes, so no axis
-is foreshortened more than the others and the stack reads the same way in a
-still image as it does in a drawing.
+Every viewer carries a **view cube** in the bottom left corner, the same navigation
+every CAD package puts there. Click a face to look straight down an axis, an edge
+to look down the diagonal between two, or a corner for the three-quarter view;
+the camera swings round to it and keeps the zoom it already had. The red, green,
+and blue arrows through the cube are the model's own X, Y, and Z axes, so a
+Twin-Lab view and a CAD view can be checked against each other by their axes
+rather than by eye. Face names follow the CAD package: the front of the assembly
+faces `-Y`, right is `+X`, top is `+Z`.
 
-It looks in from the near left corner, the same corner the CAD package
-presents, so putting the two side by side is a like-for-like comparison. The
-camera sits at `+X -Y +Z`.
+Two keys reframe the whole model rather than just turning it:
 
-The framing is measured, not fixed: the button takes the bounding box of every
-collision hull at the current pose, aims at its centre, and stands back a little
-over twice the box radius. Move the joints and click it again and it reframes
-around wherever the stack has got to. Expect it to think for about a second on
-the 43841 stack, since it walks all 5000-odd hulls.
+| Key | View |
+| --- | --- |
+| `Ctrl-I`, or `I` | **Isometric.** The camera sits at equal angles to all three axes, so no axis is foreshortened more than the others and the stack reads the same way in a still image as it does in a drawing |
+| `Ctrl-T`, or `T` | **Trimetric.** Swung 30 degrees off the front and raised 20, which foreshortens the three axes by three different amounts. Use it when an isometric hides a feature behind an edge that happens to be parallel to the view |
 
-The button only moves the camera, so the mouse still works normally afterwards
-and nothing about the model or the clearance checking changes. For a clean plate
-in a screenshot, clear **Collision detection** first so no parts are lit yellow
-or red.
+Chrome keeps `Ctrl-T` for its own new tab and never passes it to the page, which
+is why the unmodified keys do the same thing.
+
+Both look in from the near left corner, the same corner the CAD package presents,
+so putting the two side by side is a like-for-like comparison. The camera sits at
+`+X -Y +Z`.
+
+The framing is measured, not fixed: the key takes the bounding box of everything
+on screen, aims at its centre, and stands back a little over twice the box
+radius. Move the joints and press it again and it reframes around wherever the
+stack has got to.
+
+**Isometric view** in the collision viewer does the same from the panel, measured
+from the collision hulls rather than the render. Expect it to think for about a
+second on the 43841 stack, since it walks all 5000-odd hulls.
+
+None of this touches the model or the clearance checking, only the camera, so the
+mouse still works normally afterwards. For a clean plate in a screenshot, clear
+**Collision detection** first so no parts are lit yellow or red.
 
 ## Updating the 43841 STEP
 

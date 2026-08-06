@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import webbrowser
 
 import pytest
@@ -108,3 +109,25 @@ def test_viewer_params_bind_the_ipv4_wildcard() -> None:
     assert meshcat_ui.viewer_params().host == "0.0.0.0"
     assert meshcat_ui.viewer_params().show_stats_plot is False
     assert meshcat_ui.viewer_params(show_stats_plot=True).show_stats_plot is True
+
+
+def test_the_page_is_told_the_same_view_directions_python_frames_with() -> None:
+    """A second copy of the directions in the JavaScript would be free to drift."""
+
+    settings = json.loads(meshcat_ui.VIEW_SETTINGS_JS.split("=", 1)[1].rstrip(";"))
+
+    assert settings["isometric"] == list(meshcat_ui.ISOMETRIC_DIRECTION)
+    assert settings["trimetric"] == list(meshcat_ui.TRIMETRIC_DIRECTION)
+    assert settings["fit"] == meshcat_ui.FRAMING_DISTANCE
+
+
+def test_the_patched_page_carries_the_view_cube(tmp_path) -> None:
+    source = tmp_path / "meshcat.html"
+    source.write_text("<head><title>Drake MeshCat</title></head><body></body>", encoding="utf-8")
+
+    html = meshcat_ui._patched_html(source)
+
+    assert "twinlab-view-cube" in html
+    # Both later scripts read these, so they have to be in the page ahead of them.
+    assert html.index("TWINLAB_VIEWS =") < html.index("window.twinlab.modelBox =")
+    assert html.index("window.twinlab.modelBox =") < html.index("window.twinlab.modelBox()")
