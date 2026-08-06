@@ -27,9 +27,10 @@ AUTO_PERIOD_LABEL = "Auto motion period (s)"
 COLLISION_LABEL = "Collision detection"
 ANIMATION_LABEL = "Animation"
 ISOLATE_LABEL = "Isolate worst pair"
-# Deliberately a button rather than a toggle: the CAD re-check costs milliseconds per pair
-# and is a review step, not a per-frame reading. No apostrophes; Drake evals control names.
-VERIFY_LABEL = "Verify contact against CAD"
+# A hull encloses its part, so the CAD re-check can only ever open a reported gap. That is
+# what makes it safe to fold into the live reading rather than leave it as a review step.
+# No apostrophes; Drake evals control names.
+VERIFY_LABEL = "Verify against CAD"
 ISOMETRIC_LABEL = "Isometric view"
 # What makes a view isometric is that the camera sits at equal angles to all three axes.
 # Which of the four top corners reads as "near left" was settled by eye against the CAD
@@ -65,6 +66,10 @@ OFFENDER_LIMIT = 12
 # The signed-distance query costs ~30 ms, so running it every animated frame would cap the
 # loop near 30 fps; throttle it to this rate so the render can reach the requested fps.
 DETECTOR_HZ = 20.0
+# Measuring the tessellated parts costs 5-240 ms a pair, far too much to drag a slider
+# through. It waits for the pose to hold still this long; until then the reading is the
+# hull distance with only the proudness correction, which errs towards reporting contact.
+VERIFY_SETTLE_S = 0.3
 
 
 @dataclass(frozen=True)
@@ -174,6 +179,8 @@ def run_collision_viewer(
     # toggle in behind ANIMATION_LABEL.
     meshcat.AddSlider(COLLISION_LABEL, 0.0, 1.0, 1.0, 1.0)
     meshcat.AddSlider(ISOLATE_LABEL, 0.0, 1.0, 1.0, 0.0)
+    if model.refiner is not None:
+        meshcat.AddSlider(VERIFY_LABEL, 0.0, 1.0, 1.0, 1.0)
     meshcat.AddSlider(WARN_LABEL, 0.0, 50.0, 0.5, warn_mm)
     meshcat.AddSlider(ANIMATION_LABEL, 0.0, 1.0, 1.0, 0.0)
     meshcat.AddSlider(AUTO_RANGE_LABEL, 0.0, 100.0, 1.0, 25.0)
@@ -181,8 +188,6 @@ def run_collision_viewer(
     meshcat.AddButton("Reset to home")
     meshcat.AddButton(ISOMETRIC_LABEL)
     meshcat.AddButton("Log clearance report")
-    if model.refiner is not None:
-        meshcat.AddButton(VERIFY_LABEL)
     meshcat.AddButton("Stop viewer", "Escape")
     highlighter = _Highlighter(meshcat, model)
 
@@ -193,7 +198,10 @@ def run_collision_viewer(
     print("Tick 'Animation' to cycle every joint about its reviewed home.")
     print(f"'{ISOMETRIC_LABEL}' frames the whole assembly down the corner diagonal.")
     if model.refiner is not None:
-        print(f"'{VERIFY_LABEL}' re-checks the touching pairs against the CAD behind the hulls.")
+        print(
+            f"'{VERIFY_LABEL}' re-checks every reported pair against the CAD behind the hulls "
+            "and reports the corrected distance; it can only open a gap, never close one."
+        )
     print("Press Escape in Meshcat or Ctrl-C here to stop.")
 
     frame_period = 1.0 / max(fps, 1.0)
@@ -201,17 +209,18 @@ def run_collision_viewer(
     reset_clicks = 0
     isometric_clicks = 0
     log_clicks = 0
-    verify_clicks = 0
     collision_on = True
     animating = False
     show_all = True
     phase = 0.0
     previous_tick = time.monotonic()
-    previous_pose: tuple[list[float], float] | None = None
+    previous_pose: tuple[list[float], float, bool] | None = None
     previous_status: str | None = None
     readout: list[str] = []
     previous_summary = ""
     last_detect = 0.0
+    settled_at = 0.0
+    mesh_pending = False
     while meshcat.GetButtonClicks("Stop viewer") == 0:
         tick = time.monotonic()
         elapsed = tick - previous_tick
@@ -268,14 +277,17 @@ def run_collision_viewer(
 
         values = [meshcat.GetSliderValue(joint.label) for joint in joints]
         warn_m = max(meshcat.GetSliderValue(WARN_LABEL), 0.0) / 1000.0
+        verify_on = model.refiner is not None and meshcat.GetSliderValue(VERIFY_LABEL) >= 0.5
         new_log = meshcat.GetButtonClicks("Log clearance report")
-        new_verify = (
-            meshcat.GetButtonClicks(VERIFY_LABEL) if model.refiner is not None else verify_clicks
-        )
-        asked = new_log != log_clicks or new_verify != verify_clicks
-        pose = (values, warn_m)
-        if pose != previous_pose or asked:
+        asked = new_log != log_clicks
+        pose = (values, warn_m, verify_on)
+        moved = pose != previous_pose
+        if moved:
             previous_pose = pose
+            settled_at = tick + VERIFY_SETTLE_S
+            mesh_pending = verify_on and collision_on
+        mesh_due = mesh_pending and not animating and tick >= settled_at
+        if moved or asked or mesh_due:
             model.set_positions(
                 {
                     joint.joint_name: joint.to_sdf(value)
@@ -289,6 +301,13 @@ def run_collision_viewer(
             if collision_on and detect_due:
                 last_detect = tick
                 report = model.report(warn_m=warn_m)
+                refinements = ()
+                if verify_on:
+                    with_mesh = mesh_due or asked
+                    mesh_pending = not with_mesh
+                    report, refinements = model.verify(
+                        report, limit=OFFENDER_LIMIT, with_mesh=with_mesh
+                    )
                 if report.status != previous_status:
                     previous_status = report.status
                     _set_status(meshcat, report.status)
@@ -296,18 +315,15 @@ def run_collision_viewer(
                 highlighter.isolate(selected is not None)
                 highlighter.update(report, selected)
                 readout = _set_offender_readout(meshcat, report, readout, show_all=show_all)
-                if new_verify != verify_clicks:
-                    verify_clicks = new_verify
-                    _print_refinements(model, report)
                 if new_log != log_clicks:
                     log_clicks = new_log
                     _print_report(report)
+                    _print_refinements(refinements)
                 elif report.summary() != previous_summary:
                     previous_summary = report.summary()
                     print(report.summary())
             elif not collision_on:
                 log_clicks = new_log
-                verify_clicks = new_verify
         frame_cost = time.monotonic() - tick
         time.sleep(max(0.0, frame_period - frame_cost) if animating else 0.1)
 
@@ -594,14 +610,12 @@ def _print_report(report) -> None:
     )
 
 
-def _print_refinements(model: CollisionModel, report) -> None:
-    """Re-check the touching pairs against the CAD and print what the correction found."""
+def _print_refinements(refinements) -> None:
+    """Print what the CAD re-check found behind the hulls of each reported pair."""
 
-    print("\n--- CAD re-check of touching pairs ---")
-    if not report.touching:
-        print("  nothing touching to check")
+    if not refinements:
         return
-    refinements = model.refine(report, limit=OFFENDER_LIMIT)
+    print("\n--- CAD re-check ---")
     for refinement in refinements:
         print(f"  {refinement.describe()}")
     print(

@@ -338,36 +338,38 @@ Clearance numbers inherit the tessellation deflection (2 mm) and the convex
 decomposition error, so treat small positive clearances as "needs a closer look"
 rather than as a measurement.
 
-`Verify contact against CAD` in the collision viewer removes the second of those two
-terms from a flagged pair, on demand. It prefers an exact triangle-to-triangle distance
-between the two parts' own tessellations, taken over the triangles within 20 mm of the
-witness points Drake reported and capped at 400 triangles a side; where the tessellation
-cannot be loaded it falls back to subtracting the audited proudness of the two hulls,
-sampled at the three hull vertices nearest the contact. The fallback needs
+`Verify against CAD` in the collision viewer removes the second of those two
+terms from every pair inside the warning band. It prefers an exact triangle-to-triangle
+distance between the two parts' own tessellations, taken over the triangles within 20 mm
+of the witness points Drake reported and capped at 400 triangles a side; where the
+tessellation cannot be loaded it falls back to subtracting the audited proudness of the
+two hulls, sampled at the three hull vertices nearest the contact. The fallback needs
 `slac-hull-audit` to have written its `audit.npz`, and a pair with neither available is
 reported `unverified` rather than quietly passed.
 
 Both corrections are one-sided. They can only ever grow a reported distance, because the
 hulls they correct are supersets of the parts, so an `explained` verdict genuinely rules
-out the decomposition as the cause. What neither does is remove the tessellation
-deflection: BRepMesh inscribes its facets, so the meshes themselves are undersized on
-convex surfaces by up to the deflection, and a sub-millimetre `explained` result is
-inside that noise. The verdict is a routing decision — look at the CAD, or look at the
-design — not a clearance figure.
+out the decomposition as the cause. That is what makes it safe to fold them into the live
+reading: the corrected report drives the status colour, the highlights and the offender
+list, and a correction can drop a pair out of the band but never add one. What neither
+does is remove the tessellation deflection: BRepMesh inscribes its facets, so the meshes
+themselves are undersized on convex surfaces by up to the deflection, and a
+sub-millimetre `explained` result is inside that noise. The verdict is a routing decision
+— look at the CAD, or look at the design — not a clearance figure.
 
-The check is bound to a button rather than the detector loop deliberately. The exact
-distance costs ~13 ms per pair warm (~95 ms on the first press, while the tessellations
-are parsed) against the ~30 ms signed-distance query, which is affordable for a review
-action but not at the 20 Hz the detector runs at, and it is only meaningful for pairs
-already reported as touching.
+The two tiers run on different schedules, because they cost three orders of magnitude
+apart. Subtracting the audited proudness is a table lookup, 1.7-2.0 ms for twelve pairs,
+so it runs on every pose alongside the ~40 ms signed-distance query. The exact mesh
+distance is 5-240 ms per pair (720-860 ms for twelve), which no slider drag can absorb,
+so it waits until the pose has held still for 0.3 s and until then the reading carries
+only the cheaper correction. Both directions of that trade are conservative: the
+uncorrected reading is the one that over-reports.
 
-Measured at the reviewed home pose: of the six touching part pairs, four have CAD meshes
-that genuinely intersect and two are explained by hull proudness (1.18 mm and 0.18 mm of
-real clearance under a -2.10 mm and -1.59 mm hull reading). The earlier working
-assumption that the home-pose contacts were all inside the model's error budget does not
-survive the check. They are contact in the assembled CAD, which is plausible for an
-assembled state but has to be confirmed part by part before being baselined into
-`ignored_pairs`.
+Measured at the reviewed home pose (5 mm band): 22 part pairs inside the band on the
+hulls alone, 21 after the proudness correction, 18 after the exact distance — for
+instance P662 against P844 reads +0.59 mm on the hulls and 1.98 mm on the CAD. The
+control that proves the correction is not simply clearing everything is A044 driven to
+-25 mm, where P664/P844 and P652/P844 still report `CAD meshes intersect`.
 
 The 20 mm / 400-triangle neighbourhood is not a limiting approximation here: re-running
 the same pairs at 80 mm and 2000 triangles reproduces every distance exactly.

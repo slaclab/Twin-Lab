@@ -82,32 +82,45 @@ class Refinement:
         return "bulge" if self.bulge_m is not None else "none"
 
     @property
+    def verified_m(self) -> float | None:
+        """The best separation this re-check could measure, or ``None`` when it could not.
+
+        The mesh distance is preferred: it removes the decomposition error outright, while
+        the bulge correction only takes back the proudness measured at the hull vertices.
+        """
+
+        return self.mesh_distance_m if self.mesh_distance_m is not None else self.corrected_m
+
+    @property
     def verdict(self) -> str:
         """``contact`` when the pair survives the correction, ``explained`` when it does not."""
 
-        if self.mesh_distance_m is not None:
-            return "contact" if self.mesh_distance_m <= 0.0 else "explained"
-        if self.corrected_m is not None:
-            return "contact" if self.corrected_m <= 0.0 else "explained"
-        return "unverified"
+        if self.verified_m is None:
+            return "unverified"
+        return "contact" if self.verified_m <= 0.0 else "explained"
 
     def describe(self) -> str:
         first, second = self.parts
         head = f"{first} <-> {second}: hulls {self.hull_distance_m * MM_PER_M:+.2f} mm"
+        verified = self.verified_m
+        if verified is None:
+            return f"{head}; nothing cached to check it against -> unverified"
         if self.mesh_distance_m is not None:
-            if self.mesh_distance_m <= 0.0:
-                return f"{head}; CAD meshes intersect -> CONTACT"
-            return (
-                f"{head}; CAD meshes {self.mesh_distance_m * MM_PER_M:.2f} mm apart"
-                " -> explained by hull proudness"
+            evidence = (
+                "CAD meshes intersect"
+                if self.mesh_distance_m <= 0.0
+                else f"CAD meshes {self.mesh_distance_m * MM_PER_M:.2f} mm apart"
             )
-        if self.bulge_m is not None and self.corrected_m is not None:
-            state = "CONTACT" if self.corrected_m <= 0.0 else "explained by hull proudness"
-            return (
-                f"{head}; local proudness {self.bulge_m * MM_PER_M:.2f} mm"
-                f" -> {self.corrected_m * MM_PER_M:+.2f} mm -> {state}"
+        else:
+            evidence = (
+                f"local proudness {self.bulge_m * MM_PER_M:.2f} mm"  # type: ignore[operator]
+                f" -> {verified * MM_PER_M:+.2f} mm"
             )
-        return f"{head}; nothing cached to check it against -> unverified"
+        if verified <= 0.0:
+            return f"{head}; {evidence} -> CONTACT"
+        if self.hull_distance_m <= 0.0:
+            return f"{head}; {evidence} -> explained by hull proudness"
+        return f"{head}; {evidence} -> clearance corrected"
 
 
 @dataclass(frozen=True)

@@ -164,3 +164,12 @@ def test_a_pair_with_nothing_cached_behind_it_is_not_judged():
     assert refinement.evidence == "none"
     assert refinement.verdict == "unverified"
     assert "unverified" in refinement.describe()
+
+
+def test_a_near_miss_is_reported_as_a_corrected_clearance_not_as_an_explained_contact():
+    """The re-check now runs on the whole band, where nothing needed explaining away."""
+
+    refinement = _refinement(hull_distance_m=0.001, mesh_distance_m=0.004)
+    assert refinement.verified_m == pytest.approx(0.004)
+    assert refinement.verdict == "explained"
+    assert "clearance corrected" in refinement.describe()

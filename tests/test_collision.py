@@ -8,6 +8,7 @@ import os
 
 import pytest
 
+from twin_lab.clearance_refine import Refinement
 from twin_lab.collision import (
     Clearance,
     ClearanceReport,
@@ -146,6 +147,77 @@ def test_a_part_pair_inside_the_band_is_not_counted_again_as_a_warning():
 
     assert report.touching_pairs == (("A001", "A002"),)
     assert report.warning_pairs == ()
+
+
+def _hull_pair(first: str, second: str, distance_m: float) -> Clearance:
+    return Clearance(
+        f"a::l::a::{first.lower()}_000_collision",
+        f"a::l::a::{second.lower()}_000_collision",
+        distance_m,
+    )
+
+
+def test_a_cad_recheck_clears_a_contact_the_hulls_invented():
+    report = ClearanceReport(clearances=(_hull_pair("A001", "A002", -0.002),), warn_m=0.005)
+
+    corrected = report.corrected([_refinement(("A001", "A002"), -0.002, mesh_distance_m=0.006)])
+
+    assert corrected.clearances == ()
+    assert corrected.status == "clear"
+
+
+def test_a_cad_recheck_that_only_opens_the_gap_leaves_the_pair_in_the_band():
+    report = ClearanceReport(clearances=(_hull_pair("A001", "A002", -0.002),), warn_m=0.005)
+
+    corrected = report.corrected([_refinement(("A001", "A002"), -0.002, mesh_distance_m=0.001)])
+
+    assert corrected.status == "close"
+    assert corrected.clearances[0].distance_m == pytest.approx(0.001)
+
+
+def test_a_cad_recheck_can_never_make_a_pair_look_closer_than_its_hulls():
+    """Hulls enclose their parts, so a correction that closes a gap is the correction failing."""
+
+    report = ClearanceReport(clearances=(_hull_pair("A001", "A002", 0.003),), warn_m=0.005)
+
+    corrected = report.corrected([_refinement(("A001", "A002"), 0.003, mesh_distance_m=-0.004)])
+
+    assert corrected.clearances[0].distance_m == pytest.approx(0.003)
+
+
+def test_a_cad_recheck_corrects_every_hull_pair_of_the_part_pair_and_resorts():
+    report = ClearanceReport(
+        clearances=(
+            _hull_pair("A001", "A002", -0.002),
+            Clearance("a::l::a::a001_001_collision", "a::l::a::a002_001_collision", -0.001),
+            _hull_pair("A003", "A004", 0.001),
+        ),
+        warn_m=0.005,
+    )
+
+    corrected = report.corrected([_refinement(("A001", "A002"), -0.002, mesh_distance_m=0.004)])
+
+    assert corrected.touching_pairs == ()
+    assert [item.distance_m for item in corrected.clearances] == pytest.approx(
+        [0.001, 0.004, 0.004]
+    )
+
+
+def test_a_pair_the_recheck_could_not_measure_stays_as_the_hulls_reported_it():
+    report = ClearanceReport(clearances=(_hull_pair("A001", "A002", -0.002),), warn_m=0.005)
+
+    corrected = report.corrected([_refinement(("A001", "A002"), -0.002)])
+
+    assert corrected is report
+
+
+def _refinement(parts, hull_distance_m, *, bulge_m=None, mesh_distance_m=None) -> Refinement:
+    return Refinement(
+        parts=parts,
+        hull_distance_m=hull_distance_m,
+        bulge_m=bulge_m,
+        mesh_distance_m=mesh_distance_m,
+    )
 
 
 def test_offender_labels_state_each_pair_by_its_own_clearance():

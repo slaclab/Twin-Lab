@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
-from dataclasses import dataclass, field
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
@@ -111,6 +111,31 @@ class ClearanceReport:
         if self.touching:
             return "interference"
         return "close" if self.warnings else "clear"
+
+    def corrected(self, refinements: Iterable[Refinement]) -> ClearanceReport:
+        """A copy with the CAD re-check applied, and only ever in the clearing direction.
+
+        A hull encloses the part it stands in for, so a hull distance can only understate
+        the gap. Taking the larger of the two therefore keeps the report a superset of the
+        real interferences: a re-check can drop a pair out of the band, never add one.
+        """
+
+        corrections = {
+            tuple(sorted(ref.parts)): ref.verified_m
+            for ref in refinements
+            if ref.verified_m is not None
+        }
+        if not corrections:
+            return self
+        kept = []
+        for item in self.clearances:
+            verified = corrections.get(tuple(sorted(part.upper() for part in item.parts)))
+            if verified is None or verified <= item.distance_m:
+                kept.append(item)
+            elif verified <= self.warn_m:
+                kept.append(replace(item, distance_m=verified))
+        kept.sort(key=lambda item: (item.distance_m, item.a, item.b))
+        return replace(self, clearances=tuple(kept))
 
     def offenders(self, limit: int = 3) -> tuple[Clearance, ...]:
         """Worst clearance per part pair, so one physical interface is reported once."""
@@ -280,26 +305,40 @@ class CollisionModel:
         )
         return ClearanceReport(clearances=clearances, warn_m=warn_m, part_labels=self.part_labels)
 
-    def refine(self, report: ClearanceReport, *, limit: int = 12) -> tuple[Refinement, ...]:
-        """Re-check the touching pairs against the CAD behind the hulls, worst first.
+    def refine(
+        self, report: ClearanceReport, *, limit: int = 12, with_mesh: bool = True
+    ) -> tuple[Refinement, ...]:
+        """Re-check the reported pairs against the CAD behind the hulls, worst first.
 
-        Only the pairs already reported as touching are checked: the correction exists to
-        tell a decomposition artefact from an interference, and a pair that is merely
-        inside the warning band is neither.
+        Every pair inside the band is checked, not only the ones already in contact: the
+        same hull proudness that turns a clear pair into a contact turns a clear pair into
+        a near miss, and both readings mislead the reviewer.
         """
 
         if self.refiner is None:
             return ()
         seen: set[tuple[str, str]] = set()
         refinements = []
-        for clearance in report.touching:
+        for clearance in report.clearances:
             if clearance.parts in seen:
                 continue
             seen.add(clearance.parts)
-            refinements.append(self.refiner.refine(clearance))
+            refinements.append(self.refiner.refine(clearance, with_mesh=with_mesh))
             if len(refinements) >= limit:
                 break
         return tuple(refinements)
+
+    def verify(
+        self, report: ClearanceReport, *, limit: int = 12, with_mesh: bool = True
+    ) -> tuple[ClearanceReport, tuple[Refinement, ...]]:
+        """The report with the CAD re-check folded in, alongside the evidence for it.
+
+        ``with_mesh`` false keeps only the proudness correction, which is a table lookup;
+        measuring the tessellated parts themselves costs tens of milliseconds a pair.
+        """
+
+        refinements = self.refine(report, limit=limit, with_mesh=with_mesh)
+        return report.corrected(refinements), refinements
 
 
 def read_ignored_pairs(path: str | Path) -> frozenset[tuple[str, str]]:
