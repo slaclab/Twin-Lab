@@ -8,6 +8,19 @@ The current reviewed model is subassembly `*43841` from drawing
 `DSG-000040389`. It contains an EPIX detector stage, three crystal stacks, and
 three polycapillary stacks with 22 controllable joints.
 
+## For returning users
+
+Set up already? Open the repository in VS Code, open a terminal with
+`` Ctrl+Shift+` ``, and start the collision viewer:
+
+```bash
+uv run slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
+```
+
+It opens a Meshcat page at `http://localhost:7000` in your browser. Everything
+it can do is in [Collision detection](#collision-detection). First time here?
+Start at [Setup](#setup) instead.
+
 ## Setup
 
 Everything below happens in a single VS Code window. Step 1 is Windows-only
