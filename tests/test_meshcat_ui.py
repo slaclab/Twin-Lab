@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import webbrowser
+
 import pytest
 
 from twin_lab import meshcat_ui
@@ -17,17 +19,73 @@ class _FakeMeshcat:
 
 
 def test_announce_viewer_prints_a_localhost_url(capsys, monkeypatch) -> None:
-    """VS Code spots the viewer by this URL, so losing it costs the open-in-browser prompt."""
+    """The printed URL is the fallback whenever the browser cannot be launched."""
 
     monkeypatch.setattr(meshcat_ui, "wsl_ipv4_address", lambda: None)
+    monkeypatch.setattr(meshcat_ui, "open_in_browser", lambda url: None)
 
     meshcat_ui.announce_viewer("Collision viewer", _FakeMeshcat(7001))
 
     assert capsys.readouterr().out == "Collision viewer: http://localhost:7001\n"
 
 
+def test_announce_viewer_opens_the_localhost_url(monkeypatch) -> None:
+    opened: list[str] = []
+    monkeypatch.setattr(meshcat_ui, "wsl_ipv4_address", lambda: None)
+    monkeypatch.setattr(meshcat_ui, "open_in_browser", opened.append)
+
+    meshcat_ui.announce_viewer("Collision viewer", _FakeMeshcat(7002))
+
+    assert opened == ["http://localhost:7002"]
+
+
+def test_announce_viewer_can_leave_the_browser_alone(monkeypatch) -> None:
+    monkeypatch.setattr(meshcat_ui, "wsl_ipv4_address", lambda: None)
+    monkeypatch.setattr(
+        meshcat_ui,
+        "open_in_browser",
+        lambda url: pytest.fail("open_browser=False must not launch a browser"),
+    )
+
+    meshcat_ui.announce_viewer("Collision viewer", _FakeMeshcat(), open_browser=False)
+
+
+def test_open_in_browser_hands_wsl_urls_to_windows(monkeypatch) -> None:
+    """WSL has no Linux browser, so the URL has to cross to the Windows default one."""
+
+    calls: list[list[str]] = []
+    monkeypatch.setenv("WSL_DISTRO_NAME", "Ubuntu-26.04")
+    monkeypatch.setattr(
+        meshcat_ui.shutil,
+        "which",
+        lambda name: "/mnt/c/WINDOWS/explorer.exe" if name == "explorer.exe" else None,
+    )
+    monkeypatch.setattr(meshcat_ui.subprocess, "run", lambda cmd, **kw: calls.append(cmd))
+    monkeypatch.setattr(
+        meshcat_ui.webbrowser,
+        "open",
+        lambda url: pytest.fail("must not fall back to the Linux browser under WSL"),
+    )
+
+    meshcat_ui.open_in_browser("http://localhost:7000")
+
+    assert calls == [["/mnt/c/WINDOWS/explorer.exe", "http://localhost:7000"]]
+
+
+def test_open_in_browser_survives_a_missing_browser(monkeypatch) -> None:
+    monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
+
+    def refuse(url: str) -> bool:
+        raise webbrowser.Error("no runnable browser")
+
+    monkeypatch.setattr(meshcat_ui.webbrowser, "open", refuse)
+
+    meshcat_ui.open_in_browser("http://localhost:7000")
+
+
 def test_announce_viewer_adds_the_lan_url_under_wsl(capsys, monkeypatch) -> None:
     monkeypatch.setattr(meshcat_ui, "wsl_ipv4_address", lambda: "172.28.1.5")
+    monkeypatch.setattr(meshcat_ui, "open_in_browser", lambda url: None)
 
     meshcat_ui.announce_viewer("Collision viewer", _FakeMeshcat())
 

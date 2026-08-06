@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+import numpy as np
+
 from .collision import CollisionModel, part_of
 from .paths import CACHE_ROOT, EXPORT_ROOT, resolve_repo_path, review_artifact_stem
 
@@ -28,6 +30,15 @@ ISOLATE_LABEL = "Isolate worst pair"
 # Deliberately a button rather than a toggle: the CAD re-check costs milliseconds per pair
 # and is a review step, not a per-frame reading. No apostrophes; Drake evals control names.
 VERIFY_LABEL = "Verify contact against CAD"
+ISOMETRIC_LABEL = "Isometric view"
+# What makes a view isometric is that the camera sits at equal angles to all three axes.
+# The enclosure opens toward +Y, so the camera looks in from there; -X is then the near
+# RIGHT corner, matching how the CAD package presents its own isometric.
+ISOMETRIC_DIRECTION = (-1.0, 1.0, 1.0)
+# Drake's Meshcat camera has a 75 degree vertical field of view, so a sphere of radius R is
+# wholly in frame from R / sin(37.5 deg) ~= 1.64 R away. The rest is margin, since the
+# assembly is a box rather than a sphere and a photograph wants some air around it.
+ISOMETRIC_DISTANCE = 2.2
 STATUS_RGB = {
     "clear": [0.13, 0.42, 0.18],
     "close": [0.72, 0.60, 0.05],
@@ -167,6 +178,7 @@ def run_collision_viewer(
     meshcat.AddSlider(AUTO_RANGE_LABEL, 0.0, 100.0, 1.0, 25.0)
     meshcat.AddSlider(AUTO_PERIOD_LABEL, 2.0, 60.0, 0.5, 12.0)
     meshcat.AddButton("Reset to home")
+    meshcat.AddButton(ISOMETRIC_LABEL)
     meshcat.AddButton("Log clearance report")
     if model.refiner is not None:
         meshcat.AddButton(VERIFY_LABEL)
@@ -178,6 +190,7 @@ def run_collision_viewer(
     print("Clear 'Collision detection' to turn checking off and use this as a plain viewer.")
     print("Tick 'Isolate worst pair' to hide the assembly and leave only that pair on screen.")
     print("Tick 'Animation' to cycle every joint about its reviewed home.")
+    print(f"'{ISOMETRIC_LABEL}' frames the whole assembly down the corner diagonal.")
     if model.refiner is not None:
         print(f"'{VERIFY_LABEL}' re-checks the touching pairs against the CAD behind the hulls.")
     print("Press Escape in Meshcat or Ctrl-C here to stop.")
@@ -185,6 +198,7 @@ def run_collision_viewer(
     frame_period = 1.0 / max(fps, 1.0)
     detector_period = 1.0 / DETECTOR_HZ
     reset_clicks = 0
+    isometric_clicks = 0
     log_clicks = 0
     verify_clicks = 0
     collision_on = True
@@ -213,6 +227,11 @@ def run_collision_viewer(
             phase = 0.0
             for joint in joints:
                 meshcat.SetSliderValue(joint.label, joint.slider_bounds()[2])
+
+        new_isometric = meshcat.GetButtonClicks(ISOMETRIC_LABEL)
+        if new_isometric != isometric_clicks:
+            isometric_clicks = new_isometric
+            _look_isometric(meshcat, model)
 
         if (wanted_collision, wanted_animating, wanted_show_all) != (
             collision_on,
@@ -473,12 +492,80 @@ def _needs_recompile(package_dir: Path, scene_path: Path, collision_mode: str) -
     )
 
 
-def _inspector(model: CollisionModel):
+def _query_object(model: CollisionModel):
     from pydrake.geometry import QueryObject
 
     scene_context = model.scene.scene_graph.GetMyContextFromRoot(model.context)
-    query = cast(QueryObject, model.scene.scene_graph.get_query_output_port().Eval(scene_context))
-    return query.inspector()
+    return cast(QueryObject, model.scene.scene_graph.get_query_output_port().Eval(scene_context))
+
+
+def _inspector(model: CollisionModel):
+    return _query_object(model).inspector()
+
+
+def isometric_camera(lower: np.ndarray, upper: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Where to stand, and what to look at, to photograph a box isometrically.
+
+    The target is the centre of the box and the camera sits back along
+    ``ISOMETRIC_DIRECTION``, far enough out that a sphere around the box is still in frame.
+    """
+    lower = np.asarray(lower, dtype=float)
+    upper = np.asarray(upper, dtype=float)
+    target = (lower + upper) / 2.0
+    # A degenerate box would put the camera inside its own subject, so keep a floor on the
+    # radius; the value only has to be small next to anything worth photographing.
+    radius = max(float(np.linalg.norm(upper - lower)) / 2.0, 1e-3)
+    direction = np.asarray(ISOMETRIC_DIRECTION, dtype=float)
+    direction = direction / np.linalg.norm(direction)
+    return target + direction * radius * ISOMETRIC_DISTANCE, target
+
+
+def _assembly_bounds(model: CollisionModel) -> tuple[np.ndarray, np.ndarray] | None:
+    """The world-frame bounding box of everything the plant collides with, or ``None``.
+
+    The compiled package bakes each part's transform into its hull meshes rather than
+    carrying a per-geometry pose, so the geometry origins all collapse onto a handful of
+    link frames and say nothing about how far the assembly reaches. The extents have to
+    come from the meshes. Asking a convex-declared geometry for its convex hull hands back
+    the mesh Drake already loaded, which makes this cheap enough to run on a click.
+    """
+    from pydrake.geometry import Role
+
+    query = _query_object(model)
+    inspector = query.inspector()
+    lower = np.full(3, np.inf)
+    upper = np.full(3, -np.inf)
+    for geometry_id in inspector.GetAllGeometryIds(Role.kProximity):
+        shape = inspector.GetShape(geometry_id)
+        if not hasattr(shape, "GetConvexHull"):
+            continue
+        box_lower, box_upper = shape.GetConvexHull().CalcBoundingBox()
+        # Rotating an axis-aligned box does not leave it axis-aligned, so carry all eight
+        # corners across rather than just the two. The result is loose on a tilted part,
+        # which only ever frames a little wider than needed.
+        corners = np.array(
+            [
+                [box_lower[0], box_upper[0]],
+                [box_lower[1], box_upper[1]],
+                [box_lower[2], box_upper[2]],
+            ]
+        )
+        grid = np.array(np.meshgrid(*corners)).reshape(3, -1)
+        pose = query.GetPoseInWorld(geometry_id)
+        world = pose.rotation().matrix() @ grid + pose.translation().reshape(3, 1)
+        lower = np.minimum(lower, world.min(axis=1))
+        upper = np.maximum(upper, world.max(axis=1))
+    return None if not np.isfinite(lower).all() else (lower, upper)
+
+
+def _look_isometric(meshcat, model: CollisionModel) -> None:
+    """Point the camera at the whole assembly from the corner diagonal."""
+    bounds = _assembly_bounds(model)
+    if bounds is None:
+        print("Nothing to frame: the plant has no collision geometry.")
+        return
+    camera, target = isometric_camera(*bounds)
+    meshcat.SetCameraPose(camera, target)
 
 
 def _proximity_geometry_count(model: CollisionModel) -> int:

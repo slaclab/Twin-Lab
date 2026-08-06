@@ -13,7 +13,10 @@ from __future__ import annotations
 
 import base64
 import os
+import shutil
 import socket
+import subprocess
+import webbrowser
 from pathlib import Path
 
 from .paths import CACHE_ROOT
@@ -232,13 +235,12 @@ RESOURCE_ROOT = CACHE_ROOT / "drake-resource-root"
 
 
 def viewer_params(*, show_stats_plot: bool = False):
-    """Build the Meshcat settings every viewer shares, bound where the editor can see it.
+    """Build the Meshcat settings every viewer shares.
 
     Drake's default host and ``host="*"`` both bind the IPv6 wildcard, so the socket only
-    ever shows up in ``/proc/net/tcp6``. VS Code scans the IPv4 table to notice new
-    servers, so a viewer bound that way is invisible to it and no "open in browser" prompt
-    appears. The IPv4 wildcard is reachable from the same places and lands in the table the
-    editor actually reads, so it is the one binding that keeps both working.
+    shows up in ``/proc/net/tcp6``; VS Code scans the IPv4 table for new servers and so
+    never lists the viewer under Ports. The IPv4 wildcard reaches the same places and lands
+    in the table the editor reads.
 
     Every viewer must build its params here: when the three of them each configured their
     own, a change to one silently left the others behind.
@@ -249,20 +251,44 @@ def viewer_params(*, show_stats_plot: bool = False):
     return MeshcatParams(host="0.0.0.0", show_stats_plot=show_stats_plot)
 
 
-def announce_viewer(label: str, meshcat) -> None:
-    """Print the viewer's localhost URL and leave opening it to the editor.
+def announce_viewer(label: str, meshcat, *, open_browser: bool = True) -> None:
+    """Print the viewer's localhost URL and open it.
 
-    The printed localhost URL is the second way VS Code spots the port, and the only one
-    that survives if the socket is not where its scanner looks, so it is printed verbatim
-    rather than via ``web_url()`` - which reports whatever host the server bound to.
-    Launching a browser from here pre-empts the prompt and steals focus, so it is
-    deliberately not done.
+    The URL is printed as well as opened so there is still something to click when the
+    browser cannot be launched, and it is built here rather than taken from ``web_url()``,
+    which reports whatever host the server bound to.
     """
 
-    print(f"{label}: http://localhost:{meshcat.port()}")
+    url = f"http://localhost:{meshcat.port()}"
+    print(f"{label}: {url}")
     address = wsl_ipv4_address()
     if address is not None:
         print(f"From another machine: http://{address}:{meshcat.port()}")
+    if open_browser:
+        open_in_browser(url)
+
+
+def open_in_browser(url: str) -> None:
+    """Show ``url`` in the desktop browser, falling back to the printed link in silence.
+
+    WSL has no Linux browser to hand the URL to, so it goes to the Windows default browser
+    instead; ``explorer.exe`` exits non-zero even when it worked, so its status is ignored.
+    """
+
+    if "WSL_DISTRO_NAME" in os.environ:
+        launcher = shutil.which("wslview") or shutil.which("explorer.exe")
+        if launcher is not None:
+            subprocess.run(
+                [launcher, url],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return
+    try:
+        webbrowser.open(url)
+    except (webbrowser.Error, OSError):
+        pass
 
 
 def wsl_ipv4_address() -> str | None:

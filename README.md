@@ -87,24 +87,17 @@ It should print something like `Linux 5.15.167.4-microsoft-standard-WSL2
 x86_64`. A `PS C:\>` prompt or a `not recognized` error means the window is not
 connected; check the status bar and re-run **WSL: Connect to WSL**.
 
-One thing still leaves the window: the viewers print a `localhost` URL that you
-open in your normal Windows browser. WSL forwards the port for you, so no Linux
-desktop or X server is involved.
+One thing still leaves the window: the viewers open a `localhost` URL in your
+normal Windows browser. WSL forwards the port for you, so no Linux desktop or X
+server is involved.
 
-If no notification offers to open the port, check the **Ports** panel next to the
-terminal; the viewer registers there as *Meshcat viewer*. VS Code finds the server
-two ways - by scanning for new listening sockets, and by spotting the `localhost`
-URL in terminal output - so both are kept working deliberately. `viewer_params()`
-in [src/twin_lab/meshcat_ui.py](src/twin_lab/meshcat_ui.py) binds the IPv4 wildcard
-because Drake's default binds IPv6-only, which the socket scan never sees, and
-`announce_viewer()` prints the URL literally rather than echoing the bound host.
-Build viewer settings through those two helpers and the prompt keeps working.
-
-The prompt itself only fires the first time a port is forwarded, so
-[.vscode/settings.json](.vscode/settings.json) turns off `remote.restoreForwardedPorts`;
-otherwise 7000 is restored silently when the window opens and every later viewer
-launch has nothing new to announce. Either way the URL in the terminal is clickable,
-and under WSL it also works pasted straight into a Windows browser.
+The viewers open that page in your browser themselves on startup, and print the
+URL as well so there is still something to click if the browser cannot be
+launched. Under WSL there is no Linux browser to hand it to, so `open_in_browser()`
+in [src/twin_lab/meshcat_ui.py](src/twin_lab/meshcat_ui.py) passes the URL to the
+Windows default browser through `explorer.exe`. Closing the tab does not stop the
+viewer; reopen it from the URL, or from the **Ports** panel next to the terminal,
+where the port is listed as *Meshcat viewer*.
 
 #### Where your files live, and where to clone
 
@@ -308,8 +301,8 @@ This is the point of the model. Quick start, from the repository root:
 uv run slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
 ```
 
-The command prints a `http://localhost:7000` Meshcat URL; `Ctrl+Click` it in the
-VS Code terminal to open it in your normal browser. First load takes about 20
+The command opens a `http://localhost:7000` Meshcat page in your normal browser,
+and prints the URL too in case it needs reopening. First load takes about 20
 seconds, and the window stays blank until the console says the geometry is
 loaded. Note that the very first run also has to build the collision hulls,
 which takes far longer; see
@@ -516,8 +509,8 @@ finding. A pair that penetrates well past that budget is real.
 #### Seeing it in Meshcat
 
 The table says how badly a part fits; the three viewers say *where*. They are
-flags on the same command, and each prints a `http://localhost:7000` URL to
-`Ctrl+Click`, exactly like the collision viewer. Press `Escape` in the browser
+flags on the same command, and each opens a `http://localhost:7000` page in your
+browser, exactly like the collision viewer. Press `Escape` in the browser
 or `Ctrl-C` in the terminal to stop.
 
 **The ten worst parts, one per click**, which is the review to run if you run
@@ -741,6 +734,30 @@ back off.
 The range slider is a travel heuristic, not a clearance guarantee. To check an
 animated pose for real interference, run the animation inside the collision
 viewer above, which evaluates every frame.
+
+### Framing the assembly for a photograph
+
+**Isometric view** in the collision viewer swings the camera onto the corner
+diagonal and pulls back far enough to fit the whole stack in frame. An isometric
+view is one where the camera sits at equal angles to all three axes, so no axis
+is foreshortened more than the others and the stack reads the same way in a
+still image as it does in a drawing.
+
+It looks in from the near right corner, over the enclosure opening, which is the
+same corner the CAD package photographs from; putting the two side by side is
+then a like-for-like comparison. The enclosure opens toward `+Y`, so the camera
+sits at `-X +Y +Z`.
+
+The framing is measured, not fixed: the button takes the bounding box of every
+collision hull at the current pose, aims at its centre, and stands back a little
+over twice the box radius. Move the joints and click it again and it reframes
+around wherever the stack has got to. Expect it to think for about a second on
+the 43841 stack, since it walks all 5000-odd hulls.
+
+The button only moves the camera, so the mouse still works normally afterwards
+and nothing about the model or the clearance checking changes. For a clean plate
+in a screenshot, clear **Collision detection** first so no parts are lit yellow
+or red.
 
 ## Updating the 43841 STEP
 
