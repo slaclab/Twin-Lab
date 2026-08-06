@@ -743,10 +743,9 @@ view is one where the camera sits at equal angles to all three axes, so no axis
 is foreshortened more than the others and the stack reads the same way in a
 still image as it does in a drawing.
 
-It looks in from the near right corner, over the enclosure opening, which is the
-same corner the CAD package photographs from; putting the two side by side is
-then a like-for-like comparison. The enclosure opens toward `+Y`, so the camera
-sits at `-X +Y +Z`.
+It looks in from the near left corner, the same corner the CAD package
+presents, so putting the two side by side is a like-for-like comparison. The
+camera sits at `+X -Y +Z`.
 
 The framing is measured, not fixed: the button takes the bounding box of every
 collision hull at the current pose, aims at its centre, and stands back a little

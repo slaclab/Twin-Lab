@@ -32,9 +32,10 @@ ISOLATE_LABEL = "Isolate worst pair"
 VERIFY_LABEL = "Verify contact against CAD"
 ISOMETRIC_LABEL = "Isometric view"
 # What makes a view isometric is that the camera sits at equal angles to all three axes.
-# The enclosure opens toward +Y, so the camera looks in from there; -X is then the near
-# RIGHT corner, matching how the CAD package presents its own isometric.
-ISOMETRIC_DIRECTION = (-1.0, 1.0, 1.0)
+# Which of the four top corners reads as "near left" was settled by eye against the CAD
+# package's own isometric, not derived: the enclosure opening is hard to pin to an axis
+# from the geometry alone. Z stays positive so the camera looks down rather than up.
+ISOMETRIC_DIRECTION = (1.0, -1.0, 1.0)
 # Drake's Meshcat camera has a 75 degree vertical field of view, so a sphere of radius R is
 # wholly in frame from R / sin(37.5 deg) ~= 1.64 R away. The rest is margin, since the
 # assembly is a box rather than a sphere and a photograph wants some air around it.

@@ -26,14 +26,14 @@ def test_the_camera_sits_at_equal_angles_to_all_three_axes():
     assert offset[1] == pytest.approx(offset[2])
 
 
-def test_the_camera_stands_at_the_near_right_corner():
-    """The corner the CAD package photographs from, so the two views agree."""
+def test_the_camera_stands_at_the_near_left_corner():
+    """Pinned by eye against the CAD package's isometric, so the two views agree."""
     camera, target = isometric_camera(np.array([-1.0, -1.0, -1.0]), np.array([1.0, 1.0, 1.0]))
 
     offset = camera - target
     assert offset[2] > 0, "looking down on the stack, not up at it"
-    assert offset[1] > 0, "in through the enclosure opening, which faces +Y"
-    assert offset[0] < 0, "-X is the near right when looking along -Y with +Z up"
+    assert offset[0] > 0, "+X -Y is the near left corner"
+    assert offset[1] < 0
 
 
 def test_the_camera_stands_back_far_enough_to_frame_the_whole_box():

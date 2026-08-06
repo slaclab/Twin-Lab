@@ -47,7 +47,10 @@ body { background: #1a1a1a; }
                                font-size: 13px !important; }
 .dg.main .c .slider { height: 24px !important; }
 .dg.main .c select { height: 22px !important; font-size: 13px !important; }
-.dg.main .close-button { height: 24px !important; line-height: 24px !important; }
+/* dat.GUI writes the button's width inline from its own 245px, which our wider panel
+   leaves it short of; !important beats that, and outlasts dat.GUI reapplying it. */
+.dg.main .close-button { height: 24px !important; line-height: 24px !important;
+                         width: 100% !important; }
 """
 
 PANEL_JS = """
