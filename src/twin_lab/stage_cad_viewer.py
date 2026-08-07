@@ -106,11 +106,21 @@ def prepare_stage_cad(
     root_id = by_ref[inventory["subassembly"]["ref"]]["id"]
     stage_ids = [by_ref[str(item["ref"])]["id"] for item in inventory["stage_instances"]]
     hidden_refs = {str(ref) for ref in inventory.get("hidden_occurrences", [])}
+    overrides = inventory.get("attachment_overrides", {})
+    forced_fixed = {str(ref) for ref in overrides.get("fixed", [])}
+    forced_parent = {
+        str(ref): str(parent_ref)
+        for parent_ref, references in overrides.get("moving", {}).items()
+        for ref in references
+    }
+    # A reviewed attachment may name a part outside the focused subassembly, because a
+    # stack elsewhere in the STEP can still carry payload that has to move with it.
+    reviewed_refs = forced_fixed | set(forced_parent)
     attached_refs = [
         item["ref"]
         for item in manifest_items
         if not item["is_assembly"]
-        and item["id"].startswith(f"{root_id}/")
+        and (item["id"].startswith(f"{root_id}/") or item["ref"] in reviewed_refs)
         and not any(item["id"].startswith(f"{stage_id}/") for stage_id in stage_ids)
         and not _is_fastener_name(str(item["name"]))
         and item["ref"] not in hidden_refs
@@ -197,13 +207,6 @@ def prepare_stage_cad(
             attachment_style_by_ref[reference] = str(style)
 
     attachment_groups: dict[tuple[str | None, str], list[str]] = {}
-    overrides = inventory.get("attachment_overrides", {})
-    forced_fixed = {str(ref) for ref in overrides.get("fixed", [])}
-    forced_parent = {
-        str(ref): str(parent_ref)
-        for parent_ref, references in overrides.get("moving", {}).items()
-        for ref in references
-    }
     chain_root_by_id = {
         os.path.commonpath([by_ref[str(ref)]["id"] for ref in refs]): refs
         for refs in inventory.get("motion_chains", {}).values()

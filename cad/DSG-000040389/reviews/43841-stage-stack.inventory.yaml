@@ -12,14 +12,15 @@ subassembly:
 # World-fixed geometry outside the focused stage-stack subtree. Keep these as
 # separate named groups so they can become independently reviewed collision
 # groups later. Fasteners are omitted by default.
+# A003 (jet stage stack) and A007 (long jet) used to sit here. They are a driven
+# three-axis chain now, so their parts arrive through motion_chains and
+# attachment_overrides instead.
 static_geometry:
   - {ref: A037, name: Enclosure assembly, cad_id: DSG-000043161, rgba: [0.95, 0.78, 0.12, 0.28]}
   - {ref: A029, name: Camera assembly 1, cad_id: DSG-000042902}
   - {ref: A030, name: Camera assembly 2, cad_id: DSG-000042902}
   - {ref: P1170, name: Shield cone, cad_id: REF-000226146, rgba: [0.20, 0.65, 0.95, 0.35]}
   - {ref: A023, name: Chamber, cad_id: DSG-000044253}
-  - {ref: A007, name: Long jet assembly, cad_id: LCL5009-010086}
-  - {ref: A003, name: Detector stage 7948 (static), cad_id: DSG-000007948}
 
 # Semantic colors are assembly-review data: catalog stages are colored by model,
 # while attached geometry is split into separately colored rigid meshes.
@@ -35,6 +36,8 @@ visual_styles:
     kohzu_ya04a_r102_nnr_bm: [0.24, 0.68, 0.38, 1.0]
     kohzu_ya04a_r102_rrn_bm: [0.34, 0.78, 0.52, 1.0]
     kohzu_za05a_w101_bm: [0.82, 0.34, 0.48, 1.0]
+    kohzu_xa05a_l202_r: [0.16, 0.52, 0.44, 1.0]
+    kohzu_xa05a_r202: [0.32, 0.74, 0.62, 1.0]
   attachment_groups:
     adapter:
       rgba: [0.92, 0.42, 0.10, 1.0]
@@ -56,6 +59,17 @@ visual_styles:
     detector:
       rgba: [0.18, 0.72, 0.62, 1.0]
       refs: [P804]
+    jet_stage_mount:
+      rgba: [0.58, 0.60, 0.64, 1.0]
+      refs: [P027, P003, P020, P022, P024, P026, P041, P043, P045]
+    jet_adapter:
+      rgba: [0.92, 0.42, 0.10, 1.0]
+      refs: [P001, P030, P032, P034, P036, P038, P047]
+    long_jet:
+      rgba: [0.10, 0.58, 0.95, 1.0]
+      refs: [P056, P057, P058, P059, P060, P062,
+             P063, P064, P065, P066, P067, P068, P069, P070, P071, P072,
+             P073, P074, P075, P076, P077, P078, P079, P083, P086, P087]
 
 # Occurrence refs belong to this STEP revision. Catalog IDs remain reusable.
 stage_instances:
@@ -83,12 +97,24 @@ stage_instances:
   - {ref: A066, library_id: LIB-000032469, catalog: kohzu_za05a_w101_bm}
   - {ref: A068, library_id: LIB-000009109, catalog: kohzu_ya04a_r102_rrn_bm}
 
+  # Long-jet stack, DSG-000007948, outside the 43841 subassembly and grounded through
+  # the DSG-000024758 jet stage mounting plate on the breadboard.
+  - {ref: A006, library_id: LIB-000009189, catalog: kohzu_xa05a_l202_r}
+  - {ref: A005, library_id: LIB-000032478, catalog: kohzu_xa05a_r202}
+  - {ref: A004, library_id: LIB-000032469, catalog: kohzu_za05a_w101_bm}
+
 # Reviewed base-to-payload order for the detector and three crystal stacks.
 motion_chains:
   Detector: [A041]
   North Crystal: [A051, A050, A049, A048]
   Middle Crystal: [A044, A043, A046, A045]
   South Crystal: [A056, A055, A054, A053]
+  # Base to payload: 50 mm linear, 15 mm transverse, 8 mm lift, then the adapter and
+  # the long jet. Travel directions come from the stage frames, not from the assembly
+  # axes: A006 drives along DSG-000102548 Y (the jet's own axis), A005 along X, A004
+  # along Z. Each stage's own rail confirms it - A005 has only 5 mm of clearance in Y
+  # and needs 15 mm, so it cannot be the Y axis.
+  Long Jet: [A006, A005, A004]
 
 compound_motion_chains:
   North Polycap:
@@ -149,6 +175,8 @@ ignored_pairs:
     reason: touching at reviewed CAD home (-2.10 mm)
   - pair: [P1075, P1170]
     reason: touching at reviewed CAD home (-1.59 mm)
+  # RE-REVIEW: P056 is no longer static. It rides the long-jet lift now, so this pair can
+  # move into real interference and this entry would hide it.
   - pair: [P056, P1110]
     reason: touching at reviewed CAD home (-1.15 mm)
   # Validated against the exact tessellated meshes rather than the hulls: the bracket sits
@@ -172,6 +200,15 @@ attachment_overrides:
     - P1081  # LIB-000004373; Middle Polycap base fastener
     - P1082  # LIB-000004373; Middle Polycap base fastener
     - P1116  # DSG-000046530; North Polycap angled Z-stage bracket fixed to breadboard
+    - P027   # DSG-000024758-EXT; jet stage mounting plate, bolted to the breadboard
+    - P003   # Thorlabs RS1P; jet stage mounting-plate pedestal
+    - P020   # Thorlabs RS1P; jet stage mounting-plate pedestal
+    - P022   # Thorlabs RS1P; jet stage mounting-plate pedestal
+    - P024   # Thorlabs RS1P; jet stage mounting-plate pedestal
+    - P026   # Thorlabs RS1P; jet stage mounting-plate pedestal
+    - P041   # Thorlabs RS1P; jet stage mounting-plate pedestal
+    - P043   # Thorlabs RS1P; jet stage mounting-plate pedestal
+    - P045   # Thorlabs RS1P; jet stage mounting-plate pedestal
   moving:
     A041: [P805, P804, P830, P831]  # 41969 adapter, REF-000226045 EPIX 100P detector, and two Newport locating pegs
     A044: [P868]        # 34586: first linear carriage to second linear base
@@ -192,6 +229,12 @@ attachment_overrides:
     A062: [P1069, P1075, P1076]  # 40909 adapter and Middle collimating optic
     A066: [P1117]         # 46523: ZA carriage to 7591 fixed base, North Polycap
     A068: [P1112, P1110, P1111]  # 40767 adapter and North collimating optic
+    # The whole jet rides the ZA05A lift: bracket, its clamp inserts, the LCL5009-010086
+    # holder, and the DSG-000022427 jet cartridge that mounts to it magnetically.
+    A004: [P001, P030, P032, P034, P036, P038, P047,
+           P056, P057, P058, P059, P060, P062,
+           P063, P064, P065, P066, P067, P068, P069, P070, P071, P072,
+           P073, P074, P075, P076, P077, P078, P079, P083, P086, P087]
 
 reviewed_connections:
   - [P827, P805, P804]  # VT-50L carriage to 41969 adapter and EPIX 100P

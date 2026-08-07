@@ -30,14 +30,19 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
     references = [instance["ref"] for instance in instances]
 
     assert inventory["subassembly"]["ref"] == "A038"
-    assert len(instances) == 19
+    assert len(instances) == 22
     assert len(references) == len(set(references))
     assert all(instance["catalog"] in stages for instance in instances)
 
     occurrences = {item["ref"]: item for item in manifest["occurrences"]}
     root_id = occurrences[inventory["subassembly"]["ref"]]["id"]
+    jet_root_id = occurrences["A003"]["id"]
     assert all(occurrences[ref]["is_assembly"] for ref in references)
-    assert all(occurrences[ref]["id"].startswith(f"{root_id}/") for ref in references)
+    # The long-jet stack sits outside the focused subassembly but is still driven.
+    assert all(
+        occurrences[ref]["id"].startswith((f"{root_id}/", f"{jet_root_id}/"))
+        for ref in references
+    )
 
     static_geometry = inventory["static_geometry"]
     assert [item["ref"] for item in static_geometry] == [
@@ -46,8 +51,6 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
         "A030",
         "P1170",
         "A023",
-        "A007",
-        "A003",
     ]
     assert all(item["ref"] in occurrences for item in static_geometry)
     assert static_geometry[0]["rgba"] == [0.95, 0.78, 0.12, 0.28]
@@ -106,6 +109,12 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
     assert stages["kohzu_sa04b_rt02_bm"]["pivot_offset_local"] == [0.0, 0.0, 0.057]
     assert stages["kohzu_sa04b_rt02_r_bm"]["pivot_offset_local"] == [0.0, 0.0, 0.057]
 
+    # OEM travel windows for the long-jet stack, centred on the assembled CAD pose.
+    assert stages["kohzu_xa05a_l202_r"]["limits"] == [-0.025, 0.025]
+    assert stages["kohzu_xa05a_r202"]["limits"] == [-0.0075, 0.0075]
+    assert stages["kohzu_za05a_w101_bm"]["limits"] == [-0.004, 0.004]
+    assert stages["kohzu_za05a_w101_bm"]["axis_local"] == [0.0, 0.0, 1.0]
+
     assert inventory["hidden_occurrences"] == ["P775", "P776", "P777"]
     assert inventory["attachment_overrides"]["fixed"] == [
         "P847",
@@ -120,6 +129,15 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
         "P1081",
         "P1082",
         "P1116",
+        "P027",
+        "P003",
+        "P020",
+        "P022",
+        "P024",
+        "P026",
+        "P041",
+        "P043",
+        "P045",
     ]
     assert inventory["attachment_overrides"]["moving"]["A059"] == [
         "P1033",
@@ -141,7 +159,9 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
         "North Crystal",
         "Middle Crystal",
         "South Crystal",
+        "Long Jet",
     ]
+    assert inventory["motion_chains"]["Long Jet"] == ["A006", "A005", "A004"]
     assert inventory["motion_chains"]["Detector"] == ["A041"]
     assert inventory["attachment_overrides"]["moving"]["A041"] == [
         "P805",

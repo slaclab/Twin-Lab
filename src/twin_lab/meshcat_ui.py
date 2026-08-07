@@ -105,6 +105,10 @@ body { background: #1a1a1a; }
    so the cube never has to move out of anything's way. */
 #twinlab-view-cube { position: fixed; left: 12px; bottom: 12px; z-index: 8; }
 #twinlab-view-cube canvas { display: block; cursor: pointer; }
+/* Drake's own rtr% plot is switched off in every viewer here, so the top-left is free. */
+#twinlab-fps { position: fixed; left: 12px; top: 12px; z-index: 8; pointer-events: none;
+               font: 12px/1.4 monospace; color: #d8d8d8; background: rgba(26,26,26,0.6);
+               padding: 3px 7px; border-radius: 3px; white-space: pre; }
 """
 
 # Anything that has to measure the model needs the same idea of what the model is, and
@@ -302,6 +306,36 @@ window.addEventListener("load", function () {
   };
   // Controls normally arrive after load, but a fast connection can beat this listener.
   Object.keys(viewer.gui_controllers).forEach(checkboxify);
+});
+"""
+
+# The scenes here are heavy enough that a slow viewer reads as a hung one, so the draw
+# rate is worth showing. Counting viewer.render rather than requestAnimationFrame is
+# deliberate: rAF keeps ticking at the display rate while a backed-up message queue
+# starves the actual drawing, which is exactly the case this is meant to expose. Meshcat
+# only redraws a scene that changed, so a still model legitimately draws nothing at all
+# and has to say so rather than report a zero that reads as a stall.
+FPS_JS = """
+window.addEventListener("load", function () {
+  if (typeof viewer === "undefined" || typeof viewer.render !== "function") return;
+  var readout = document.createElement("div");
+  readout.id = "twinlab-fps";
+  readout.textContent = "idle";
+  document.body.appendChild(readout);
+
+  var frames = 0;
+  var render = viewer.render.bind(viewer);
+  viewer.render = function () { frames += 1; return render.apply(null, arguments); };
+
+  var since = performance.now();
+  setInterval(function () {
+    var now = performance.now();
+    var drawn = frames;
+    var fps = drawn * 1000 / Math.max(now - since, 1);
+    frames = 0;
+    since = now;
+    readout.textContent = drawn ? fps.toFixed(0).padStart(2, " ") + " fps" : "idle";
+  }, 500);
 });
 """
 
@@ -760,6 +794,7 @@ def _patched_html(source: Path) -> str:
         f"<script>{PANEL_JS}</script>\n"
         f"<script>{CONTROLS_JS}</script>\n"
         f"<script>{TOGGLE_JS}</script>\n"
+        f"<script>{FPS_JS}</script>\n"
         f"<script>{VIEW_CUBE_JS}</script>\n"
     )
     html = html.replace("</body>", f"{patch}</body>")

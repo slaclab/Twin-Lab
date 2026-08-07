@@ -103,5 +103,34 @@ stages:
     manufacturer: KOHZU
     model: ZA05A-W101-BM
     joint_type: prismatic
+    axis_local: [0.0, 0.0, 1.0]
     component_roles: {fixed: [1], moving: [2]}
     limits: [-0.004, 0.004]
+    source: https://www.kohzu.co.jp/products/positioning-stages/item/za05a-w101/
+
+  kohzu_xa05a_l202_r:
+    manufacturer: KOHZU
+    model: XA05A-L202-R
+    joint_type: prismatic
+    axis_local: [1.0, 0.0, 0.0]
+    component_roles: {fixed: [1], moving: [2]}
+    travel: 0.050
+    limits: [-0.025, 0.025]
+    mirrored: true
+    notes:
+      - The STEP occurrence is SLAC library part LIB-000009189.
+      - Long-stroke linear-guide X stage; -R is Kohzu's opposite-hand build of XA05A-L202.
+    source: https://www.kohzu.co.jp/products/positioning-stages/item/xa05a-l202/
+
+  kohzu_xa05a_r202:
+    manufacturer: KOHZU
+    model: XA05A-R202
+    joint_type: prismatic
+    axis_local: [1.0, 0.0, 0.0]
+    component_roles: {fixed: [1], moving: [2]}
+    travel: 0.015
+    limits: [-0.0075, 0.0075]
+    notes:
+      - The STEP occurrence is SLAC library part LIB-000032478.
+      - Cross-roller X stage; the short stroke is why it carries the transverse axis.
+    source: https://www.kohzu.co.jp/products/positioning-stages/item/xa05a-r202/
