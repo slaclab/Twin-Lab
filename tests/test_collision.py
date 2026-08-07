@@ -7,6 +7,7 @@ import math
 import os
 
 import pytest
+import yaml
 
 from twin_lab.clearance_refine import Refinement
 from twin_lab.collision import (
@@ -27,12 +28,18 @@ from twin_lab.convex_collision import (
     CACHE_SCHEMA,
     ConvexPart,
     DecompositionSettings,
+    PartSettings,
     _clear_part_dir,
+    _override_snippet,
     _read_manifest,
     _read_part_marker,
     _write_manifest,
     _write_part_marker,
+    cached_hull_count,
+    invalidate_parts,
+    part_settings_from_config,
     read_obj_parts,
+    read_part_refs,
 )
 
 SPLIT_OBJ = """\
@@ -69,6 +76,62 @@ def test_read_obj_parts_falls_back_to_the_file_stem_without_group_markers(tmp_pa
 
     assert [ref for ref, _, _ in parts] == ["kohzu_sa04b"]
     assert parts[0][2] == [(0, 1, 2)]
+
+
+def test_read_part_refs_indexes_exactly_like_read_obj_parts(tmp_path):
+    path = tmp_path / "merged.obj"
+    # The empty P002 group must be skipped by both, or cache markers index the wrong part.
+    path.write_text(SPLIT_OBJ.replace("o P002", "o P002\no P003"), encoding="utf-8")
+
+    assert read_part_refs(path) == [ref for ref, _, _ in read_obj_parts(path)] == ["P001", "P003"]
+
+
+def test_invalidate_parts_drops_only_the_named_parts(tmp_path):
+    source = tmp_path / "merged.obj"
+    source.write_text(SPLIT_OBJ, encoding="utf-8")
+    part_dir = tmp_path / "cache" / "merged"
+    part_dir.mkdir(parents=True)
+    (part_dir / "manifest.json").write_text("{}", encoding="utf-8")
+    settings = DecompositionSettings()
+    kept = []
+    for index, ref in enumerate(read_part_refs(source)):
+        hull = part_dir / f"{ref.lower()}_hull000.obj"
+        hull.write_text("v 0 0 0\n", encoding="utf-8")
+        _write_part_marker(
+            part_dir / f"part{index:04d}.json",
+            source,
+            settings,
+            ConvexPart(source=source, part_ref=ref, hulls=(hull,)),
+        )
+        kept.append(hull)
+
+    removed = invalidate_parts(tmp_path / "cache", source, [0])
+
+    assert removed == 1
+    assert not kept[0].exists() and not (part_dir / "part0000.json").exists()
+    assert kept[1].exists() and (part_dir / "part0001.json").exists()
+    # The manifest vouches for the whole source, so it must go or nothing is dispatched.
+    assert not (part_dir / "manifest.json").exists()
+    assert cached_hull_count(tmp_path / "cache", source, 0) is None
+    assert cached_hull_count(tmp_path / "cache", source, 1) == 1
+
+
+def test_override_snippet_parses_back_into_the_same_settings():
+    resolver = PartSettings(
+        DecompositionSettings(),
+        {
+            "P650": DecompositionSettings(threshold=0.01, max_hulls=64),
+            "P651": DecompositionSettings(threshold=0.01, max_hulls=64),
+            "P900": DecompositionSettings(threshold=0.02, max_hulls=8),
+        },
+    )
+
+    snippet = yaml.safe_load(_override_snippet(["P900", "P651", "P650"], resolver))
+    parsed = part_settings_from_config(snippet["decomposition"])
+
+    assert len(snippet["decomposition"]["overrides"]) == 2
+    for ref in ("P650", "P651", "P900"):
+        assert parsed.for_part(ref) == resolver.for_part(ref)
 
 
 def test_decomposition_settings_round_trip_through_the_cache_key():
