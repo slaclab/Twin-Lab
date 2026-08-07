@@ -55,9 +55,18 @@ HIGHLIGHT_GROUP = "clearance"
 DEFAULT_TOP_RGB = [0.53, 0.81, 0.98]
 DEFAULT_BOTTOM_RGB = [0.10, 0.10, 0.44]
 OFFENDER_LIMIT = 12
-# The signed-distance query costs ~30 ms, so running it every animated frame would cap the
-# loop near 30 fps; throttle it to this rate so the render can reach the requested fps.
-DETECTOR_HZ = 20.0
+# The signed-distance query measures 49 ms on the 43841 package, so a 20 Hz throttle never
+# engaged and every frame paid for it. Held well under the achievable rate so the render
+# keeps a budget of its own.
+DETECTOR_HZ = 10.0
+# Republishing the offender buttons is by far the most expensive thing this viewer sends:
+# Drake destroys and recreates a dat.GUI row per label, and the panel hooks reflow on each
+# one. While animating, the offending pairs change every frame, which measured 25 control
+# rebuilds a frame - enough to bury the browser under a message backlog minutes deep.
+READOUT_HZ = 2.0
+# The sliders report the animated pose rather than drive it, so they only have to keep up
+# with the eye; pushing all 22 every frame costs a dat.GUI redraw each.
+SLIDER_PUSH_HZ = 5.0
 # Measuring the tessellated parts costs 5-240 ms a pair, far too much to drag a slider
 # through. It waits for the pose to hold still this long; until then the reading is the
 # hull distance with only the proudness correction, which errs towards reporting contact.
@@ -204,6 +213,8 @@ def run_collision_viewer(
 
     frame_period = 1.0 / max(fps, 1.0)
     detector_period = 1.0 / DETECTOR_HZ
+    readout_period = 1.0 / READOUT_HZ
+    slider_period = 1.0 / SLIDER_PUSH_HZ
     reset_clicks = 0
     isometric_clicks = 0
     log_clicks = 0
@@ -217,8 +228,11 @@ def run_collision_viewer(
     readout: list[str] = []
     previous_summary = ""
     last_detect = 0.0
+    last_readout = 0.0
+    last_slider_push = 0.0
     settled_at = 0.0
     mesh_pending = False
+    values = [joint.slider_bounds()[2] for joint in joints]
     while meshcat.GetButtonClicks("Stop viewer") == 0:
         tick = time.monotonic()
         elapsed = tick - previous_tick
@@ -233,8 +247,8 @@ def run_collision_viewer(
             wanted_animating = False
             meshcat.SetSliderValue(ANIMATION_LABEL, 0.0)
             phase = 0.0
-            for joint in joints:
-                meshcat.SetSliderValue(joint.label, joint.slider_bounds()[2])
+            values = [joint.slider_bounds()[2] for joint in joints]
+            _push_sliders(meshcat, joints, values)
 
         new_isometric = meshcat.GetButtonClicks(ISOMETRIC_LABEL)
         if new_isometric != isometric_clicks:
@@ -248,6 +262,10 @@ def run_collision_viewer(
         ):
             if wanted_collision != collision_on:
                 print(f"Collision detection {'ON' if wanted_collision else 'OFF'}.")
+            if animating and not wanted_animating:
+                # The sliders only catch up a few times a second while animating, so hand
+                # them the pose that is actually on screen before they become the input.
+                _push_sliders(meshcat, joints, values)
             if not wanted_collision:
                 _reset_status(meshcat)
                 highlighter.clear()
@@ -262,18 +280,24 @@ def run_collision_viewer(
             previous_pose = None
             previous_status = None
             previous_summary = ""
+            last_readout = 0.0
 
         if animating:
             period = max(meshcat.GetSliderValue(AUTO_PERIOD_LABEL), 0.1)
             span_fraction = meshcat.GetSliderValue(AUTO_RANGE_LABEL) / 100.0
             phase = math.fmod(phase + 2.0 * math.pi * elapsed / period, 2.0 * math.pi)
+            values = []
             for index, joint in enumerate(joints):
                 lower, upper, home = joint.slider_bounds()
                 amplitude = max(min(home - lower, upper - home), 0.0) * span_fraction
                 offset = 2.0 * math.pi * index / max(len(joints), 1)
-                meshcat.SetSliderValue(joint.label, home + amplitude * math.sin(phase + offset))
+                values.append(home + amplitude * math.sin(phase + offset))
+            if tick - last_slider_push >= slider_period:
+                last_slider_push = tick
+                _push_sliders(meshcat, joints, values)
+        else:
+            values = [meshcat.GetSliderValue(joint.label) for joint in joints]
 
-        values = [meshcat.GetSliderValue(joint.label) for joint in joints]
         warn_m = max(meshcat.GetSliderValue(WARN_LABEL), 0.0) / 1000.0
         verify_on = model.refiner is not None and meshcat.GetSliderValue(VERIFY_LABEL) >= 0.5
         new_log = meshcat.GetButtonClicks("Log clearance report")
@@ -312,7 +336,9 @@ def run_collision_viewer(
                 selected = None if show_all else _isolated_parts(report)
                 highlighter.isolate(selected is not None)
                 highlighter.update(report, selected)
-                readout = _set_offender_readout(meshcat, report, readout, show_all=show_all)
+                if not animating or asked or tick - last_readout >= readout_period:
+                    last_readout = tick
+                    readout = _set_offender_readout(meshcat, report, readout, show_all=show_all)
                 if new_log != log_clicks:
                     log_clicks = new_log
                     _print_report(report)
@@ -322,8 +348,21 @@ def run_collision_viewer(
                     print(report.summary())
             elif not collision_on:
                 log_clicks = new_log
+        # Backpressure. Meshcat buffers without limit, so a loop that publishes faster than
+        # the browser can draw builds a queue that never drains - and a stop request cannot
+        # be seen until the browser has chewed through it. Waiting for the send to land caps
+        # this loop at the rate the viewer can actually keep up with.
+        meshcat.Flush()
         frame_cost = time.monotonic() - tick
         time.sleep(max(0.0, frame_period - frame_cost) if animating else 0.1)
+
+    # Releasing thousands of collision geometries takes seconds and says nothing while it
+    # runs, which reads as the stop request having been missed.
+    print("Stopping; releasing the collision geometry takes a few seconds.")
+
+def _push_sliders(meshcat, joints: list[SliderJoint], values: list[float]) -> None:
+    for joint, value in zip(joints, values, strict=True):
+        meshcat.SetSliderValue(joint.label, value)
 
 
 def _reset_status(meshcat) -> None:
