@@ -27,6 +27,10 @@ from .paths import CACHE_ROOT, resolve_repo_path, review_artifact_stem
 AUTO_MOTION_LABEL = "Animation"
 AUTO_RANGE_LABEL = "Auto motion range (% of travel)"
 AUTO_PERIOD_LABEL = "Auto motion period (s)"
+# While animating, the sliders report the pose rather than drive it, so they only have to
+# keep up with the eye. Pushing all of them every frame costs a dat.GUI redraw each, which
+# is far more work than the browser can absorb at the frame rate.
+SLIDER_PUSH_HZ = 5.0
 
 
 def prepare_stage_cad(
@@ -451,9 +455,17 @@ def view_stage_cad(scene_path: str | Path, *, fps: float = 30.0) -> None:
     print_view_help()
     print("Press Escape in Meshcat or Ctrl-C here to stop.")
     frame_period = 1.0 / max(fps, 1.0)
+    slider_period = 1.0 / SLIDER_PUSH_HZ
     reset_clicks = 0
     phase = 0.0
     previous_tick = time.monotonic()
+    last_slider_push = 0.0
+    was_automatic = False
+    scales = [_slider_scale(joint)[0] for joint in joints]
+    labels = [_slider_label(joint, _slider_scale(joint)[1]) for joint in joints]
+    homes = [joint["home"] * scale for joint, scale in zip(joints, scales, strict=True)]
+    values = list(homes)
+    published: list[float | None] = [None] * len(joints)
     while meshcat.GetButtonClicks("Stop viewer") == 0:
         tick = time.monotonic()
         elapsed = tick - previous_tick
@@ -465,25 +477,34 @@ def view_stage_cad(scene_path: str | Path, *, fps: float = 30.0) -> None:
             phase = 0.0
             automatic = False
             meshcat.SetSliderValue(AUTO_MOTION_LABEL, 0.0)
-            for joint in joints:
-                scale, unit = _slider_scale(joint)
-                meshcat.SetSliderValue(_slider_label(joint, unit), joint["home"] * scale)
+            values = list(homes)
+            _push_sliders(meshcat, labels, values)
         if automatic:
             period = max(meshcat.GetSliderValue(AUTO_PERIOD_LABEL), 0.1)
             span_fraction = meshcat.GetSliderValue(AUTO_RANGE_LABEL) / 100.0
             phase = math.fmod(phase + 2.0 * math.pi * elapsed / period, 2.0 * math.pi)
+            values = []
             for index, joint in enumerate(joints):
-                scale, unit = _slider_scale(joint)
                 offset = 2.0 * math.pi * index / max(len(joints), 1)
                 target = joint["home"] + _auto_amplitude(joint, span_fraction) * math.sin(
                     phase + offset
                 )
-                meshcat.SetSliderValue(_slider_label(joint, unit), target * scale)
-        for joint in joints:
-            scale, unit = _slider_scale(joint)
-            value = _joint_displacement(
-                joint, meshcat.GetSliderValue(_slider_label(joint, unit)) / scale
-            )
+                values.append(target * scales[index])
+            if tick - last_slider_push >= slider_period:
+                last_slider_push = tick
+                _push_sliders(meshcat, labels, values)
+        else:
+            if was_automatic:
+                # The sliders only catch up a few times a second while animating, so hand
+                # them the pose that is actually on screen before they become the input.
+                _push_sliders(meshcat, labels, values)
+            values = [meshcat.GetSliderValue(label) for label in labels]
+        was_automatic = automatic
+        for index, joint in enumerate(joints):
+            if published[index] == values[index]:
+                continue
+            published[index] = values[index]
+            value = _joint_displacement(joint, values[index] / scales[index])
             if joint["joint_type"] == "prismatic":
                 offset = [component * value for component in joint["axis_world"]]
                 # pydrake's Eigen stub is malformed; the list converts at runtime.
@@ -493,7 +514,17 @@ def view_stage_cad(scene_path: str | Path, *, fps: float = 30.0) -> None:
                     joint["axis_world"], joint["origin_m"], value, RigidTransform, RotationMatrix
                 )
             meshcat.SetTransform(joint_paths[joint["key"]], transform)
-        time.sleep(frame_period if automatic else 0.1)
+        # Backpressure. Meshcat buffers without limit, so a loop that publishes faster than
+        # the browser can draw builds a queue that never drains, and a stop request cannot
+        # be seen until the browser has chewed through it.
+        meshcat.Flush()
+        frame_cost = time.monotonic() - tick
+        time.sleep(max(0.0, frame_period - frame_cost))
+
+
+def _push_sliders(meshcat, labels: list[str], values: list[float]) -> None:
+    for label, value in zip(labels, values, strict=True):
+        meshcat.SetSliderValue(label, value)
 
 
 def _write_shape_obj(shape: Any, output: Path, linear_deflection_mm: float) -> None:

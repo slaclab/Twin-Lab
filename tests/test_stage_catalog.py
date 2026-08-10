@@ -221,13 +221,13 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
         0.0,
     ]
     assert _reviewed_home(inventory, "A041", "A041") == 0.0
-    # The jet lift is assembled at the bottom of its stroke, so home is the midpoint and
-    # the CAD pose it was meshed at is the lower endpoint, not the home.
+    # The jet lift is assembled at the bottom of its stroke, so its travel runs one way
+    # from the CAD pose and home sits at that same lower endpoint.
     assert _reviewed_limits(inventory, "A004", "A004", stages["kohzu_za05a_w101_bm"]["limits"]) == [
         0.0,
         0.008,
     ]
-    assert _reviewed_home(inventory, "A004", "A004") == 0.004
+    assert _reviewed_home(inventory, "A004", "A004") == 0.0
     assert _reviewed_cad_position(inventory, "A004", "A004") == 0.0
     assert _reviewed_cad_position(inventory, "A041", "A041") == 0.0
     assert inventory["joint_limit_overrides"]["A049"] == {

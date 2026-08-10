@@ -154,13 +154,19 @@ window.addEventListener("load", function () {
 
   // The canvas keeps the width the panel is not using, so neither one overlaps or
   // pushes the other, and the document never grows past the window.
+  var reserved = -1;
   function fit() {
     var closed = list.classList.contains("closed");
     // dat.GUI rewrites the caption on every toggle, so ours has to be reapplied here.
     if (closeButton) closeButton.innerHTML = closed ? "Show panel" : "Hide panel";
-    var reserved = closed ? 0 : panel.offsetWidth;
+    var want = closed ? 0 : panel.offsetWidth;
+    // The observer below also fires when the panel grows TALLER, which happens every time
+    // a readout button is added or removed. Resizing the canvas reallocates its drawing
+    // buffer and forces a redraw, so it must only run when the width it reserves moves.
+    if (want === reserved) return;
+    reserved = want;
     document.documentElement.style.setProperty(
-      "--twinlab-panel-width", reserved + "px");
+      "--twinlab-panel-width", want + "px");
     viewer.set_3d_pane_size();
   }
   new ResizeObserver(fit).observe(panel);
@@ -232,7 +238,11 @@ window.addEventListener("load", function () {
     var row = animation.domElement.closest("li");
     // TOGGLE_JS puts the checkbox immediately before this row, so "after" still reads as
     // directly below the animation toggle.
-    if (row && row.parentElement) row.parentElement.insertBefore(overrideRow, row.nextSibling);
+    if (!row || !row.parentElement) return;
+    // This runs on every control message, and moving a row already in place still costs a
+    // forced reflow, so leave it alone once it is where it belongs.
+    if (row.nextSibling === overrideRow) return;
+    row.parentElement.insertBefore(overrideRow, row.nextSibling);
   }
 
   var set_control = viewer.set_control.bind(viewer);
