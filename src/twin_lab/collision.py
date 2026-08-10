@@ -193,21 +193,32 @@ class CollisionModel:
         self.ignored_pairs = ignored_pairs
         self.part_labels = dict(part_labels or {})
         self.context = scene.create_context()
-        self.reopened_joints = self._reopen_anchored_pairs()
+        self.reopened_joints = self._reopen_joint_adjacent_pairs()
         self.refiner = (
             ClearanceRefiner(decomposition_dir) if decomposition_dir is not None else None
         )
 
-    def _reopen_anchored_pairs(self) -> int:
-        """Restore clearance checking between each stage's first moving link and the room.
+    def _reopen_joint_adjacent_pairs(self) -> int:
+        """Restore clearance checking across every joint except the bearing it represents.
 
-        Drake filters the two bodies either side of a joint. The compiled assembly holds
-        the whole static environment in a single anchored body, so that filter also hides
-        every approach between a stage's first moving link and the chamber, the enclosure,
-        or a neighbouring stage. Only the driven stage's own fixed-role geometry is truly
-        adjacent, so that alone stays filtered.
+        Drake filters the two bodies either side of a joint outright, and each of those
+        bodies carries far more than the joint. The parent holds the stage's own rail
+        *and* whatever that rail is bolted to; the child holds the carriage *and*
+        everything riding on it. Two different holes follow, and each needs its own rule.
 
-        Returns the number of joints whose surroundings were reopened.
+        The payload is hidden from the stage it rides on. A part bolted to the carriage
+        can be driven into that stage's own rail, or into the stage below, and the joint
+        does not explain those pairs at all - only the carriage-on-rail bearing.
+
+        The first moving link is hidden from the room, because the compiled assembly holds
+        the whole static environment in one anchored body, so the same filter also hides
+        the chamber, the enclosure and every neighbouring stage.
+
+        What stays filtered is the stage's own structure against the body it is journalled
+        to: a carriage rides its rail, and anything bolted through that interface is in
+        designed contact with it.
+
+        Returns the number of joints that had anything reopened.
         """
 
         from pydrake.geometry import CollisionFilterDeclaration, GeometrySet, Role
@@ -218,30 +229,39 @@ class CollisionModel:
         inspector = scene_graph.model_inspector()
         anchored = {body.name() for body in plant.GetBodiesWeldedTo(plant.world_body())}
 
-        def proximity(body) -> list:
+        def split(body, prefix: str) -> tuple[list, list]:
             frame_id = plant.GetBodyFrameIdOrThrow(body.index())
-            return list(inspector.GetGeometries(frame_id, Role.kProximity))
+            own, rest = [], []
+            for geometry_id in inspector.GetGeometries(frame_id, Role.kProximity):
+                target = own if _leaf(inspector.GetName(geometry_id)).startswith(prefix) else rest
+                target.append(geometry_id)
+            return own, rest
 
         declaration = CollisionFilterDeclaration()
         reopened = 0
         for index in range(plant.num_joints()):
             joint = plant.get_joint(JointIndex(index))
-            if joint.num_positions() == 0 or joint.parent_body().name() not in anchored:
+            if joint.num_positions() == 0:
                 continue
             stage = STAGE_PATTERN.search(joint.name())
             if stage is None:
                 continue
-            own_stage = f"{stage.group(1).lower()}_fixed"
-            moving = proximity(joint.child_body())
-            surroundings = [
-                geometry_id
-                for geometry_id in proximity(joint.parent_body())
-                if not _leaf(inspector.GetName(geometry_id)).startswith(own_stage)
-            ]
-            if not moving or not surroundings:
-                continue
-            declaration.AllowBetween(GeometrySet(moving), GeometrySet(surroundings))
-            reopened += 1
+            token = stage.group(1).lower()
+            rail, below = split(joint.parent_body(), f"{token}_fixed")
+            # Only geometry named as an attachment is payload. The rest of the child is
+            # the stage's own structure - a compound stage names its carriages after the
+            # axis they drive (``a059_y``), not ``moving``, so a role whitelist would
+            # quietly reclassify those bearings as payload and report them every pose.
+            payload, structure = split(joint.child_body(), f"{token}_attachment")
+            pairs = [(rail + below, payload)]
+            if joint.parent_body().name() in anchored:
+                pairs.append((below, structure))
+            allowed = False
+            for first, second in pairs:
+                if first and second:
+                    declaration.AllowBetween(GeometrySet(first), GeometrySet(second))
+                    allowed = True
+            reopened += allowed
         if reopened:
             scene_context = scene_graph.GetMyContextFromRoot(self.context)
             scene_graph.collision_filter_manager(scene_context).Apply(declaration)

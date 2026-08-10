@@ -586,6 +586,17 @@ def _read_manifest_path(
     return _read_manifest(cache_dir / _safe_name(source.stem) / "manifest.json", source, settings)
 
 
+def hull_names(item: Mapping[str, Any]) -> list[str]:
+    """The hull files a manifest entry stands behind, preferring inflated ones.
+
+    ``slac-inflate-hulls`` writes grown copies beside the originals and records them
+    here, so everything downstream picks up the conservative geometry without knowing
+    the pass exists, and deleting the copies puts the raw decomposition straight back.
+    """
+
+    return [str(name) for name in item.get("inflated") or item["hulls"]]
+
+
 def _read_manifest(
     manifest_path: Path, source: Path, settings: DecompositionSettings | PartSettings
 ) -> list[ConvexPart] | None:
@@ -603,7 +614,7 @@ def _read_manifest(
         return None
     parts = []
     for item in manifest["parts"]:
-        hulls = tuple(manifest_path.parent / name for name in item["hulls"])
+        hulls = tuple(manifest_path.parent / name for name in hull_names(item))
         if not all(hull.exists() for hull in hulls):
             return None
         parts.append(ConvexPart(source=source, part_ref=item["part_ref"], hulls=hulls))
