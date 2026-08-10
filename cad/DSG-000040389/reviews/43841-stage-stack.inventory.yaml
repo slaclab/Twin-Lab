@@ -134,6 +134,9 @@ compound_motion_chains:
 # degrees; A049/A054 use the assembly's 180-degree mounting orientation as home.
 joint_limit_overrides:
   A041: {unit: meter, limits: [-0.400, 0.0], home: 0.0}  # EPIX CAD pose is upper endpoint
+  # The jet lift is assembled fully down, so its 8 mm travel runs one way from the CAD
+  # pose and home is the midpoint rather than the CAD pose the other stages use.
+  A004: {unit: meter, limits: [0.0, 0.008], home: 0.004, cad_position: 0.0}
   A045: {unit: degree, limits: [-10, 10]}
   A046: {unit: degree, limits: [-30, 30]}
   A048: {unit: degree, limits: [-10, 10]}

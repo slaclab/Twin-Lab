@@ -139,12 +139,22 @@ class ClearanceRefiner:
         self.cache_dir = Path(cache_dir)
         self.seed = seed
         self._parts = _index_parts(self.cache_dir)
+        # A refiner that indexed nothing still answers every call, with ``None`` each time,
+        # and a ``None`` correction leaves the hull distance standing. The report then reads
+        # as CAD-verified while carrying a millimetre or two of decomposition error.
+        if not self._parts:
+            raise FileNotFoundError(f"No decomposition manifests under {self.cache_dir}")
         self._meshes: dict[str, tuple[np.ndarray, np.ndarray]] = {}
         self._hulls: dict[str, tuple[np.ndarray, ...]] = {}
         self._bulge: dict[str, np.ndarray | None] = {}
 
     def __len__(self) -> int:
         return len(self._parts)
+
+    def part_refs(self) -> tuple[str, ...]:
+        """Every reviewed part with a cached tessellation behind its hulls."""
+
+        return tuple(sorted(self._parts))
 
     def refine(
         self,
@@ -221,14 +231,14 @@ class ClearanceRefiner:
         pose: np.ndarray | None,
         radius_m: float,
     ) -> tuple[np.ndarray, np.ndarray] | None:
-        mesh = self._part_mesh(part_ref)
+        mesh = self.part_mesh(part_ref)
         if mesh is None or pose is None or witness_m is None:
             return None
         vertices, faces = mesh
         world = vertices @ pose[:3, :3].T + pose[:3, 3]
         return world, triangles_near(world, faces, witness_m, radius_m)
 
-    def _part_mesh(self, part_ref: str) -> tuple[np.ndarray, np.ndarray] | None:
+    def part_mesh(self, part_ref: str) -> tuple[np.ndarray, np.ndarray] | None:
         """The reviewed part's own triangles, in the frame its hulls were cut from."""
 
         if part_ref in self._meshes:

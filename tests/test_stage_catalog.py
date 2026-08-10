@@ -9,6 +9,7 @@ from twin_lab.stage_cad_viewer import (
     _is_fastener_name,
     _joint_displacement,
     _joint_origin_m,
+    _reviewed_cad_position,
     _reviewed_home,
     _reviewed_limits,
     _rotate_vector,
@@ -220,6 +221,15 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
         0.0,
     ]
     assert _reviewed_home(inventory, "A041", "A041") == 0.0
+    # The jet lift is assembled at the bottom of its stroke, so home is the midpoint and
+    # the CAD pose it was meshed at is the lower endpoint, not the home.
+    assert _reviewed_limits(inventory, "A004", "A004", stages["kohzu_za05a_w101_bm"]["limits"]) == [
+        0.0,
+        0.008,
+    ]
+    assert _reviewed_home(inventory, "A004", "A004") == 0.004
+    assert _reviewed_cad_position(inventory, "A004", "A004") == 0.0
+    assert _reviewed_cad_position(inventory, "A041", "A041") == 0.0
     assert inventory["joint_limit_overrides"]["A049"] == {
         "unit": "degree",
         "limits": [150, 210],

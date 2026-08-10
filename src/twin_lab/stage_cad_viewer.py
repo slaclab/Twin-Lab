@@ -291,7 +291,7 @@ def prepare_stage_cad(
                         inventory, item["ref"], item["ref"], stage["limits"]
                     ),
                     "home": _reviewed_home(inventory, item["ref"], item["ref"]),
-                    "cad_position": _reviewed_home(inventory, item["ref"], item["ref"]),
+                    "cad_position": _reviewed_cad_position(inventory, item["ref"], item["ref"]),
                 }
             )
         motion_chains.append({"name": str(chain_name), "joints": joints})
@@ -580,6 +580,21 @@ def _reviewed_home(inventory: dict[str, Any], key: str, stage_ref: str) -> float
     override = overrides.get(key, overrides.get(stage_ref, {}))
     home = float(override.get("home", 0.0))
     return math.radians(home) if override.get("unit") == "degree" else home
+
+
+def _reviewed_cad_position(inventory: dict[str, Any], key: str, stage_ref: str) -> float:
+    """Where the CAD pose sits on the joint, which is the home unless a review says otherwise.
+
+    A stage assembled at one end of its stroke has a home the CAD pose cannot supply, and the
+    meshes are baked at the CAD pose, so the two have to be stated separately.
+    """
+
+    overrides = inventory.get("joint_limit_overrides", {})
+    override = overrides.get(key, overrides.get(stage_ref, {}))
+    if "cad_position" not in override:
+        return _reviewed_home(inventory, key, stage_ref)
+    position = float(override["cad_position"])
+    return math.radians(position) if override.get("unit") == "degree" else position
 
 
 def _slider_label(joint: dict[str, Any], unit: str) -> str:
