@@ -29,7 +29,7 @@ from OCP.XCAFDoc import XCAFDoc_DocumentTool, XCAFDoc_ShapeTool
 from .paths import CACHE_ROOT, REPOSITORY_ROOT, resolve_repo_path
 
 SUPPORTED_STEP_SUFFIXES = {".stp", ".step"}
-REF_TOKEN = re.compile(r"\b[AP]\d{3}\b")
+REF_TOKEN = re.compile(r"\b[AP]\d{3,}\b")
 
 
 def extract_cad_manifest(step_path: str | Path) -> dict[str, Any]:
