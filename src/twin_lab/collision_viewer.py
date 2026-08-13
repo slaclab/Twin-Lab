@@ -55,9 +55,24 @@ HIGHLIGHT_GROUP = "clearance"
 DEFAULT_TOP_RGB = [0.53, 0.81, 0.98]
 DEFAULT_BOTTOM_RGB = [0.10, 0.10, 0.44]
 OFFENDER_LIMIT = 12
-# The signed-distance query costs ~30 ms, so running it every animated frame would cap the
-# loop near 30 fps; throttle it to this rate so the render can reach the requested fps.
-DETECTOR_HZ = 20.0
+# The signed-distance query measures 49 ms on the 43841 package, so a 20 Hz throttle never
+# engaged and every frame paid for it. Held well under the achievable rate so the render
+# keeps a budget of its own.
+DETECTOR_HZ = 10.0
+# A fixed ceiling cannot keep the query out of the render's way on its own, because the
+# query grows with the assembly: the same pass now measures ~75 ms over 5382 geometries,
+# which at 10 Hz would eat three quarters of every second and leave the motion at half
+# frame rate. Each pass must instead be followed by this multiple of its own measured cost
+# before the next one, which holds it to 1/(1+DETECT_DUTY) of the loop whatever it costs.
+DETECT_DUTY = 3.0
+# Republishing the offender buttons is by far the most expensive thing this viewer sends:
+# Drake destroys and recreates a dat.GUI row per label, and the panel hooks reflow on each
+# one. While animating, the offending pairs change every frame, which measured 25 control
+# rebuilds a frame - enough to bury the browser under a message backlog minutes deep.
+READOUT_HZ = 2.0
+# The sliders report the animated pose rather than drive it, so they only have to keep up
+# with the eye; pushing all 22 every frame costs a dat.GUI redraw each.
+SLIDER_PUSH_HZ = 5.0
 # Measuring the tessellated parts costs 5-240 ms a pair, far too much to drag a slider
 # through. It waits for the pose to hold still this long; until then the reading is the
 # hull distance with only the proudness correction, which errs towards reporting contact.
@@ -204,6 +219,8 @@ def run_collision_viewer(
 
     frame_period = 1.0 / max(fps, 1.0)
     detector_period = 1.0 / DETECTOR_HZ
+    readout_period = 1.0 / READOUT_HZ
+    slider_period = 1.0 / SLIDER_PUSH_HZ
     reset_clicks = 0
     isometric_clicks = 0
     log_clicks = 0
@@ -217,8 +234,15 @@ def run_collision_viewer(
     readout: list[str] = []
     previous_summary = ""
     last_detect = 0.0
+    next_detect = 0.0
+    last_readout = 0.0
+    last_slider_push = 0.0
     settled_at = 0.0
     mesh_pending = False
+    detect_pending = False
+    pending_report = None
+    assembly_bounds: tuple[np.ndarray, np.ndarray] | None = None
+    values = [joint.slider_bounds()[2] for joint in joints]
     while meshcat.GetButtonClicks("Stop viewer") == 0:
         tick = time.monotonic()
         elapsed = tick - previous_tick
@@ -233,13 +257,18 @@ def run_collision_viewer(
             wanted_animating = False
             meshcat.SetSliderValue(ANIMATION_LABEL, 0.0)
             phase = 0.0
-            for joint in joints:
-                meshcat.SetSliderValue(joint.label, joint.slider_bounds()[2])
+            values = [joint.slider_bounds()[2] for joint in joints]
+            _push_sliders(meshcat, joints, values)
 
         new_isometric = meshcat.GetButtonClicks(ISOMETRIC_LABEL)
         if new_isometric != isometric_clicks:
             isometric_clicks = new_isometric
-            _look_isometric(meshcat, model)
+            # Measuring every hull takes the best part of a second, which stalls the loop
+            # long enough to swallow whatever is clicked next. The framing only has to
+            # contain the assembly, so the first measurement is kept.
+            if assembly_bounds is None:
+                assembly_bounds = _assembly_bounds(model)
+            _look_isometric(meshcat, assembly_bounds)
 
         if (wanted_collision, wanted_animating, wanted_show_all) != (
             collision_on,
@@ -248,10 +277,15 @@ def run_collision_viewer(
         ):
             if wanted_collision != collision_on:
                 print(f"Collision detection {'ON' if wanted_collision else 'OFF'}.")
+            if animating and not wanted_animating:
+                # The sliders only catch up a few times a second while animating, so hand
+                # them the pose that is actually on screen before they become the input.
+                _push_sliders(meshcat, joints, values)
             if not wanted_collision:
                 _reset_status(meshcat)
                 highlighter.clear()
                 readout = _clear_readout(meshcat, readout)
+                pending_report = None
             if not wanted_collision or wanted_show_all:
                 highlighter.isolate(False)
             collision_on, animating, show_all = (
@@ -262,18 +296,24 @@ def run_collision_viewer(
             previous_pose = None
             previous_status = None
             previous_summary = ""
+            last_readout = 0.0
 
         if animating:
             period = max(meshcat.GetSliderValue(AUTO_PERIOD_LABEL), 0.1)
             span_fraction = meshcat.GetSliderValue(AUTO_RANGE_LABEL) / 100.0
             phase = math.fmod(phase + 2.0 * math.pi * elapsed / period, 2.0 * math.pi)
+            values = []
             for index, joint in enumerate(joints):
                 lower, upper, home = joint.slider_bounds()
                 amplitude = max(min(home - lower, upper - home), 0.0) * span_fraction
                 offset = 2.0 * math.pi * index / max(len(joints), 1)
-                meshcat.SetSliderValue(joint.label, home + amplitude * math.sin(phase + offset))
+                values.append(home + amplitude * math.sin(phase + offset))
+            if tick - last_slider_push >= slider_period:
+                last_slider_push = tick
+                _push_sliders(meshcat, joints, values)
+        else:
+            values = [meshcat.GetSliderValue(joint.label) for joint in joints]
 
-        values = [meshcat.GetSliderValue(joint.label) for joint in joints]
         warn_m = max(meshcat.GetSliderValue(WARN_LABEL), 0.0) / 1000.0
         verify_on = model.refiner is not None and meshcat.GetSliderValue(VERIFY_LABEL) >= 0.5
         new_log = meshcat.GetButtonClicks("Log clearance report")
@@ -284,8 +324,7 @@ def run_collision_viewer(
             previous_pose = pose
             settled_at = tick + VERIFY_SETTLE_S
             mesh_pending = verify_on and collision_on
-        mesh_due = mesh_pending and not animating and tick >= settled_at
-        if moved or asked or mesh_due:
+            detect_pending = True
             model.set_positions(
                 {
                     joint.joint_name: joint.to_sdf(value)
@@ -293,37 +332,67 @@ def run_collision_viewer(
                 }
             )
             scene.diagram.ForcedPublish(model.context)
-            # The render above runs every frame; the query below is throttled so its cost
-            # stutters the detector rather than the motion.
-            detect_due = not animating or asked or tick - last_detect >= detector_period
-            if collision_on and detect_due:
-                last_detect = tick
-                report = model.report(warn_m=warn_m)
-                refinements = ()
-                if verify_on:
-                    with_mesh = mesh_due or asked
-                    mesh_pending = not with_mesh
-                    report, refinements = model.verify(
-                        report, limit=OFFENDER_LIMIT, with_mesh=with_mesh
-                    )
-                if report.status != previous_status:
-                    previous_status = report.status
-                    _set_status(meshcat, report.status)
-                selected = None if show_all else _isolated_parts(report)
-                highlighter.isolate(selected is not None)
-                highlighter.update(report, selected)
-                readout = _set_offender_readout(meshcat, report, readout, show_all=show_all)
-                if new_log != log_clicks:
-                    log_clicks = new_log
-                    _print_report(report)
-                    _print_refinements(refinements)
-                elif report.summary() != previous_summary:
-                    previous_summary = report.summary()
-                    print(report.summary())
-            elif not collision_on:
+        mesh_due = mesh_pending and not animating and tick >= settled_at
+        # The render above runs every frame; the query is throttled so its cost stutters the
+        # detector rather than the motion. Dragging a slider by hand moves the pose every
+        # frame just as the animation does, so the throttle has to cover both; the pending
+        # flag carries the last pose forward so the reading still catches up once it stops.
+        detect_due = asked or mesh_due or (detect_pending and tick >= next_detect)
+        if collision_on and detect_due:
+            detect_pending = False
+            last_detect = tick
+            report = model.report(warn_m=warn_m)
+            refinements = ()
+            if verify_on:
+                with_mesh = mesh_due or asked
+                mesh_pending = not with_mesh
+                report, refinements = model.verify(
+                    report, limit=OFFENDER_LIMIT, with_mesh=with_mesh
+                )
+            if report.status != previous_status:
+                previous_status = report.status
+                _set_status(meshcat, report.status)
+            selected = None if show_all else _isolated_parts(report)
+            highlighter.isolate(selected is not None)
+            highlighter.update(report, selected)
+            pending_report = report
+            if new_log != log_clicks:
                 log_clicks = new_log
+                _print_report(report)
+                _print_refinements(refinements)
+            elif report.summary() != previous_summary:
+                previous_summary = report.summary()
+                print(report.summary())
+            detect_cost = time.monotonic() - last_detect
+            next_detect = time.monotonic() + max(detector_period, DETECT_DUTY * detect_cost)
+        elif not collision_on:
+            log_clicks = new_log
+        # Republishing the labels is the most expensive thing this viewer sends, so it is
+        # rate limited against every pose source and then flushed from whichever report is
+        # newest - publishing in the detect block instead would leave the settled pose
+        # showing the readout of the pose before it.
+        if pending_report is not None and (asked or tick - last_readout >= readout_period):
+            last_readout = tick
+            readout = _set_offender_readout(meshcat, pending_report, readout, show_all=show_all)
+            pending_report = None
+        # Backpressure. Meshcat buffers without limit, so a loop that publishes faster than
+        # the browser can draw builds a queue that never drains - and a stop request cannot
+        # be seen until the browser has chewed through it. Waiting for the send to land caps
+        # this loop at the rate the viewer can actually keep up with.
+        meshcat.Flush()
         frame_cost = time.monotonic() - tick
-        time.sleep(max(0.0, frame_period - frame_cost) if animating else 0.1)
+        # The loop paces at the frame rate whether or not it is animating: input is only
+        # looked at once around, so a slower idle pace is also the delay before a click or
+        # a slider step is noticed, and an idle pass is only a handful of map lookups.
+        time.sleep(max(0.0, frame_period - frame_cost))
+
+    # Releasing thousands of collision geometries takes seconds and says nothing while it
+    # runs, which reads as the stop request having been missed.
+    print("Stopping; releasing the collision geometry takes a few seconds.")
+
+def _push_sliders(meshcat, joints: list[SliderJoint], values: list[float]) -> None:
+    for joint, value in zip(joints, values, strict=True):
+        meshcat.SetSliderValue(joint.label, value)
 
 
 def _reset_status(meshcat) -> None:
@@ -573,9 +642,8 @@ def _assembly_bounds(model: CollisionModel) -> tuple[np.ndarray, np.ndarray] | N
     return None if not np.isfinite(lower).all() else (lower, upper)
 
 
-def _look_isometric(meshcat, model: CollisionModel) -> None:
+def _look_isometric(meshcat, bounds: tuple[np.ndarray, np.ndarray] | None) -> None:
     """Point the camera at the whole assembly from the corner diagonal."""
-    bounds = _assembly_bounds(model)
     if bounds is None:
         print("Nothing to frame: the plant has no collision geometry.")
         return

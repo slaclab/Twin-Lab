@@ -50,6 +50,8 @@ slac-compile-sdf = "twin_lab.sdf_compiler:main"
 slac-collision = "twin_lab.collision_viewer:main"
 slac-decompose = "twin_lab.convex_collision:main"
 slac-hull-audit = "twin_lab.hull_audit:main"
+slac-accuracy = "twin_lab.accuracy:main"
+slac-inflate-hulls = "twin_lab.hull_inflation:main"
 slac-view = "twin_lab.scene:main"
 slac-refresh-43841 = "twin_lab.update_43841_step:main"
 

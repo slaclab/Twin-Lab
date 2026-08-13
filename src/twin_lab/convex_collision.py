@@ -144,6 +144,71 @@ def read_obj_parts(path: Path) -> list[ObjPart]:
     return parts
 
 
+def read_part_refs(path: Path) -> list[str]:
+    """Part refs in the same order and indexing as :func:`read_obj_parts`, without geometry.
+
+    Faceless groups are dropped there too, so a ref's position here is the index a
+    cache marker uses.
+    """
+
+    refs: list[str] = []
+    current = path.stem
+    faces = 0
+    for line in path.read_text(encoding="ascii").splitlines():
+        if line.startswith("o "):
+            if faces:
+                refs.append(current)
+            current = line[2:].strip() or path.stem
+            faces = 0
+        elif line.startswith("f "):
+            faces += 1
+    if faces:
+        refs.append(current)
+    return refs
+
+
+def invalidate_parts(cache_dir: Path, source: Path, indices: Iterable[int]) -> int:
+    """Drop cached hulls for named sub-parts so the next run re-runs CoACD on them.
+
+    The manifest goes too: it vouches for the whole source, so leaving it would make
+    :func:`decompose_sources` return the stale list without dispatching anything.
+    """
+
+    part_dir = cache_dir / _safe_name(source.stem)
+    if not part_dir.exists():
+        return 0
+    (part_dir / "manifest.json").unlink(missing_ok=True)
+    removed = 0
+    for index in indices:
+        marker = part_dir / f"part{index:04d}.json"
+        if not marker.exists():
+            continue
+        try:
+            payload = json.loads(marker.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            payload = {}
+        item = payload.get("part")
+        for name in (item or {}).get("hulls", []):
+            (part_dir / name).unlink(missing_ok=True)
+        marker.unlink()
+        removed += 1
+    return removed
+
+
+def cached_hull_count(cache_dir: Path, source: Path, index: int) -> int | None:
+    """Hulls recorded for one sub-part, or None when nothing is cached for it."""
+
+    marker = cache_dir / _safe_name(source.stem) / f"part{index:04d}.json"
+    if not marker.exists():
+        return None
+    try:
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    item = payload.get("part")
+    return 0 if item is None else len(item.get("hulls", []))
+
+
 def decompose_source(
     source: Path,
     cache_dir: Path,
@@ -521,6 +586,17 @@ def _read_manifest_path(
     return _read_manifest(cache_dir / _safe_name(source.stem) / "manifest.json", source, settings)
 
 
+def hull_names(item: Mapping[str, Any]) -> list[str]:
+    """The hull files a manifest entry stands behind, preferring inflated ones.
+
+    ``slac-inflate-hulls`` writes grown copies beside the originals and records them
+    here, so everything downstream picks up the conservative geometry without knowing
+    the pass exists, and deleting the copies puts the raw decomposition straight back.
+    """
+
+    return [str(name) for name in item.get("inflated") or item["hulls"]]
+
+
 def _read_manifest(
     manifest_path: Path, source: Path, settings: DecompositionSettings | PartSettings
 ) -> list[ConvexPart] | None:
@@ -538,7 +614,7 @@ def _read_manifest(
         return None
     parts = []
     for item in manifest["parts"]:
-        hulls = tuple(manifest_path.parent / name for name in item["hulls"])
+        hulls = tuple(manifest_path.parent / name for name in hull_names(item))
         if not all(hull.exists() for hull in hulls):
             return None
         parts.append(ConvexPart(source=source, part_ref=item["part_ref"], hulls=hulls))
@@ -585,25 +661,152 @@ def _safe_name(value: str) -> str:
     return re.sub(r"[^0-9A-Za-z]+", "_", value).strip("_").lower() or "part"
 
 
+def _resolve_scene(source: str | Path) -> tuple[Path, dict[str, Any]]:
+    """Accept either a reviewed inventory or an already prepared scene.yaml."""
+
+    import yaml
+
+    from .paths import resolve_repo_path
+
+    path = resolve_repo_path(source)
+    document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if str(document.get("schema", "")).startswith("slac-stage-cad-scene/"):
+        return path, document
+    from .stage_cad_viewer import prepare_stage_cad
+
+    scene_path = prepare_stage_cad(path)
+    return scene_path, yaml.safe_load(scene_path.read_text(encoding="utf-8"))
+
+
+def _override_snippet(refs: Iterable[str], resolver: PartSettings) -> str:
+    """The YAML to paste into the inventory so a tweak survives the next compile."""
+
+    grouped: dict[DecompositionSettings, list[str]] = {}
+    for ref in sorted(set(refs)):
+        grouped.setdefault(resolver.for_part(ref), []).append(ref)
+    lines = ["decomposition:", "  overrides:"]
+    for settings, group in grouped.items():
+        lines += [
+            f"    - refs: [{', '.join(group)}]",
+            f"      threshold: {settings.threshold}",
+            f"      max_hulls: {settings.max_hulls}",
+            f"      seed: {settings.seed}",
+            "      reason: <why these parts need different hulls>",
+        ]
+    return "\n".join(lines)
+
+
 def main() -> None:
     import argparse
 
     from .paths import CACHE_ROOT
+    from .sdf_compiler import _build_tree, _read_decomposition_config
 
-    parser = argparse.ArgumentParser(description="Convex-decompose cached stage CAD meshes")
-    parser.add_argument("meshes", nargs="+", help="Cached OBJ files to decompose")
-    parser.add_argument("--threshold", type=float, default=0.05)
-    parser.add_argument("--max-hulls", type=int, default=32)
+    parser = argparse.ArgumentParser(
+        description="Regenerate CoACD convex hulls for selected reviewed parts",
+        epilog="Cached hulls are reused unless --force or a changed setting invalidates them.",
+    )
+    parser.add_argument("source", help="Stage inventory YAML or prepared stage-cad scene.yaml")
+    parser.add_argument("--part", default=None, help="Regular expression matching part refs")
+    parser.add_argument("--mesh", default=None, help="Regular expression matching source OBJ stems")
+    parser.add_argument("--threshold", type=float, default=None, help="CoACD concavity threshold")
+    parser.add_argument("--max-hulls", type=int, default=None, help="CoACD convex hull cap")
+    parser.add_argument("--seed", type=int, default=None, help="CoACD random seed")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-run CoACD even when the cache is valid; needs --part or --mesh",
+    )
     parser.add_argument("--workers", type=int, default=None)
+    parser.add_argument(
+        "--dry-run", action="store_true", help="List the selected parts and settings, then stop"
+    )
     args = parser.parse_args()
 
-    settings = replace(DEFAULT_SETTINGS, threshold=args.threshold, max_hulls=args.max_hulls)
+    if args.force and not (args.part or args.mesh):
+        parser.error("--force needs --part or --mesh; a full rebuild takes hours")
+
+    scene_path, scene = _resolve_scene(args.source)
+    cache_dir = CACHE_ROOT / "convex-collision" / scene_path.parent.name
+    base = part_settings_from_config(_read_decomposition_config(scene))
+    links, _ = _build_tree(scene, scene_path)
+
+    part_pattern = re.compile(args.part) if args.part else None
+    mesh_pattern = re.compile(args.mesh) if args.mesh else None
+    selected: dict[Path, list[tuple[int, str]]] = {}
+    for source in sorted({mesh for link in links for _, mesh, _ in link.meshes}):
+        if mesh_pattern and not mesh_pattern.search(source.stem):
+            continue
+        matches = [
+            (index, ref)
+            for index, ref in enumerate(read_part_refs(source))
+            if part_pattern is None or part_pattern.search(ref)
+        ]
+        if matches:
+            selected[source] = matches
+    if not selected:
+        parser.error("no reviewed part matched; check --part and --mesh")
+
+    changes = {
+        name: value
+        for name, value in (
+            ("threshold", args.threshold),
+            ("max_hulls", args.max_hulls),
+            ("seed", args.seed),
+        )
+        if value is not None
+    }
+    resolver = base
+    chosen_refs = [ref for matches in selected.values() for _, ref in matches]
+    if changes:
+        overrides = dict(base.overrides)
+        for ref in chosen_refs:
+            overrides[ref] = replace(base.for_part(ref), **changes)
+        resolver = PartSettings(base.default, overrides)
+
+    print(f"{len(chosen_refs)} parts in {len(selected)} meshes under {cache_dir}")
+    for source, matches in selected.items():
+        for index, ref in matches:
+            settings = resolver.for_part(ref)
+            cached = cached_hull_count(cache_dir, source, index)
+            state = "uncached" if cached is None else f"{cached} hulls"
+            print(
+                f"  {source.stem}[{index}] {ref}: {state}, "
+                f"threshold {settings.threshold}, max_hulls {settings.max_hulls}"
+            )
+    if changes:
+        print(
+            "\nThese settings are not recorded in the reviewed inventory, so the next "
+            "slac-compile-sdf will regenerate these parts at the inventory's settings.\n"
+            "Paste this into the inventory's decomposition block to keep them:\n\n"
+            + _override_snippet(chosen_refs, resolver)
+            + "\n"
+        )
+    if args.dry_run:
+        return
+
+    before = {
+        (source, ref): cached_hull_count(cache_dir, source, index)
+        for source, matches in selected.items()
+        for index, ref in matches
+    }
+    if args.force:
+        dropped = sum(
+            invalidate_parts(cache_dir, source, [index for index, _ in matches])
+            for source, matches in selected.items()
+        )
+        print(f"Invalidated {dropped} cached parts")
+
     results = decompose_sources(
-        [Path(mesh) for mesh in args.meshes],
-        CACHE_ROOT / "convex-collision",
-        settings,
-        workers=args.workers,
-        progress=True,
+        selected, cache_dir, resolver, workers=args.workers, progress=True
     )
-    total = sum(len(part.hulls) for parts in results.values() for part in parts)
-    print(f"{len(results)} meshes -> {total} convex hulls")
+    total = 0
+    for source, parts in results.items():
+        for part in parts:
+            if (source, part.part_ref) not in before:
+                continue
+            total += len(part.hulls)
+            was = before[(source, part.part_ref)]
+            if was != len(part.hulls):
+                print(f"  {source.stem} {part.part_ref}: {was} -> {len(part.hulls)} hulls")
+    print(f"{len(chosen_refs)} parts -> {total} convex hulls")

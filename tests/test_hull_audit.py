@@ -229,12 +229,27 @@ def test_cache_is_discarded_when_its_inputs_moved(tmp_path):
 
 
 def test_audit_key_tracks_the_mesh_the_hulls_and_the_seed():
-    manifest = {"source_sha256": "aa", "source_size": 10, "parts_settings_sig": "sig"}
+    manifest = {
+        "source_sha256": "aa",
+        "source_size": 10,
+        "parts_settings_sig": "sig",
+        "parts": [{"part_ref": "P001", "hulls": ["p001_000.obj"]}],
+    }
     base = _audit_key(manifest, 0)
     assert _audit_key(dict(manifest), 0) == base
     assert _audit_key({**manifest, "source_sha256": "bb"}, 0) != base
     assert _audit_key({**manifest, "parts_settings_sig": "other"}, 0) != base
     assert _audit_key(manifest, 1) != base
+
+
+def test_audit_key_moves_when_a_part_swaps_to_inflated_hulls():
+    """Inflation leaves the source and the CoACD settings alone, so a key built from
+    those alone would replay the pre-inflation gaps and hide whether the pass worked."""
+
+    part = {"part_ref": "P001", "hulls": ["p001_000.obj"]}
+    manifest = {"source_sha256": "aa", "source_size": 10, "parts": [part]}
+    grown = {**part, "inflated": ["p001_000_inflated.obj"]}
+    assert _audit_key({**manifest, "parts": [grown]}, 0) != _audit_key(manifest, 0)
 
 
 def test_tour_labels_count_from_one_and_carry_every_metric():

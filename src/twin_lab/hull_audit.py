@@ -20,7 +20,7 @@ from typing import Any
 
 import numpy as np
 
-from .convex_collision import _content_matches, read_obj_parts
+from .convex_collision import _content_matches, hull_names, read_obj_parts
 from .paths import CACHE_ROOT, resolve_repo_path
 
 MM_PER_M = 1000.0
@@ -76,6 +76,8 @@ DEFAULT_BULGE_SCALE_MM = 2.0
 AUDIT_CACHE_NAME = "audit.npz"
 # Bump when a measurement changes meaning, so old numbers are redone rather than trusted.
 AUDIT_SCHEMA = 1
+# Exact gaps hold a point-by-triangle array, so they are measured a block at a time.
+GAP_CHUNK = 512
 
 
 @dataclass(frozen=True)
@@ -221,6 +223,37 @@ def outside_distance(hulls: Sequence[Hull], points: np.ndarray) -> np.ndarray:
     return np.maximum(per_hull.min(axis=1), 0.0)
 
 
+def surface_gap(hulls: Sequence[Hull], points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Exact distance from each point to the nearest hull, and which hull that is.
+
+    ``outside_distance`` measures to the nearest face *plane*, which falls short of the
+    truth whenever the closest feature is an edge or a corner. That understatement is
+    harmless when reporting a gap - it never overstates the missing material - but it is
+    not safe to inflate by, because growing a hull by the plane distance can still leave
+    the point outside. Points inside a hull report zero distance and hull ``-1``.
+    """
+
+    distance = np.zeros(len(points))
+    nearest = np.full(len(points), -1, dtype=np.int64)
+    if not hulls or len(points) == 0:
+        return distance, nearest
+    outside = np.flatnonzero(outside_distance(hulls, points) > 0.0)
+    for start in range(0, len(outside), GAP_CHUNK):
+        block = outside[start : start + GAP_CHUNK]
+        query = points[block][:, None, :]
+        best = np.full(len(block), np.inf)
+        owner = np.full(len(block), -1, dtype=np.int64)
+        for index, hull in enumerate(hulls):
+            corners = tuple(hull.vertices[hull.faces[:, axis]] for axis in range(3))
+            closest = _closest_on_triangle(query, *corners)
+            span = np.linalg.norm(closest - query, axis=2).min(axis=1)
+            owner = np.where(span < best, index, owner)
+            best = np.minimum(best, span)
+        distance[block] = best
+        nearest[block] = owner
+    return distance, nearest
+
+
 def surface_distance(points: np.ndarray, vertices: np.ndarray, faces: np.ndarray) -> np.ndarray:
     """Signed distance from each point to the mesh: positive outside, negative inside.
 
@@ -359,7 +392,7 @@ def audit_cache(
         if not _content_matches(manifest, source):
             print(f"  warning: {source.name} changed since it was decomposed; audit is stale")
         entries = {
-            str(item["part_ref"]): item["hulls"]
+            str(item["part_ref"]): hull_names(item)
             for item in manifest["parts"]
             if matcher is None or matcher.search(str(item["part_ref"]))
         }
@@ -420,6 +453,12 @@ def _audit_key(manifest: dict[str, Any], seed: int) -> str:
             "source_sha256": manifest.get("source_sha256"),
             "source_size": manifest.get("source_size"),
             "parts_settings_sig": manifest.get("parts_settings_sig"),
+            # Named explicitly: inflation swaps the hulls without touching the source or
+            # the CoACD settings, so a key built from those alone replays stale numbers
+            # and the pass looks like it did nothing.
+            "hulls": {
+                str(item["part_ref"]): hull_names(item) for item in manifest.get("parts", [])
+            },
             "seed": seed,
             "overlap_samples": OVERLAP_SAMPLES,
         },
