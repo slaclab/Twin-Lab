@@ -7,7 +7,7 @@ reviewed YAML overlay.
 
 ## Project files
 
-Each drawing has one directory:
+Each source assembly has one directory:
 
 ```text
 cad/DSG-000040389/
@@ -38,7 +38,7 @@ Preview only the active `*43841` subassembly:
 
 ```bash
 slac-cad-manifest cad/DSG-000040389/source.stp \
-  --view --focus A035 --manifest-only
+  --view --focus A037 --manifest-only
 ```
 
 Preview only the cataloged stage occurrences:
@@ -69,7 +69,7 @@ in the assembly review, because they change with the STEP revision.
 ## Test motion
 
 ```bash
-python -m twin_lab.stage_cad_viewer \
+uv run slac-stage-cad \
   cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
 ```
 
@@ -100,15 +100,13 @@ If the STEP, manifest, inventory, or catalog changes, the cache is rebuilt. Use
 For the current `DSG-000040389` review, use the dedicated helper:
 
 ```bash
-source .venv/bin/activate
-python -m twin_lab.update_43841_step --rebuild-viewer-cache
+uv run slac-refresh-43841 --rebuild-viewer-cache
 ```
 
 Or, if the replacement STEP is not yet inside the repo:
 
 ```bash
-source .venv/bin/activate
-python -m twin_lab.update_43841_step /path/to/new/DSG-000040389.stp --rebuild-viewer-cache
+uv run slac-refresh-43841 /path/to/new/DSG-000040389.stp --rebuild-viewer-cache
 ```
 
 This helper:
@@ -199,7 +197,7 @@ only the collision geometry is split per reviewed part.
 Collision geometry is built one of two ways, selected by `--collision-mode`:
 
 - `hull` wraps each merged mesh in a single convex hull. It compiles in seconds but
-  inflates part volume by 1.65x-2.93x, and a hollow part such as the `A037` enclosure
+  inflates part volume by 1.65x-2.93x, and a hollow part such as the `A036` enclosure
   becomes solid. At the home pose this mode reports 112 touching pairs that are
   entirely artefacts of hull inflation, so it is not usable for clearance review.
 - `convex` (the default for `slac-collision`) runs CoACD on each part and emits one
@@ -207,9 +205,10 @@ Collision geometry is built one of two ways, selected by `--collision-mode`:
   drops to roughly 1.4x-1.5x, and the residual is mostly filled bolt holes rather than
   spanned external concavity.
 
-Decomposing the full `43841` assembly (215 sub-parts, 1.2 M triangles) measured 34
-minutes on a 12-core Xeon W-2265. A triangles-per-second figure does not predict that
-well, because per-part setup dominates: the median part is about 1,400 triangles, while
+Decomposing the full `43841` assembly -- 187 sub-parts and 1.0 M triangles at the
+current revision -- costs tens of minutes: 34 minutes measured on a 12-core Xeon
+W-2265, and roughly an hour on an 8-core i9-11950H running 12 workers. A
+triangles-per-second figure does not predict that well, because per-part setup dominates: the median part is about 1,400 triangles, while
 spawning a worker and running CoACD's size-independent search costs the equivalent of
 roughly 15,000. Results are cached under `.cache/twin_lab/convex-collision/` keyed by
 source mtime, size, and settings, so the full assembly is a one-time cost and
@@ -283,7 +282,7 @@ the solid, with a true outward bulge of 0.28 mm. Signing the distance moved the 
 worst-case bulge from 1.61 mm to 0.69 mm and the 90th percentile from 5.51 mm to
 1.96 mm across the assembly.
 
-Auditing all 215 parts of the `43841` assembly measured 3.5 minutes and reported 1.536x
+Auditing every part of the `43841` assembly measured 3.5 minutes and reported 1.536x
 volume overall, median 1.229 per part, worst 2.688, with the largest gap at 0.45 mm,
 below the 0.5 mm tessellation deflection, so no part is meaningfully undersized. Bulge
 runs 0.69 mm at the median, 1.96 mm at the 90th percentile and 7.39 mm at the worst,
@@ -308,9 +307,12 @@ Work is dispatched per sub-part rather than per file, longest first, so one larg
 cannot set the makespan. Each finished sub-part writes a resume marker, so a build that
 is interrupted picks up where it stopped instead of starting over.
 
-Budget memory before raising `--decomposition-workers`. Each CoACD worker peaks around
-2.5 GB on the larger meshes, and because the longest parts start first, the biggest
-meshes decompose concurrently. On a 15 GB machine 8 workers exhausts RAM; 4 is safe.
+Budget memory before raising `--decomposition-workers`. Because the longest parts start
+first, the biggest meshes decompose concurrently, so peak memory lands early in the run.
+Measured on this assembly, a worker holds 0.5-1.2 GB, and 12 workers ran at about 8 GB
+combined on a 16 GB machine without touching swap. Cores bind before memory does: CoACD
+is single-threaded per part, so workers past the physical core count only queue, and one
+oversized part sets the tail of the run no matter how many workers are free.
 
 Drake filters collision pairs automatically at `Finalize()` for bodies joined by a
 joint and for bodies welded into the same subgraph, so each stage's own fixed and
@@ -319,9 +321,13 @@ moving halves need no manual filter. Pairs that touch by design belong in the
 
 ```yaml
 ignored_pairs:
-  - pair: [A050, A037]
-    reason: cable tray passes through the reviewed envelope
+  - pair: [P759, P784]
+    reason: cable-carrier bracket sits flush on the detector adapter at home
 ```
+
+Both entries must be leaf part references (`P###`). Collision geometry is split per
+reviewed part, so an assembly reference such as `A037` matches no geometry and the
+filter silently never fires.
 
 Use `--ignore-file` only to try an alternative list without editing the review.
 
