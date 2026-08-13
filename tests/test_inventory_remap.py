@@ -172,3 +172,71 @@ reviewed_connections:
     assert "occurrence_count: 4" in text
     assert "assembly_count: 3" in text
     assert "leaf_part_count: 1" in text
+
+
+def test_remaps_four_digit_part_refs(tmp_path: Path) -> None:
+    previous_manifest = tmp_path / "previous-manifest.json"
+    new_manifest = tmp_path / "new-manifest.json"
+    inventory = tmp_path / "review.inventory.yaml"
+
+    def manifest(assembly_ref: str, part_ref: str) -> str:
+        return json.dumps(
+            {
+                "occurrences": [
+                    {
+                        "ref": "A001",
+                        "id": "root[1]/root",
+                        "name": "root",
+                        "parent_id": None,
+                        "depth": 0,
+                        "is_assembly": True,
+                    },
+                    {
+                        "ref": assembly_ref,
+                        "id": "root[1]/root/1:STACK",
+                        "name": "STACK",
+                        "parent_id": "root[1]/root",
+                        "depth": 1,
+                        "is_assembly": True,
+                    },
+                    {
+                        "ref": part_ref,
+                        "id": "root[1]/root/1:STACK/1:PART",
+                        "name": "PART",
+                        "parent_id": "root[1]/root/1:STACK",
+                        "depth": 2,
+                        "is_assembly": False,
+                    },
+                ]
+            }
+        )
+
+    previous_manifest.write_text(manifest("A1002", "P1019"), encoding="utf-8")
+    new_manifest.write_text(manifest("A1003", "P0998"), encoding="utf-8")
+    inventory.write_text(
+        """schema: slac-stage-inventory/v1
+source_step: cad/example/source.stp
+cad_manifest: cad/example/manifest.json
+subassembly:
+  ref: A1002
+  name: STACK
+  occurrence_count: 2
+  assembly_count: 1
+  leaf_part_count: 1
+hidden_occurrences:
+  - P1019
+""",
+        encoding="utf-8",
+    )
+
+    output, report = remap_stage_inventory(
+        inventory,
+        previous_manifest_path=previous_manifest,
+        new_manifest_path=new_manifest,
+    )
+
+    text = output.read_text(encoding="utf-8")
+    assert report["unresolved_refs"] == []
+    assert "ref: A1003" in text
+    assert "- P0998" in text
+    assert "P1019" not in text
