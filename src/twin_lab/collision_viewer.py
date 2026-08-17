@@ -34,11 +34,12 @@ ISOLATE_LABEL = "Isolate worst pair"
 VERIFY_LABEL = "Verify against CAD"
 ISOMETRIC_LABEL = "Isometric view"
 BEAM_LABEL = "X-ray beam path"
-# Translucent so the beam reads as a volume the hardware has to stay out of rather than as
-# another part. Alpha is low enough to see the geometry it passes, unlike the clearance
-# highlights, which have to be opaque to survive the depth-sorted pass.
+# Three states, because "stopped" is not the same as "blocked": a ray ending on the crystal
+# it reflects from, its diode, or the detector has done its job. Only a ray stopped by
+# something off the intended optical path is a fault, and that is the one that goes red.
 BEAM_RGBA = (0.20, 0.85, 1.00, 0.25)
-BLOCKED_BEAM_RGBA = (1.00, 0.35, 0.15, 0.35)
+EXPECTED_BEAM_RGBA = (0.20, 0.90, 0.40, 0.30)
+OBSTRUCTED_BEAM_RGBA = (1.00, 0.10, 0.10, 0.55)
 # Its own subtree, so it is never touched by the highlighter or the visualizer's republish.
 BEAM_PREFIX = "/drake/xray"
 # Re-uploading a cylinder costs about 3 ms, and its length changes with every pose, so the
@@ -231,6 +232,11 @@ def run_collision_viewer(
         print(
             f"'{BEAM_LABEL}' shoots {len(beam_specs)} beam(s) out of the collimating optics and "
             "reflects them off the Bragg crystal faces; each stops at the first part it meets."
+        )
+        print(
+            "Each beam is split into sub-beams across its cross-section, so an edge that "
+            "clips part of the aperture stops only the rays it covers. RED marks a ray "
+            "stopped off the intended path; green marks one landing on a crystal or diode."
         )
         print(
             "The beam is a line-of-sight check on the collision hulls, which enclose the "
@@ -472,11 +478,11 @@ def _trace_beams(model, specs):
 
 
 class _BeamDrawer:
-    """Draws each beam as a translucent cylinder per straight run.
+    """Draws every sub-beam as a translucent cylinder per straight run.
 
     A cylinder's length is baked into its geometry, so a segment that changes length has
     to be uploaded again rather than just moved. That is the expensive part, so it is
-    skipped while the length is visually unchanged.
+    skipped while the length and the colour are both unchanged.
     """
 
     def __init__(self, meshcat):
@@ -492,24 +498,26 @@ class _BeamDrawer:
 
         live = set()
         for path in paths:
-            blocked = path.blocked
-            for index, segment in enumerate(path.segments):
-                name = f"{BEAM_PREFIX}/{path.name}/{index}"
-                live.add(name)
-                if segment.length_m <= 0.0:
-                    continue
-                state = (
-                    round(segment.length_m / BEAM_LENGTH_QUANTUM_M),
-                    int(blocked and segment.blocker is not None),
-                )
-                if self._uploaded.get(name) != state:
-                    self._uploaded[name] = state
-                    rgba = BLOCKED_BEAM_RGBA if segment.blocker is not None else BEAM_RGBA
-                    self._meshcat.SetObject(
-                        name, Cylinder(segment.radius_m, segment.length_m), Rgba(*rgba)
-                    )
-                pose = cylinder_pose(segment.start_m, segment.direction, segment.length_m)
-                self._meshcat.SetTransform(name, RigidTransform(pose))
+            for ray_index, ray in enumerate(path.rays):
+                for index, segment in enumerate(ray.segments):
+                    name = f"{BEAM_PREFIX}/{path.name}/{ray_index}/{index}"
+                    if segment.length_m <= 0.0:
+                        continue
+                    live.add(name)
+                    if segment.obstructed:
+                        rgba, tone = OBSTRUCTED_BEAM_RGBA, 2
+                    elif segment.blocker is not None:
+                        rgba, tone = EXPECTED_BEAM_RGBA, 1
+                    else:
+                        rgba, tone = BEAM_RGBA, 0
+                    state = (round(segment.length_m / BEAM_LENGTH_QUANTUM_M), tone)
+                    if self._uploaded.get(name) != state:
+                        self._uploaded[name] = state
+                        self._meshcat.SetObject(
+                            name, Cylinder(segment.radius_m, segment.length_m), Rgba(*rgba)
+                        )
+                    pose = cylinder_pose(segment.start_m, segment.direction, segment.length_m)
+                    self._meshcat.SetTransform(name, RigidTransform(pose))
 
         for name in live - self._shown:
             self._meshcat.SetProperty(name, "visible", True)

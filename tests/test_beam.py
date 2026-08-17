@@ -15,10 +15,12 @@ import pytest
 from twin_lab.beam import (
     CONTACT_EPSILON_M,
     Plane,
+    bundle_offsets,
     cylinder_pose,
     intersect_plane,
     manifest_rotation,
     march,
+    perpendicular_basis,
     propagate,
     reflect,
     top_face_plane,
@@ -209,7 +211,8 @@ def test_a_clear_beam_reflects_and_reports_two_segments():
 
     assert path.reached_crystal
     assert not path.blocked
-    assert len(path.segments) == 2
+    assert len(path.rays) == 1
+    assert len(path.rays[0].segments) == 2
     assert path.segments[0].length_m == pytest.approx(0.5)
     assert path.segments[1].direction == pytest.approx([1.0, 0.0, 0.0], abs=1e-9)
 
@@ -227,7 +230,8 @@ def test_an_obstruction_before_the_crystal_stops_the_beam_and_names_the_part():
     assert path.blocker == "P660"
     assert not path.reached_crystal
     assert len(path.segments) == 1
-    assert "blocked by P660 before the crystal" in path.summary()
+    assert "OBSTRUCTED" in path.summary()
+    assert "P660" in path.summary()
 
 
 def test_an_obstruction_after_the_crystal_is_reported_on_the_reflected_leg():
@@ -244,8 +248,6 @@ def test_an_obstruction_after_the_crystal_is_reported_on_the_reflected_leg():
     assert path.blocker == "P783"
     assert path.segments[1].blocker == "P783"
     assert "after reflecting" in path.summary()
-
-
 def test_a_beam_that_crosses_outside_the_face_is_a_miss_not_a_reflection():
     """The crystal face is 14 mm; a crossing 0.5 m off it must not bend the beam."""
 
@@ -358,3 +360,119 @@ def test_an_unknown_occurrence_is_an_error_not_a_silent_identity(tmp_path):
 
     with pytest.raises(KeyError):
         manifest_rotation(manifest, "P999")
+
+
+def test_the_bundle_tiles_the_aperture_without_spilling_outside_it():
+    """Rings of 6j sub-beams, and the outermost must still fit inside the beam radius."""
+
+    for rings, expected in ((0, 1), (1, 7), (2, 19), (3, 37)):
+        offsets, sub_radius = bundle_offsets(0.01, rings)
+
+        assert len(offsets) == expected
+        assert sub_radius == pytest.approx(0.01 / (2 * rings + 1))
+        reach = max(np.hypot(*offset) for offset in offsets) + sub_radius
+        assert reach <= 0.01 + 1e-12
+
+
+def test_the_sub_beams_are_laid_out_across_the_beam_not_along_it():
+    direction = np.array([0.0, 0.0, 1.0])
+    across, up = perpendicular_basis(direction)
+
+    assert across @ direction == pytest.approx(0.0)
+    assert up @ direction == pytest.approx(0.0)
+    assert across @ up == pytest.approx(0.0)
+    assert np.linalg.norm(across) == pytest.approx(1.0)
+    assert np.linalg.norm(up) == pytest.approx(1.0)
+
+
+def test_an_edge_across_half_the_aperture_stops_only_the_rays_it_covers():
+    """The point of splitting the beam: one ray can only be wholly clear or wholly stopped."""
+
+    source = Plane(np.array([0.0, 0.0, 0.0]), np.array([0.0, 0.0, 1.0]), 0.011)
+    crystal = Plane(np.array([0.0, 0.0, 1.0]), np.array([0.0, 0.0, -1.0]), 0.014)
+    # A sphere pushed off to +x so it covers one side of the bundle only.
+    query = FakeQuery({"P664": (np.array([0.107, 0.0, 0.3]), 0.1)})
+
+    path = propagate(
+        query,
+        identity_part,
+        name="South",
+        source=source,
+        crystal=crystal,
+        radius_m=0.01,
+        subdivisions=1,
+    )
+
+    assert len(path.rays) == 7
+    blocked = [ray for ray in path.rays if ray.blocker is not None]
+    assert 0 < len(blocked) < 7
+    assert f"{len(blocked)}/7 of the bundle" in path.summary()
+
+
+def test_a_ray_landing_on_an_expected_part_is_not_an_obstruction():
+    """Ending on the diode or the detector is the beam doing its job, not a fault."""
+
+    source = Plane(np.array([0.0, 0.0, 0.0]), np.array([0.0, 0.0, 1.0]), 0.011)
+    crystal = Plane(np.array([0.5, 0.0, 0.5]), np.array([0.0, 0.0, -1.0]), 0.014)
+    query = FakeQuery({"P938": (np.array([0.0, 0.0, 0.4]), 0.05)})
+
+    path = propagate(
+        query,
+        identity_part,
+        name="South",
+        source=source,
+        crystal=crystal,
+        radius_m=0.01,
+        expected_parts=frozenset({"P938"}),
+    )
+
+    assert path.blocked
+    assert path.blocker == "P938"
+    assert path.obstructed_rays == 0
+    assert path.obstructions == ()
+    assert "OBSTRUCTED" not in path.summary()
+
+
+def test_the_same_hit_on_an_unlisted_part_is_an_obstruction():
+    """Identical geometry, different part: the verdict has to come from the list alone."""
+
+    source = Plane(np.array([0.0, 0.0, 0.0]), np.array([0.0, 0.0, 1.0]), 0.011)
+    crystal = Plane(np.array([0.5, 0.0, 0.5]), np.array([0.0, 0.0, -1.0]), 0.014)
+    query = FakeQuery({"P664": (np.array([0.0, 0.0, 0.4]), 0.05)})
+
+    path = propagate(
+        query,
+        identity_part,
+        name="South",
+        source=source,
+        crystal=crystal,
+        radius_m=0.01,
+        expected_parts=frozenset({"P938"}),
+    )
+
+    assert path.obstructed_rays == len(path.rays)
+    assert path.obstructions == ("P664",)
+    assert "OBSTRUCTED fully" in path.summary()
+
+
+def test_a_partly_aligned_bundle_reflects_some_rays_and_passes_the_rest():
+    """A crystal face covering only part of the aperture splits the bundle in two."""
+
+    source = Plane(np.array([0.0, 0.0, 0.0]), np.array([0.0, 0.0, 1.0]), 0.011)
+    # Face centred on the bundle edge, so only the rays under it reflect.
+    normal = np.array([-1.0, 0.0, 1.0]) / np.sqrt(2.0)
+    crystal = Plane(np.array([0.0067, 0.0, 0.5]), normal, 0.005)
+
+    path = propagate(
+        FakeQuery({}),
+        identity_part,
+        name="Middle",
+        source=source,
+        crystal=crystal,
+        radius_m=0.01,
+        subdivisions=1,
+    )
+
+    landed = sum(1 for ray in path.rays if ray.reached_crystal)
+    assert 0 < landed < len(path.rays)
+    assert f"{landed}/{len(path.rays)} of the bundle lands on the crystal" in path.summary()

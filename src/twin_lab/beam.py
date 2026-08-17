@@ -65,7 +65,7 @@ class Plane:
 
 @dataclass(frozen=True)
 class Segment:
-    """One straight run of the beam, from where it started to where it stopped."""
+    """One straight run of a single ray, from where it started to where it stopped."""
 
     start_m: np.ndarray
     direction: np.ndarray
@@ -75,43 +75,107 @@ class Segment:
     blocker: str | None = None
     # True when the segment ended on the optic it was aimed at rather than an obstruction.
     reflected: bool = False
+    # True when the blocker is a part this beam is supposed to land on - the crystal it
+    # reflects from, its diode, or the detector at the end. Anything else is an obstruction.
+    expected: bool = False
 
     @property
     def end_m(self) -> np.ndarray:
         return self.start_m + self.direction * self.length_m
 
+    @property
+    def obstructed(self) -> bool:
+        return self.blocker is not None and not self.expected
+
 
 @dataclass(frozen=True)
-class BeamPath:
-    """Every segment of one beam, plus why it ended."""
+class Ray:
+    """One sub-beam of the bundle: the thread of segments it followed."""
 
-    name: str
     segments: tuple[Segment, ...]
 
     @property
-    def blocked(self) -> bool:
-        return any(segment.blocker is not None for segment in self.segments)
-
-    @property
     def blocker(self) -> str | None:
-        """The part that stopped the beam, or None when nothing did."""
-
         for segment in self.segments:
             if segment.blocker is not None:
                 return segment.blocker
         return None
 
     @property
+    def obstructed(self) -> bool:
+        """Stopped by something that is not part of the intended optical path."""
+
+        return any(segment.obstructed for segment in self.segments)
+
+    @property
     def reached_crystal(self) -> bool:
         return any(segment.reflected for segment in self.segments)
 
+
+@dataclass(frozen=True)
+class BeamPath:
+    """One beam, as the bundle of rays that tile its cross-section.
+
+    Splitting the cross-section is what makes partial blockage visible: a single ray can
+    only ever be all or nothing, whereas an edge clipping half the aperture stops half
+    the bundle and leaves the rest running.
+    """
+
+    name: str
+    rays: tuple[Ray, ...]
+
+    @property
+    def segments(self) -> tuple[Segment, ...]:
+        return tuple(segment for ray in self.rays for segment in ray.segments)
+
+    @property
+    def blocked(self) -> bool:
+        return any(ray.blocker is not None for ray in self.rays)
+
+    @property
+    def blocker(self) -> str | None:
+        """The part that stopped the beam, or None when nothing did."""
+
+        for ray in self.rays:
+            if ray.blocker is not None:
+                return ray.blocker
+        return None
+
+    @property
+    def obstructed_rays(self) -> int:
+        return sum(1 for ray in self.rays if ray.obstructed)
+
+    @property
+    def obstructions(self) -> tuple[str, ...]:
+        """Distinct parts blocking this beam that are not on the intended path."""
+
+        found = {
+            segment.blocker
+            for ray in self.rays
+            for segment in ray.segments
+            if segment.obstructed and segment.blocker is not None
+        }
+        return tuple(sorted(found))
+
+    @property
+    def reached_crystal(self) -> bool:
+        return any(ray.reached_crystal for ray in self.rays)
+
     def summary(self) -> str:
-        if self.blocker is not None:
-            stage = "before the crystal" if not self.reached_crystal else "after reflecting"
-            return f"{self.name}: blocked by {self.blocker} {stage}"
+        total = len(self.rays)
+        obstructed = self.obstructed_rays
+        if obstructed:
+            share = "fully" if obstructed == total else f"{obstructed}/{total} of the bundle"
+            where = "before the crystal" if not self.reached_crystal else "after reflecting"
+            return (
+                f"{self.name}: OBSTRUCTED {share} {where} by {', '.join(self.obstructions)}"
+            )
         if not self.reached_crystal:
-            return f"{self.name}: misses the crystal face, no obstruction"
-        return f"{self.name}: clear to the end of range"
+            return f"{self.name}: clear, but misses the crystal face"
+        landed = sum(1 for ray in self.rays if ray.reached_crystal)
+        if landed < total:
+            return f"{self.name}: clear, {landed}/{total} of the bundle lands on the crystal"
+        return f"{self.name}: clear, whole bundle lands on the crystal"
 
 
 def top_face_plane(
@@ -181,6 +245,9 @@ def _nearest(
 
     The threshold grows until something is found, because a threshold that culls every
     geometry is indistinguishable from open space and would otherwise force a blind step.
+    Always starting at the floor is deliberate: query cost is superlinear in the
+    threshold, so the whole ladder up to 100 mm costs about what one 100 mm probe costs,
+    and carrying a large threshold between steps measures slower (414 ms -> 950 ms).
     """
 
     threshold = max(2.0 * radius_m, MIN_QUERY_M)
@@ -241,84 +308,115 @@ def march(
     return min(travelled, max_range_m), None
 
 
-def propagate(
-    query,
-    part_of_geometry,
-    *,
-    name: str,
-    source: Plane,
-    crystal: Plane,
-    radius_m: float,
-    source_parts: frozenset[str] = frozenset(),
-    crystal_parts: frozenset[str] = frozenset(),
-    max_range_m: float = MAX_RANGE_M,
-) -> BeamPath:
-    """Run a beam from an optic to its crystal and onward along the reflected direction.
+def perpendicular_basis(direction: Sequence[float]) -> tuple[np.ndarray, np.ndarray]:
+    """Two unit vectors spanning the plane across a direction. The beam has no roll."""
 
-    The optic and the crystal holder are excluded from their own segments: the beam
-    starts inside the optic's hull and ends on the crystal's, so without that the first
-    step would report the emitter as the blocker.
+    axis = np.asarray(direction, dtype=float).reshape(3)
+    axis = axis / np.linalg.norm(axis)
+    reference = np.array([0.0, 0.0, 1.0]) if abs(axis[2]) < 0.9 else np.array([1.0, 0.0, 0.0])
+    first = np.cross(reference, axis)
+    first = first / np.linalg.norm(first)
+    return first, np.cross(axis, first)
+
+
+def bundle_offsets(radius_m: float, subdivisions: int) -> tuple[list[tuple[float, float]], float]:
+    """Sub-beam centres and radius tiling the cross-section in hexagonal rings.
+
+    ``subdivisions`` counts rings around the middle, so 0 is the whole aperture as one
+    ray, 1 gives 7 sub-beams and 2 gives 19. Ring ``j`` sits at ``2 r j`` from the axis
+    and the outermost sub-beam reaches ``r (2 k + 1)``, which is the full radius, so the
+    bundle fills the aperture without spilling outside it.
     """
 
-    direction = source.normal / np.linalg.norm(source.normal)
-    hit = intersect_plane(source.origin_m, direction, crystal)
+    rings = max(int(subdivisions), 0)
+    sub_radius = radius_m / (2 * rings + 1)
+    offsets = [(0.0, 0.0)]
+    for ring in range(1, rings + 1):
+        count = 6 * ring
+        for index in range(count):
+            angle = 2.0 * np.pi * index / count
+            distance = 2.0 * sub_radius * ring
+            offsets.append((distance * np.cos(angle), distance * np.sin(angle)))
+    return offsets, sub_radius
 
+
+def _ray_from(
+    query,
+    part_of_geometry,
+    origin: np.ndarray,
+    direction: np.ndarray,
+    radius_m: float,
+    crystal: Plane,
+    *,
+    source_parts: frozenset[str],
+    crystal_parts: frozenset[str],
+    expected_parts: frozenset[str],
+    max_range_m: float,
+) -> Ray:
+    """Take one sub-beam from the optic to its crystal and on along the reflection."""
+
+    def stop(blocker: str | None) -> bool:
+        return blocker is not None and blocker in expected_parts
+
+    hit = intersect_plane(origin, direction, crystal)
     reach, blocker = march(
         query,
         part_of_geometry,
-        source.origin_m,
+        origin,
         direction,
         radius_m,
         ignored_parts=source_parts | crystal_parts,
         max_range_m=max_range_m if hit is None else hit[0],
     )
     if blocker is not None or hit is None:
-        return BeamPath(
-            name=name,
-            segments=(
+        return Ray(
+            (
                 Segment(
-                    start_m=source.origin_m,
+                    start_m=origin,
                     direction=direction,
                     length_m=reach,
                     radius_m=radius_m,
                     blocker=blocker,
+                    expected=stop(blocker),
                 ),
-            ),
+            )
         )
 
     distance, point = hit
-    # A crossing outside the crystal face is a miss: the beam keeps going undeflected.
+    # A crossing outside the crystal face is a miss: that sub-beam carries on undeflected,
+    # which is how a partly-aligned bundle reflects some rays and passes the rest.
     if float(np.linalg.norm(point - crystal.origin_m)) > crystal.radius_m:
         onward, blocker = march(
             query,
             part_of_geometry,
-            source.origin_m,
+            origin,
             direction,
             radius_m,
             ignored_parts=source_parts,
             max_range_m=max_range_m,
         )
-        return BeamPath(
-            name=name,
-            segments=(
+        return Ray(
+            (
                 Segment(
-                    start_m=source.origin_m,
+                    start_m=origin,
                     direction=direction,
                     length_m=onward,
                     radius_m=radius_m,
                     blocker=blocker,
+                    expected=stop(blocker),
                 ),
-            ),
+            )
         )
 
     incoming = Segment(
-        start_m=source.origin_m,
+        start_m=origin,
         direction=direction,
         length_m=distance,
         radius_m=radius_m,
         reflected=True,
     )
     outgoing_direction = reflect(direction, crystal.normal)
+    outgoing_direction = outgoing_direction / np.linalg.norm(outgoing_direction)
     outgoing_reach, outgoing_blocker = march(
         query,
         part_of_geometry,
@@ -330,12 +428,56 @@ def propagate(
     )
     outgoing = Segment(
         start_m=point,
-        direction=outgoing_direction / np.linalg.norm(outgoing_direction),
+        direction=outgoing_direction,
         length_m=outgoing_reach,
         radius_m=radius_m,
         blocker=outgoing_blocker,
+        expected=stop(outgoing_blocker),
     )
-    return BeamPath(name=name, segments=(incoming, outgoing))
+    return Ray((incoming, outgoing))
+
+
+def propagate(
+    query,
+    part_of_geometry,
+    *,
+    name: str,
+    source: Plane,
+    crystal: Plane,
+    radius_m: float,
+    source_parts: frozenset[str] = frozenset(),
+    crystal_parts: frozenset[str] = frozenset(),
+    expected_parts: frozenset[str] = frozenset(),
+    subdivisions: int = 0,
+    max_range_m: float = MAX_RANGE_M,
+) -> BeamPath:
+    """Run a beam from an optic to its crystal and onward along the reflected direction.
+
+    The optic and the crystal holder are excluded from their own segments: the beam
+    starts inside the optic's hull and ends on the crystal's, so without that the first
+    step would report the emitter as the blocker.
+    """
+
+    direction = source.normal / np.linalg.norm(source.normal)
+    offsets, sub_radius = bundle_offsets(radius_m, subdivisions)
+    across, up = perpendicular_basis(direction)
+
+    rays = tuple(
+        _ray_from(
+            query,
+            part_of_geometry,
+            source.origin_m + across * offset[0] + up * offset[1],
+            direction,
+            sub_radius,
+            crystal,
+            source_parts=source_parts,
+            crystal_parts=crystal_parts,
+            expected_parts=expected_parts,
+            max_range_m=max_range_m,
+        )
+        for offset in offsets
+    )
+    return BeamPath(name=name, rays=rays)
 
 
 def manifest_rotation(manifest_path: str | Path, ref: str) -> np.ndarray:
@@ -405,12 +547,15 @@ class BeamSpec:
 
     name: str
     radius_m: float
+    subdivisions: int
     source_body: str
     source_plane: Plane
     source_parts: frozenset[str]
     crystal_body: str
     crystal_plane: Plane
     crystal_parts: frozenset[str]
+    # Parts the beam is meant to land on, so stopping there is not an obstruction.
+    expected_parts: frozenset[str]
 
 
 def body_of_part(model, ref: str) -> str:
@@ -479,15 +624,18 @@ def _resolve_one(model, entry: Mapping[str, object], cache_dir: Path, manifest: 
 
     source_body, source_plane, source_parts = face("source")
     crystal_body, crystal_plane, crystal_parts = face("crystal")
+    expected = {str(ref).upper() for ref in entry.get("expected", [])} | crystal_parts
     return BeamSpec(
         name=str(entry.get("name", "beam")),
         radius_m=float(entry.get("diameter_mm", 20.0)) / 2000.0,
+        subdivisions=int(entry.get("subdivisions", 1)),
         source_body=source_body,
         source_plane=source_plane,
         source_parts=source_parts,
         crystal_body=crystal_body,
         crystal_plane=crystal_plane,
         crystal_parts=crystal_parts,
+        expected_parts=frozenset(expected),
     )
 
 
@@ -525,6 +673,8 @@ def trace(model, specs: Iterable[BeamSpec], *, max_range_m: float = MAX_RANGE_M)
                 radius_m=spec.radius_m,
                 source_parts=spec.source_parts,
                 crystal_parts=spec.crystal_parts,
+                expected_parts=spec.expected_parts,
+                subdivisions=spec.subdivisions,
                 max_range_m=max_range_m,
             )
         )
@@ -539,12 +689,7 @@ def cylinder_pose(
     origin = np.asarray(start, dtype=float).reshape(3)
     axis = np.asarray(direction, dtype=float).reshape(3)
     axis = axis / np.linalg.norm(axis)
-
-    # Any vector off the axis gives a valid pair of perpendiculars; the beam has no roll.
-    reference = np.array([0.0, 0.0, 1.0]) if abs(axis[2]) < 0.9 else np.array([1.0, 0.0, 0.0])
-    first = np.cross(reference, axis)
-    first = first / np.linalg.norm(first)
-    second = np.cross(axis, first)
+    first, second = perpendicular_basis(axis)
 
     pose = np.eye(4)
     pose[:3, 0] = first
