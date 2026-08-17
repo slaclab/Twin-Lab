@@ -429,13 +429,13 @@ question is which external tool to use, not whether to use one.
 #### What the first build costs
 
 The cold run is genuinely expensive. Measured on the reviewed 43841 inventory,
-which is 215 sub-parts totalling 1.2 M triangles:
+which is 187 sub-parts totalling 1.0 M triangles:
 
 | | |
 | --- | --- |
-| Wall time | 34 min on a 12-core Xeon W-2265 |
+| Wall time | 34 min on a 12-core Xeon W-2265; about an hour on an 8-core i9-11950H |
 | CPU | Fully saturated, by design |
-| Memory | Up to 2.9 GB per worker, around 14 GB total while the largest parts run |
+| Memory | 0.5-1.2 GB per worker, around 8 GB total with 12 workers |
 
 Do not expect more cores to rescue this. The median part is only about 1,400
 triangles, while spawning a worker, importing CoACD, and running its
@@ -606,12 +606,12 @@ output at the reviewed home pose:
 
 ```
 --- CAD re-check of touching pairs ---
-  P1170 <-> P1112: hulls -2.69 mm; CAD meshes intersect -> CONTACT
-  P1170 <-> P1069: hulls -2.37 mm; CAD meshes intersect -> CONTACT
-  P1170 <-> P1111: hulls -2.10 mm; CAD meshes 1.18 mm apart -> explained by hull proudness
-  P1170 <-> P1075: hulls -1.59 mm; CAD meshes 0.18 mm apart -> explained by hull proudness
-  P780 <-> P805: hulls -1.34 mm; CAD meshes intersect -> CONTACT
-  P056 <-> P1110: hulls -1.15 mm; CAD meshes intersect -> CONTACT
+  P1355 <-> P1091: hulls -2.69 mm; CAD meshes intersect -> CONTACT
+  P1355 <-> P1048: hulls -2.37 mm; CAD meshes intersect -> CONTACT
+  P1355 <-> P1090: hulls -2.10 mm; CAD meshes 1.18 mm apart -> explained by hull proudness
+  P1355 <-> P1054: hulls -1.59 mm; CAD meshes 0.18 mm apart -> explained by hull proudness
+  P759 <-> P784: hulls -1.34 mm; CAD meshes intersect -> CONTACT
+  P056 <-> P1089: hulls -1.15 mm; CAD meshes intersect -> CONTACT
 ```
 
 Two other line shapes appear when the exact distance cannot be had: `local
@@ -693,7 +693,7 @@ like this:
 
 ```yaml
 ignored_pairs:
-  - pair: [P1112, P1170]
+  - pair: [P1091, P1355]
     reason: touching at reviewed CAD home (-2.69 mm)
 ```
 
@@ -941,7 +941,7 @@ Inspect a STEP tree or generate a focused preview:
 
 ```bash
 uv run slac-cad-manifest cad/DSG-000040389/source.stp --show-tree --manifest-only
-uv run slac-cad-manifest cad/DSG-000040389/source.stp --view --focus A035 --manifest-only
+uv run slac-cad-manifest cad/DSG-000040389/source.stp --view --focus A037 --manifest-only
 ```
 
 **Fallback**, only if you need to debug the refresh helper. The low-level remap
