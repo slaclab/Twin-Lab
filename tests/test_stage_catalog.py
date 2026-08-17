@@ -9,6 +9,7 @@ from twin_lab.stage_cad_viewer import (
     _is_fastener_name,
     _joint_displacement,
     _joint_origin_m,
+    _reviewed_cad_position,
     _reviewed_home,
     _reviewed_limits,
     _rotate_vector,
@@ -29,15 +30,20 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
     instances = inventory["stage_instances"]
     references = [instance["ref"] for instance in instances]
 
-    assert inventory["subassembly"]["ref"] == "A037"
+    assert inventory["subassembly"]["ref"] == "A038"
     assert len(instances) == 19
     assert len(references) == len(set(references))
     assert all(instance["catalog"] in stages for instance in instances)
 
     occurrences = {item["ref"]: item for item in manifest["occurrences"]}
     root_id = occurrences[inventory["subassembly"]["ref"]]["id"]
+    jet_root_id = occurrences["A003"]["id"]
     assert all(occurrences[ref]["is_assembly"] for ref in references)
-    assert all(occurrences[ref]["id"].startswith(f"{root_id}/") for ref in references)
+    # The long-jet stack sits outside the focused subassembly but is still driven.
+    assert all(
+        occurrences[ref]["id"].startswith((f"{root_id}/", f"{jet_root_id}/"))
+        for ref in references
+    )
 
     static_geometry = inventory["static_geometry"]
     assert [item["ref"] for item in static_geometry] == [
@@ -46,8 +52,6 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
         "A029",
         "P1355",
         "A023",
-        "A007",
-        "A003",
     ]
     assert all(item["ref"] in occurrences for item in static_geometry)
     assert static_geometry[0]["rgba"] == [0.95, 0.78, 0.12, 0.28]
@@ -106,20 +110,20 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
     assert stages["kohzu_sa04b_rt02_bm"]["pivot_offset_local"] == [0.0, 0.0, 0.057]
     assert stages["kohzu_sa04b_rt02_r_bm"]["pivot_offset_local"] == [0.0, 0.0, 0.057]
 
-    assert inventory["hidden_occurrences"] == ["P754", "P755", "P756"]
+    assert inventory["hidden_occurrences"] == ["P775", "P776", "P777"]
     assert inventory["attachment_overrides"]["fixed"] == [
-        "P826",
-        "P890",
-        "P892",
-        "P998",
-        "P999",
-        "P1016",
-        "P1050",
-        "P1058",
-        "P1059",
-        "P1060",
-        "P1061",
-        "P1095",
+        "P847",
+        "P911",
+        "P913",
+        "P1019",
+        "P1020",
+        "P1037",
+        "P1071",
+        "P1079",
+        "P1080",
+        "P1081",
+        "P1082",
+        "P1116",
     ]
     assert inventory["attachment_overrides"]["moving"]["A058"] == [
         "P1012",
@@ -142,12 +146,12 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
         "Middle Crystal",
         "South Crystal",
     ]
-    assert inventory["motion_chains"]["Detector"] == ["A040"]
-    assert inventory["attachment_overrides"]["moving"]["A040"] == [
-        "P784",
-        "P783",
-        "P809",
-        "P810",
+    assert inventory["motion_chains"]["Detector"] == ["A041"]
+    assert inventory["attachment_overrides"]["moving"]["A041"] == [
+        "P805",
+        "P804",
+        "P830",
+        "P831",
     ]
     assert occurrences["A040"]["name"] == "LIB-000032416_oa_14"
     assert occurrences["P806"]["name"] == "430250 Carriage 55mm S14_car"
@@ -199,8 +203,8 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
         -0.4,
         0.0,
     ]
-    assert _reviewed_home(inventory, "A040", "A040") == 0.0
-    assert inventory["joint_limit_overrides"]["A048"] == {
+    assert _reviewed_home(inventory, "A041", "A041") == 0.0
+    assert inventory["joint_limit_overrides"]["A049"] == {
         "unit": "degree",
         "limits": [150, 210],
         "home": 180,

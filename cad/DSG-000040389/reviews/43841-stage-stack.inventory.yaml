@@ -12,14 +12,15 @@ subassembly:
 # World-fixed geometry outside the focused stage-stack subtree. Keep these as
 # separate named groups so they can become independently reviewed collision
 # groups later. Fasteners are omitted by default.
+# A003 (jet stage stack) and A007 (long jet) used to sit here. They are a driven
+# three-axis chain now, so their parts arrive through motion_chains and
+# attachment_overrides instead.
 static_geometry:
   - {ref: A036, name: Enclosure assembly, cad_id: DSG-000043161, rgba: [0.95, 0.78, 0.12, 0.28]}
   - {ref: A028, name: Camera assembly 1, cad_id: DSG-000042902}
   - {ref: A029, name: Camera assembly 2, cad_id: DSG-000042902}
   - {ref: P1355, name: Shield cone, cad_id: REF-000226146, rgba: [0.20, 0.65, 0.95, 0.35]}
   - {ref: A023, name: Chamber, cad_id: DSG-000044253}
-  - {ref: A007, name: Long jet assembly, cad_id: LCL5009-010086}
-  - {ref: A003, name: Detector stage 7948 (static), cad_id: DSG-000007948}
 
 # Semantic colors are assembly-review data: catalog stages are colored by model,
 # while attached geometry is split into separately colored rigid meshes.
@@ -35,6 +36,8 @@ visual_styles:
     kohzu_ya04a_r102_nnr_bm: [0.24, 0.68, 0.38, 1.0]
     kohzu_ya04a_r102_rrn_bm: [0.34, 0.78, 0.52, 1.0]
     kohzu_za05a_w101_bm: [0.82, 0.34, 0.48, 1.0]
+    kohzu_xa05a_l202_r: [0.16, 0.52, 0.44, 1.0]
+    kohzu_xa05a_r202: [0.32, 0.74, 0.62, 1.0]
   attachment_groups:
     adapter:
       rgba: [0.92, 0.42, 0.10, 1.0]
@@ -55,7 +58,7 @@ visual_styles:
       refs: [P784, P809, P810]
     detector:
       rgba: [0.18, 0.72, 0.62, 1.0]
-      refs: [P783]
+      refs: [P804]
 
 # Occurrence refs belong to this STEP revision. Catalog IDs remain reusable.
 stage_instances:
@@ -76,19 +79,19 @@ stage_instances:
   - {ref: A054, library_id: LIB-000008869, catalog: kohzu_sxa0530_r01_bm}
   - {ref: A055, library_id: LIB-000008990, catalog: kohzu_sxa0750_r01_bm}
 
-  - {ref: A058, library_id: LIB-000007591, catalog: kohzu_ya04a_r102_nnr_bm}
-  - {ref: A059, library_id: LIB-000032469, catalog: kohzu_za05a_w101_bm}
-  - {ref: A061, library_id: LIB-000007591, catalog: kohzu_ya04a_r102_nnr_bm}
-  - {ref: A063, library_id: LIB-000032469, catalog: kohzu_za05a_w101_bm}
-  - {ref: A065, library_id: LIB-000032469, catalog: kohzu_za05a_w101_bm}
-  - {ref: A067, library_id: LIB-000009109, catalog: kohzu_ya04a_r102_rrn_bm}
+  - {ref: A059, library_id: LIB-000007591, catalog: kohzu_ya04a_r102_nnr_bm}
+  - {ref: A060, library_id: LIB-000032469, catalog: kohzu_za05a_w101_bm}
+  - {ref: A062, library_id: LIB-000007591, catalog: kohzu_ya04a_r102_nnr_bm}
+  - {ref: A064, library_id: LIB-000032469, catalog: kohzu_za05a_w101_bm}
+  - {ref: A066, library_id: LIB-000032469, catalog: kohzu_za05a_w101_bm}
+  - {ref: A068, library_id: LIB-000009109, catalog: kohzu_ya04a_r102_rrn_bm}
 
 # Reviewed base-to-payload order for the detector and three crystal stacks.
 motion_chains:
-  Detector: [A040]
-  North Crystal: [A050, A049, A048, A047]
-  Middle Crystal: [A043, A042, A045, A044]
-  South Crystal: [A055, A054, A053, A052]
+  Detector: [A041]
+  North Crystal: [A051, A050, A049, A048]
+  Middle Crystal: [A044, A043, A046, A045]
+  South Crystal: [A056, A055, A054, A053]
 
 compound_motion_chains:
   North Polycap:
@@ -107,13 +110,13 @@ compound_motion_chains:
 # Editable logical operating limits and home positions. Angular values here are
 # degrees; A048/A053 use the assembly's 180-degree mounting orientation as home.
 joint_limit_overrides:
-  A040: {unit: meter, limits: [-0.400, 0.0], home: 0.0}  # EPIX CAD pose is upper endpoint
-  A044: {unit: degree, limits: [-10, 10]}
-  A045: {unit: degree, limits: [-30, 30]}
-  A047: {unit: degree, limits: [-10, 10]}
-  A048: {unit: degree, limits: [150, 210], home: 180}
-  A052: {unit: degree, limits: [-10, 10]}
-  A053: {unit: degree, limits: [150, 210], home: 180}
+  A041: {unit: meter, limits: [-0.400, 0.0], home: 0.0}  # EPIX CAD pose is upper endpoint
+  A045: {unit: degree, limits: [-10, 10]}
+  A046: {unit: degree, limits: [-30, 30]}
+  A048: {unit: degree, limits: [-10, 10]}
+  A049: {unit: degree, limits: [150, 210], home: 180}
+  A053: {unit: degree, limits: [-10, 10]}
+  A054: {unit: degree, limits: [150, 210], home: 180}
 
 # Human-reviewed exceptions always override automatic proximity grouping.
 hidden_occurrences:
@@ -149,7 +152,7 @@ ignored_pairs:
     reason: touching at reviewed CAD home (-2.10 mm)
   - pair: [P1054, P1355]
     reason: touching at reviewed CAD home (-1.59 mm)
-  - pair: [P056, P1089]
+  - pair: [P056, P1110]
     reason: touching at reviewed CAD home (-1.15 mm)
   # Validated against the exact tessellated meshes rather than the hulls: the bracket sits
   # flush on the adapter with a 0.000 mm gap and no vertex inside the other part, and the
@@ -160,38 +163,38 @@ ignored_pairs:
 
 attachment_overrides:
   fixed:
-    - P826   # DSG-000041331; Middle Crystal base mount
-    - P890   # DSG-000043036; North Crystal base mount
-    - P892   # DSG-000041169; North Crystal base support
-    - P998  # DSG-000043037; South Crystal base mount
-    - P999  # DSG-000041293; South Crystal base support
-    - P1016  # DSG-000046522; South Polycap angled Z-stage bracket fixed to breadboard
-    - P1050  # DSG-000046528; Middle Polycap angled Z-stage bracket fixed to breadboard
-    - P1058  # LIB-000004373; Middle Polycap base fastener
-    - P1059  # LIB-000004373; Middle Polycap base fastener
-    - P1060  # LIB-000004373; Middle Polycap base fastener
-    - P1061  # LIB-000004373; Middle Polycap base fastener
-    - P1095  # DSG-000046530; North Polycap angled Z-stage bracket fixed to breadboard
+    - P847   # DSG-000041331; Middle Crystal base mount
+    - P911   # DSG-000043036; North Crystal base mount
+    - P913   # DSG-000041169; North Crystal base support
+    - P1019  # DSG-000043037; South Crystal base mount
+    - P1020  # DSG-000041293; South Crystal base support
+    - P1037  # DSG-000046522; South Polycap angled Z-stage bracket fixed to breadboard
+    - P1071  # DSG-000046528; Middle Polycap angled Z-stage bracket fixed to breadboard
+    - P1079  # LIB-000004373; Middle Polycap base fastener
+    - P1080  # LIB-000004373; Middle Polycap base fastener
+    - P1081  # LIB-000004373; Middle Polycap base fastener
+    - P1082  # LIB-000004373; Middle Polycap base fastener
+    - P1116  # DSG-000046530; North Polycap angled Z-stage bracket fixed to breadboard
   moving:
-    A040: [P784, P783, P809, P810]  # 41969 adapter, REF-000226045 EPIX 100P detector, and two Newport locating pegs
-    A043: [P847]        # 34586: first linear carriage to second linear base
-    A042: [P821]        # 41329: second linear carriage to rotation base
-    A045: [P820]        # 28455: rotation carriage to tilt base
-    A044: [P871, P872, P873, P868]  # final adapter, holder, and Middle Crystal
-    A050: [P887]        # mirrored first-linear to second-linear adapter
-    A049: [P884]        # 41276: second linear carriage to rotation base
-    A048: [P881]        # 28455: rotation carriage to tilt base
-    A047: [P875, P876, P891, P877]  # final adapter, holder, and North Crystal
-    A055: [P983]       # 35628: first linear carriage to second linear base
-    A054: [P966]        # 41276: second linear carriage to rotation base
-    A053: [P956]        # 28455: rotation carriage to tilt base
-    A052: [P937, P939, P994, P938]  # final adapter, holder, and South Crystal
-    A059: [P1017]         # 46523: ZA carriage to 7591 fixed base, South Polycap
-    A058: [P1012, P1010, P1011]  # 40767 adapter and South collimating optic
-    A063: [P1049]         # 46527: ZA carriage to 7591 fixed base, Middle Polycap
-    A061: [P1048, P1054, P1055]  # 40909 adapter and Middle collimating optic
-    A065: [P1096]         # 46523: ZA carriage to 7591 fixed base, North Polycap
-    A067: [P1091, P1089, P1090]  # 40767 adapter and North collimating optic
+    A041: [P805, P804, P830, P831]  # 41969 adapter, REF-000226045 EPIX 100P detector, and two Newport locating pegs
+    A044: [P868]        # 34586: first linear carriage to second linear base
+    A043: [P842]        # 41329: second linear carriage to rotation base
+    A046: [P841]        # 28455: rotation carriage to tilt base
+    A045: [P892, P893, P894, P889]  # final adapter, holder, and Middle Crystal
+    A051: [P908]        # mirrored first-linear to second-linear adapter
+    A050: [P905]        # 41276: second linear carriage to rotation base
+    A049: [P902]        # 28455: rotation carriage to tilt base
+    A048: [P896, P897, P912, P898]  # final adapter, holder, and North Crystal
+    A056: [P1004]       # 35628: first linear carriage to second linear base
+    A055: [P987]        # 41276: second linear carriage to rotation base
+    A054: [P977]        # 28455: rotation carriage to tilt base
+    A053: [P958, P960, P1015, P959]  # final adapter, holder, and South Crystal
+    A060: [P1038]         # 46523: ZA carriage to 7591 fixed base, South Polycap
+    A059: [P1033, P1031, P1032]  # 40767 adapter and South collimating optic
+    A064: [P1070]         # 46527: ZA carriage to 7591 fixed base, Middle Polycap
+    A062: [P1069, P1075, P1076]  # 40909 adapter and Middle collimating optic
+    A066: [P1117]         # 46523: ZA carriage to 7591 fixed base, North Polycap
+    A068: [P1112, P1110, P1111]  # 40767 adapter and North collimating optic
 
 reviewed_connections:
   - [P806, P784, P783]  # VT-50L carriage to 41969 adapter and EPIX 100P
