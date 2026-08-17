@@ -33,6 +33,17 @@ ISOLATE_LABEL = "Isolate worst pair"
 # No apostrophes; Drake evals control names.
 VERIFY_LABEL = "Verify against CAD"
 ISOMETRIC_LABEL = "Isometric view"
+BEAM_LABEL = "X-ray beam path"
+# Translucent so the beam reads as a volume the hardware has to stay out of rather than as
+# another part. Alpha is low enough to see the geometry it passes, unlike the clearance
+# highlights, which have to be opaque to survive the depth-sorted pass.
+BEAM_RGBA = (0.20, 0.85, 1.00, 0.25)
+BLOCKED_BEAM_RGBA = (1.00, 0.35, 0.15, 0.35)
+# Its own subtree, so it is never touched by the highlighter or the visualizer's republish.
+BEAM_PREFIX = "/drake/xray"
+# Re-uploading a cylinder costs about 3 ms, and its length changes with every pose, so the
+# geometry is only replaced once the change is visible at all.
+BEAM_LENGTH_QUANTUM_M = 5.0e-4
 STATUS_RGB = {
     "clear": [0.13, 0.42, 0.18],
     "close": [0.72, 0.60, 0.05],
@@ -139,6 +150,9 @@ def run_collision_viewer(
     ignore_file: str | Path | None = None,
     label_source: str | Path | None = None,
     decomposition_dir: str | Path | None = None,
+    beam_inventory: str | Path | None = None,
+    beam_cache_dir: str | Path | None = None,
+    beam_manifest: str | Path | None = None,
     fps: float = 30.0,
 ) -> None:
     """Drive the compiled assembly from sliders and report clearance at every pose."""
@@ -194,6 +208,9 @@ def run_collision_viewer(
     if model.refiner is not None:
         meshcat.AddSlider(VERIFY_LABEL, 0.0, 1.0, 1.0, 1.0)
     meshcat.AddSlider(WARN_LABEL, 0.0, 50.0, 0.5, warn_mm)
+    beam_specs = _resolve_beams(model, beam_inventory, beam_cache_dir, beam_manifest)
+    if beam_specs:
+        meshcat.AddSlider(BEAM_LABEL, 0.0, 1.0, 1.0, 1.0)
     meshcat.AddSlider(ANIMATION_LABEL, 0.0, 1.0, 1.0, 0.0)
     meshcat.AddSlider(AUTO_RANGE_LABEL, 0.0, 100.0, 1.0, 25.0)
     meshcat.AddSlider(AUTO_PERIOD_LABEL, 2.0, 60.0, 0.5, 12.0)
@@ -202,6 +219,7 @@ def run_collision_viewer(
     meshcat.AddButton("Log clearance report")
     meshcat.AddButton("Stop viewer", "Escape")
     highlighter = _Highlighter(meshcat, model)
+    beam_drawer = _BeamDrawer(meshcat) if beam_specs else None
 
     print(f"{len(joints)} joints")
     print("Offending parts light up: YELLOW inside the warning band, RED where they touch.")
@@ -209,6 +227,15 @@ def run_collision_viewer(
     print("Tick 'Isolate worst pair' to hide the assembly and leave only that pair on screen.")
     print("Tick 'Animation' to cycle every joint about its reviewed home.")
     print(f"'{ISOMETRIC_LABEL}' frames the whole assembly down the corner diagonal.")
+    if beam_specs:
+        print(
+            f"'{BEAM_LABEL}' shoots {len(beam_specs)} beam(s) out of the collimating optics and "
+            "reflects them off the Bragg crystal faces; each stops at the first part it meets."
+        )
+        print(
+            "The beam is a line-of-sight check on the collision hulls, which enclose the "
+            "parts, so it stops early rather than late - it cannot miss an obstruction."
+        )
     if model.refiner is not None:
         print(
             f"'{VERIFY_LABEL}' re-checks every reported pair against the CAD behind the hulls "
@@ -240,6 +267,10 @@ def run_collision_viewer(
     settled_at = 0.0
     mesh_pending = False
     detect_pending = False
+    beam_on = bool(beam_specs)
+    beam_pending = bool(beam_specs)
+    next_beam = 0.0
+    previous_beam_summary = ""
     pending_report = None
     assembly_bounds: tuple[np.ndarray, np.ndarray] | None = None
     values = [joint.slider_bounds()[2] for joint in joints]
@@ -251,6 +282,13 @@ def run_collision_viewer(
         wanted_collision = meshcat.GetSliderValue(COLLISION_LABEL) >= 0.5
         wanted_animating = meshcat.GetSliderValue(ANIMATION_LABEL) >= 0.5
         wanted_show_all = meshcat.GetSliderValue(ISOLATE_LABEL) < 0.5
+        wanted_beam = bool(beam_specs) and meshcat.GetSliderValue(BEAM_LABEL) >= 0.5
+        if wanted_beam != beam_on:
+            beam_on = wanted_beam
+            beam_pending = beam_on
+            if not beam_on and beam_drawer is not None:
+                beam_drawer.clear()
+                previous_beam_summary = ""
         new_reset = meshcat.GetButtonClicks("Reset to home")
         if new_reset != reset_clicks:
             reset_clicks = new_reset
@@ -325,6 +363,7 @@ def run_collision_viewer(
             settled_at = tick + VERIFY_SETTLE_S
             mesh_pending = verify_on and collision_on
             detect_pending = True
+            beam_pending = beam_on
             model.set_positions(
                 {
                     joint.joint_name: joint.to_sdf(value)
@@ -367,6 +406,20 @@ def run_collision_viewer(
             next_detect = time.monotonic() + max(detector_period, DETECT_DUTY * detect_cost)
         elif not collision_on:
             log_clicks = new_log
+        # Same duty-cycle bargain as the detector: the trace is charged against its own
+        # measured cost, so it takes a fixed share of the loop however long it runs.
+        if beam_on and beam_drawer is not None and beam_pending and tick >= next_beam:
+            beam_pending = False
+            beam_start = time.monotonic()
+            paths = _trace_beams(model, beam_specs)
+            beam_drawer.update(paths)
+            summary = "; ".join(path.summary() for path in paths)
+            if summary != previous_beam_summary:
+                previous_beam_summary = summary
+                for path in paths:
+                    print(path.summary())
+            beam_cost = time.monotonic() - beam_start
+            next_beam = time.monotonic() + DETECT_DUTY * beam_cost
         # Republishing the labels is the most expensive thing this viewer sends, so it is
         # rate limited against every pose source and then flushed from whichever report is
         # newest - publishing in the detect block instead would leave the settled pose
@@ -393,6 +446,81 @@ def run_collision_viewer(
 def _push_sliders(meshcat, joints: list[SliderJoint], values: list[float]) -> None:
     for joint, value in zip(joints, values, strict=True):
         meshcat.SetSliderValue(joint.label, value)
+
+
+def _resolve_beams(model, inventory, cache_dir, manifest):
+    """Bind the reviewed ``beam_paths`` block, or return an empty list when it is absent."""
+
+    if inventory is None or cache_dir is None or manifest is None:
+        return []
+    from .beam import read_beam_config, resolve_beams
+
+    config = read_beam_config(inventory)
+    if not config:
+        return []
+    try:
+        return resolve_beams(model, config, cache_dir=cache_dir, manifest_path=manifest)
+    except (KeyError, FileNotFoundError, ValueError) as error:
+        print(f"Beam paths are configured but could not be resolved, so they are off: {error}")
+        return []
+
+
+def _trace_beams(model, specs):
+    from .beam import trace
+
+    return trace(model, specs)
+
+
+class _BeamDrawer:
+    """Draws each beam as a translucent cylinder per straight run.
+
+    A cylinder's length is baked into its geometry, so a segment that changes length has
+    to be uploaded again rather than just moved. That is the expensive part, so it is
+    skipped while the length is visually unchanged.
+    """
+
+    def __init__(self, meshcat):
+        self._meshcat = meshcat
+        self._uploaded: dict[str, tuple[int, int]] = {}
+        self._shown: set[str] = set()
+
+    def update(self, paths) -> None:
+        from pydrake.geometry import Cylinder, Rgba
+        from pydrake.math import RigidTransform
+
+        from .beam import cylinder_pose
+
+        live = set()
+        for path in paths:
+            blocked = path.blocked
+            for index, segment in enumerate(path.segments):
+                name = f"{BEAM_PREFIX}/{path.name}/{index}"
+                live.add(name)
+                if segment.length_m <= 0.0:
+                    continue
+                state = (
+                    round(segment.length_m / BEAM_LENGTH_QUANTUM_M),
+                    int(blocked and segment.blocker is not None),
+                )
+                if self._uploaded.get(name) != state:
+                    self._uploaded[name] = state
+                    rgba = BLOCKED_BEAM_RGBA if segment.blocker is not None else BEAM_RGBA
+                    self._meshcat.SetObject(
+                        name, Cylinder(segment.radius_m, segment.length_m), Rgba(*rgba)
+                    )
+                pose = cylinder_pose(segment.start_m, segment.direction, segment.length_m)
+                self._meshcat.SetTransform(name, RigidTransform(pose))
+
+        for name in live - self._shown:
+            self._meshcat.SetProperty(name, "visible", True)
+        for name in self._shown - live:
+            self._meshcat.SetProperty(name, "visible", False)
+        self._shown = live
+
+    def clear(self) -> None:
+        for name in self._shown:
+            self._meshcat.SetProperty(name, "visible", False)
+        self._shown = set()
 
 
 def _reset_status(meshcat) -> None:
@@ -750,6 +878,9 @@ def main() -> None:
             ignore_file=args.ignore_file or inventory,
             label_source=inventory,
             decomposition_dir=decomposition_dir if decomposition_dir.is_dir() else None,
+            beam_inventory=inventory,
+            beam_cache_dir=scene_path.parent,
+            beam_manifest=inventory.parent.parent / "manifest.json",
             fps=args.fps,
         )
     except KeyboardInterrupt:
