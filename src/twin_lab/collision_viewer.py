@@ -48,6 +48,13 @@ BEAM_PREFIX = "/drake/xray"
 # Re-uploading a cylinder costs about 3 ms, and its length changes with every pose, so the
 # geometry is only replaced once the change is visible at all.
 BEAM_LENGTH_QUANTUM_M = 5.0e-4
+# The beam is meant to be read as a diagnostic overlay, not an object standing in the
+# scene, so it draws through everything rather than merely being translucent - a
+# translucent enclosure still writes the depth buffer, which without this would let it
+# visually occlude a beam that is genuinely behind it. `renderOrder` only reorders within
+# three.js's own transparent pass, so `depthTest` also has to go for the beam to survive
+# being drawn before an enclosure that is nearer the camera.
+BEAM_RENDER_ORDER = 999.0
 STATUS_RGB = {
     "clear": [0.13, 0.42, 0.18],
     "close": [0.72, 0.60, 0.05],
@@ -522,6 +529,15 @@ class _BeamDrawer:
                         self._meshcat.SetObject(
                             name, Cylinder(segment.radius_m, segment.length_m), Rgba(*rgba)
                         )
+                        # The actual mesh (and its material) is Meshcat's synthetic
+                        # "<object>" child of the path a plain SetObject uploads to; a
+                        # fresh SetObject replaces that mesh, so this has to be resent
+                        # every time, not just once.
+                        self._meshcat.SetProperty(f"{name}/<object>", "material.depthTest", False)
+                        self._meshcat.SetProperty(
+                            f"{name}/<object>", "material.depthWrite", False
+                        )
+                        self._meshcat.SetProperty(name, "renderOrder", BEAM_RENDER_ORDER)
                     pose = cylinder_pose(segment.start_m, segment.direction, segment.length_m)
                     self._meshcat.SetTransform(name, RigidTransform(pose))
 
