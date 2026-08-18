@@ -138,7 +138,13 @@ joint_limit_overrides:
   # pose. Home is the bottom of that travel, which is the CAD pose itself.
   A004: {unit: meter, limits: [0.0, 0.008], home: 0.0, cad_position: 0.0}
   A044: {unit: degree, limits: [-10, 10]}
-  A045: {unit: degree, limits: [-30, 30]}
+  # The Middle Crystal is drawn 155 degrees away from the orientation that reflects its
+  # beam onto the EPIX: at the CAD pose the reflection misses the detector by 471 mm,
+  # and at 155 degrees by 22 mm. The optimum is sharp - 150 and 160 degrees miss by 87
+  # and 101 mm - so this is a real solution rather than a flat region. RA04A-W01 travels
+  # +/-177 degrees, so the rotation is within the stage. `cad_position: 0` is what makes
+  # this move the geometry; without it the home would only relabel the CAD pose.
+  A045: {unit: degree, limits: [125, 185], home: 155, cad_position: 0}
   A047: {unit: degree, limits: [-10, 10]}
   A048: {unit: degree, limits: [150, 210], home: 180}
   A052: {unit: degree, limits: [-10, 10]}
@@ -283,6 +289,7 @@ beam_paths:
     crystal:
       ref: P937                                    # DSG-000042292 Bragg xtal holder clip
       mesh: attached_A052_crystal_and_holder.obj
+      ignore: [P939, P994]                         # 42294 adapter and 27467 holder
     expected: [P938, P783]                         # South annular PIPS diode, EPIX 100P
   - name: Middle
     diameter_mm: 20.0
@@ -294,6 +301,7 @@ beam_paths:
     crystal:
       ref: P871                                    # DSG-000041271 Bragg xtal holder clip
       mesh: attached_A044_crystal_and_holder.obj
+      ignore: [P872, P873]                         # 27467 holder and 42294 adapter
     expected: [P868, P783]                         # Middle annular PIPS diode, EPIX 100P
   - name: North
     diameter_mm: 20.0
@@ -305,4 +313,5 @@ beam_paths:
     crystal:
       ref: P875                                    # DSG-000041271 Bragg xtal holder clip
       mesh: attached_A047_crystal_and_holder.obj
+      ignore: [P876, P891]                         # 42294 adapter and 27467 holder
     expected: [P877, P783]                         # North annular PIPS diode, EPIX 100P

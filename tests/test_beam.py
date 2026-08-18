@@ -268,7 +268,62 @@ def test_a_beam_that_crosses_outside_the_face_is_a_miss_not_a_reflection():
     assert not path.blocked
     assert len(path.segments) == 1
     assert path.segments[0].direction == pytest.approx([0.0, 0.0, 1.0])
-    assert "misses the crystal face" in path.summary()
+    assert "never reaches the crystal" in path.summary()
+
+
+def test_a_ray_that_misses_the_face_but_strikes_the_holder_still_reflects():
+    """Otherwise there is no reflected leg to steer, and alignment has nothing to aim.
+
+    The reflection is off the crystal plane at the point the holder was struck, so the
+    leg exists to be walked onto the detector, but it is flagged as not on the face.
+    """
+
+    source = Plane(np.array([0.0, 0.0, 0.0]), np.array([0.0, 0.0, 1.0]), 0.011)
+    normal = np.array([-1.0, 0.0, 1.0]) / np.sqrt(2.0)
+    # Face centre far off the axis, so the crossing is a clean miss of the face.
+    crystal = Plane(np.array([0.5, 0.0, 0.5]), normal, 0.014)
+    query = FakeQuery({"P937": (np.array([0.0, 0.0, 0.35]), 0.05)})
+
+    path = propagate(
+        query,
+        identity_part,
+        name="South",
+        source=source,
+        crystal=crystal,
+        radius_m=0.01,
+        crystal_parts=frozenset({"P937"}),
+    )
+
+    assert path.reached_crystal
+    assert path.on_face_rays == 0
+    assert not path.rays[0].on_face
+    assert len(path.rays[0].segments) == 2
+    assert path.rays[0].segments[1].direction == pytest.approx([1.0, 0.0, 0.0], abs=1e-9)
+    assert "reflecting off the crystal HOLDER" in path.summary()
+
+
+def test_a_holder_reflection_is_drawn_amber_not_green():
+    """The leg is usable for steering but its direction is not trustworthy yet."""
+
+    from twin_lab.collision_viewer import OFF_FACE_BEAM_RGBA
+
+    source = Plane(np.array([0.0, 0.0, 0.0]), np.array([0.0, 0.0, 1.0]), 0.011)
+    normal = np.array([-1.0, 0.0, 1.0]) / np.sqrt(2.0)
+    crystal = Plane(np.array([0.5, 0.0, 0.5]), normal, 0.014)
+    query = FakeQuery({"P937": (np.array([0.0, 0.0, 0.35]), 0.05)})
+
+    path = propagate(
+        query,
+        identity_part,
+        name="South",
+        source=source,
+        crystal=crystal,
+        radius_m=0.01,
+        crystal_parts=frozenset({"P937"}),
+    )
+    colours = [colour for _, colour in _drawn(path).objects.values()]
+
+    assert OFF_FACE_BEAM_RGBA in colours
 
 
 def test_a_grazing_surface_terminates_instead_of_stalling():
@@ -473,6 +528,85 @@ def test_a_partly_aligned_bundle_reflects_some_rays_and_passes_the_rest():
         subdivisions=1,
     )
 
-    landed = sum(1 for ray in path.rays if ray.reached_crystal)
+    landed = sum(1 for ray in path.rays if ray.on_face)
     assert 0 < landed < len(path.rays)
-    assert f"{landed}/{len(path.rays)} of the bundle lands on the crystal" in path.summary()
+    assert f"{landed}/{len(path.rays)} of the bundle is on the crystal face" in path.summary()
+
+
+class FakeMeshcat:
+    """Records what the drawer would upload, so colour choice is testable without a browser."""
+
+    def __init__(self):
+        self.objects = {}
+        self.visible = {}
+
+    def SetObject(self, path, shape, rgba):
+        self.objects[path] = (shape.length(), (rgba.r(), rgba.g(), rgba.b(), rgba.a()))
+
+    def SetTransform(self, path, pose):
+        pass
+
+    def SetProperty(self, path, key, value):
+        self.visible[path] = value
+
+
+def _drawn(path):
+    from twin_lab.collision_viewer import _BeamDrawer
+
+    meshcat = FakeMeshcat()
+    _BeamDrawer(meshcat).update([path])
+    return meshcat
+
+
+def test_a_ray_stopped_off_the_intended_path_is_drawn_red():
+    from twin_lab.collision_viewer import (
+        BEAM_RGBA,
+        EXPECTED_BEAM_RGBA,
+        OBSTRUCTED_BEAM_RGBA,
+    )
+
+    source = Plane(np.array([0.0, 0.0, 0.0]), np.array([0.0, 0.0, 1.0]), 0.011)
+    crystal = Plane(np.array([0.5, 0.0, 0.5]), np.array([0.0, 0.0, -1.0]), 0.014)
+    query = FakeQuery({"P664": (np.array([0.0, 0.0, 0.4]), 0.05)})
+    common = dict(source=source, crystal=crystal, radius_m=0.01)
+
+    obstruction = propagate(query, identity_part, name="A", **common)
+    allowed = propagate(
+        query, identity_part, name="B", expected_parts=frozenset({"P664"}), **common
+    )
+    unimpeded = propagate(FakeQuery({}), identity_part, name="C", max_range_m=0.3, **common)
+
+    assert {colour for _, colour in _drawn(obstruction).objects.values()} == {
+        OBSTRUCTED_BEAM_RGBA
+    }
+    assert {colour for _, colour in _drawn(allowed).objects.values()} == {EXPECTED_BEAM_RGBA}
+    assert {colour for _, colour in _drawn(unimpeded).objects.values()} == {BEAM_RGBA}
+
+
+def test_each_sub_beam_is_drawn_separately_so_partial_blocking_shows():
+    source = Plane(np.array([0.0, 0.0, 0.0]), np.array([0.0, 0.0, 1.0]), 0.011)
+    crystal = Plane(np.array([0.0, 0.0, 1.0]), np.array([0.0, 0.0, -1.0]), 0.014)
+    query = FakeQuery({"P664": (np.array([0.107, 0.0, 0.3]), 0.1)})
+
+    path = propagate(
+        query,
+        identity_part,
+        name="South",
+        source=source,
+        crystal=crystal,
+        radius_m=0.01,
+        subdivisions=1,
+    )
+    meshcat = _drawn(path)
+
+    from twin_lab.collision_viewer import OBSTRUCTED_BEAM_RGBA
+
+    # A reflected ray draws two cylinders, so count rays by their path prefix.
+    rays = {name.rsplit("/", 1)[0] for name in meshcat.objects}
+    assert len(rays) == 7
+    red = {
+        name.rsplit("/", 1)[0]
+        for name, (_, colour) in meshcat.objects.items()
+        if colour == OBSTRUCTED_BEAM_RGBA
+    }
+    assert 0 < len(red) < 7

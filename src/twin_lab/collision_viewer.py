@@ -34,11 +34,14 @@ ISOLATE_LABEL = "Isolate worst pair"
 VERIFY_LABEL = "Verify against CAD"
 ISOMETRIC_LABEL = "Isometric view"
 BEAM_LABEL = "X-ray beam path"
-# Three states, because "stopped" is not the same as "blocked": a ray ending on the crystal
+# Four states, because "stopped" is not the same as "blocked": a ray ending on the crystal
 # it reflects from, its diode, or the detector has done its job. Only a ray stopped by
 # something off the intended optical path is a fault, and that is the one that goes red.
+# Amber is a reflection off the crystal HOLDER rather than its face - the leg is drawn so
+# it can be steered, but its direction is not trustworthy until the ray is on the face.
 BEAM_RGBA = (0.20, 0.85, 1.00, 0.25)
 EXPECTED_BEAM_RGBA = (0.20, 0.90, 0.40, 0.30)
+OFF_FACE_BEAM_RGBA = (1.00, 0.72, 0.10, 0.35)
 OBSTRUCTED_BEAM_RGBA = (1.00, 0.10, 0.10, 0.55)
 # Its own subtree, so it is never touched by the highlighter or the visualizer's republish.
 BEAM_PREFIX = "/drake/xray"
@@ -236,7 +239,8 @@ def run_collision_viewer(
         print(
             "Each beam is split into sub-beams across its cross-section, so an edge that "
             "clips part of the aperture stops only the rays it covers. RED marks a ray "
-            "stopped off the intended path; green marks one landing on a crystal or diode."
+            "stopped off the intended path; green marks one landing on a crystal or diode; "
+            "amber marks a leg reflected off the crystal HOLDER rather than its face."
         )
         print(
             "The beam is a line-of-sight check on the collision hulls, which enclose the "
@@ -505,7 +509,9 @@ class _BeamDrawer:
                         continue
                     live.add(name)
                     if segment.obstructed:
-                        rgba, tone = OBSTRUCTED_BEAM_RGBA, 2
+                        rgba, tone = OBSTRUCTED_BEAM_RGBA, 3
+                    elif segment.reflected and not segment.on_face:
+                        rgba, tone = OFF_FACE_BEAM_RGBA, 2
                     elif segment.blocker is not None:
                         rgba, tone = EXPECTED_BEAM_RGBA, 1
                     else:

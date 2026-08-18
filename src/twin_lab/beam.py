@@ -75,6 +75,10 @@ class Segment:
     blocker: str | None = None
     # True when the segment ended on the optic it was aimed at rather than an obstruction.
     reflected: bool = False
+    # True when a reflection happened on the crystal face itself. A ray that strikes the
+    # holder still reflects, so there is something to steer while aligning, but the
+    # direction is only trustworthy once this is True.
+    on_face: bool = False
     # True when the blocker is a part this beam is supposed to land on - the crystal it
     # reflects from, its diode, or the detector at the end. Anything else is an obstruction.
     expected: bool = False
@@ -110,6 +114,10 @@ class Ray:
     @property
     def reached_crystal(self) -> bool:
         return any(segment.reflected for segment in self.segments)
+
+    @property
+    def on_face(self) -> bool:
+        return any(segment.reflected and segment.on_face for segment in self.segments)
 
 
 @dataclass(frozen=True)
@@ -161,21 +169,28 @@ class BeamPath:
     def reached_crystal(self) -> bool:
         return any(ray.reached_crystal for ray in self.rays)
 
+    @property
+    def on_face_rays(self) -> int:
+        return sum(1 for ray in self.rays if ray.on_face)
+
     def summary(self) -> str:
         total = len(self.rays)
         obstructed = self.obstructed_rays
         if obstructed:
             share = "fully" if obstructed == total else f"{obstructed}/{total} of the bundle"
             where = "before the crystal" if not self.reached_crystal else "after reflecting"
-            return (
-                f"{self.name}: OBSTRUCTED {share} {where} by {', '.join(self.obstructions)}"
-            )
+            return f"{self.name}: OBSTRUCTED {share} {where} by {', '.join(self.obstructions)}"
         if not self.reached_crystal:
-            return f"{self.name}: clear, but misses the crystal face"
-        landed = sum(1 for ray in self.rays if ray.reached_crystal)
-        if landed < total:
-            return f"{self.name}: clear, {landed}/{total} of the bundle lands on the crystal"
-        return f"{self.name}: clear, whole bundle lands on the crystal"
+            return f"{self.name}: clear, but never reaches the crystal"
+        on_face = self.on_face_rays
+        if on_face == 0:
+            return (
+                f"{self.name}: clear, reflecting off the crystal HOLDER - "
+                "no ray is on the crystal face yet"
+            )
+        if on_face < total:
+            return f"{self.name}: clear, {on_face}/{total} of the bundle is on the crystal face"
+        return f"{self.name}: clear, whole bundle on the crystal face"
 
 
 def top_face_plane(
@@ -353,28 +368,24 @@ def _ray_from(
     expected_parts: frozenset[str],
     max_range_m: float,
 ) -> Ray:
-    """Take one sub-beam from the optic to its crystal and on along the reflection."""
+    """Take one sub-beam from the optic to its crystal and on along the reflection.
+
+    A ray reflects either where it crosses the crystal face, or - when it misses the face
+    but still runs into the crystal holder - at the point it strikes it. The second case
+    is what makes the tool usable for alignment: the reflected leg is drawn and can be
+    steered onto the detector, and ``on_face`` records that the pose is not there yet.
+    """
 
     def stop(blocker: str | None) -> bool:
         return blocker is not None and blocker in expected_parts
 
-    hit = intersect_plane(origin, direction, crystal)
-    reach, blocker = march(
-        query,
-        part_of_geometry,
-        origin,
-        direction,
-        radius_m,
-        ignored_parts=source_parts | crystal_parts,
-        max_range_m=max_range_m if hit is None else hit[0],
-    )
-    if blocker is not None or hit is None:
+    def terminated(start, heading, length, blocker) -> Ray:
         return Ray(
             (
                 Segment(
-                    start_m=origin,
-                    direction=direction,
-                    length_m=reach,
+                    start_m=start,
+                    direction=heading,
+                    length_m=length,
                     radius_m=radius_m,
                     blocker=blocker,
                     expected=stop(blocker),
@@ -382,11 +393,35 @@ def _ray_from(
             )
         )
 
-    distance, point = hit
-    # A crossing outside the crystal face is a miss: that sub-beam carries on undeflected,
-    # which is how a partly-aligned bundle reflects some rays and passes the rest.
-    if float(np.linalg.norm(point - crystal.origin_m)) > crystal.radius_m:
-        onward, blocker = march(
+    hit = intersect_plane(origin, direction, crystal)
+    on_face = (
+        hit is not None and float(np.linalg.norm(hit[1] - crystal.origin_m)) <= crystal.radius_m
+    )
+
+    if on_face:
+        # Stop at the face itself, so the holder behind it cannot claim the ray first.
+        reach, blocker = march(
+            query,
+            part_of_geometry,
+            origin,
+            direction,
+            radius_m,
+            ignored_parts=source_parts | crystal_parts,
+            max_range_m=hit[0],
+        )
+        if blocker is not None:
+            return terminated(origin, direction, reach, blocker)
+        strike = hit[1]
+        incoming = Segment(
+            start_m=origin,
+            direction=direction,
+            length_m=hit[0],
+            radius_m=radius_m,
+            reflected=True,
+            on_face=True,
+        )
+    else:
+        reach, blocker = march(
             query,
             part_of_geometry,
             origin,
@@ -395,39 +430,33 @@ def _ray_from(
             ignored_parts=source_parts,
             max_range_m=max_range_m,
         )
-        return Ray(
-            (
-                Segment(
-                    start_m=origin,
-                    direction=direction,
-                    length_m=onward,
-                    radius_m=radius_m,
-                    blocker=blocker,
-                    expected=stop(blocker),
-                ),
-            )
+        if blocker is None or blocker not in crystal_parts:
+            return terminated(origin, direction, reach, blocker)
+        strike = origin + direction * reach
+        incoming = Segment(
+            start_m=origin,
+            direction=direction,
+            length_m=reach,
+            radius_m=radius_m,
+            blocker=blocker,
+            expected=True,
+            reflected=True,
+            on_face=False,
         )
 
-    incoming = Segment(
-        start_m=origin,
-        direction=direction,
-        length_m=distance,
-        radius_m=radius_m,
-        reflected=True,
-    )
     outgoing_direction = reflect(direction, crystal.normal)
     outgoing_direction = outgoing_direction / np.linalg.norm(outgoing_direction)
     outgoing_reach, outgoing_blocker = march(
         query,
         part_of_geometry,
-        point,
+        strike,
         outgoing_direction,
         radius_m,
         ignored_parts=crystal_parts,
         max_range_m=max_range_m,
     )
     outgoing = Segment(
-        start_m=point,
+        start_m=strike,
         direction=outgoing_direction,
         length_m=outgoing_reach,
         radius_m=radius_m,

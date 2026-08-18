@@ -209,7 +209,9 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
     }
     assert inventory["joint_limit_overrides"]["A045"] == {
         "unit": "degree",
-        "limits": [-30, 30],
+        "limits": [125, 185],
+        "home": 155,
+        "cad_position": 0,
     }
     assert inventory["joint_limit_overrides"]["A040"] == {
         "unit": "meter",
