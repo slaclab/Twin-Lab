@@ -138,7 +138,13 @@ joint_limit_overrides:
   # pose. Home is the bottom of that travel, which is the CAD pose itself.
   A004: {unit: meter, limits: [0.0, 0.008], home: 0.0, cad_position: 0.0}
   A044: {unit: degree, limits: [-10, 10]}
-  A045: {unit: degree, limits: [-30, 30]}
+  # The Middle Crystal is drawn 155 degrees away from the orientation that reflects its
+  # beam onto the EPIX: at the CAD pose the reflection misses the detector by 471 mm,
+  # and at 155 degrees by 22 mm. The optimum is sharp - 150 and 160 degrees miss by 87
+  # and 101 mm - so this is a real solution rather than a flat region. RA04A-W01 travels
+  # +/-177 degrees, so the rotation is within the stage. `cad_position: 0` is what makes
+  # this move the geometry; without it the home would only relabel the CAD pose.
+  A045: {unit: degree, limits: [125, 185], home: 155, cad_position: 0}
   A047: {unit: degree, limits: [-10, 10]}
   A048: {unit: degree, limits: [150, 210], home: 180}
   A052: {unit: degree, limits: [-10, 10]}
@@ -253,3 +259,59 @@ reviewed_connections:
   - [P1053, P1058, P1059, P1060]  # 40909 equivalent, Middle Polycap
   - [P1088, P1096, P1093]  # ZA carriage to 46523 adapter and A067 fixed plate, North
   - [P1096, P1097, P1094, P1095]  # 40767: A067 X carrier to polycap, North
+
+# X-ray line of sight. Each beam leaves the collimating optic along that part's local +z
+# and reflects off the Bragg crystal face, which is the flat face at the part's maximum
+# local z in both cases. The crystal wafer itself is not in the STEP, so the clip's seating
+# face stands in for it; the geometry is right to the flatness of that face, which measures
+# 0.0000 mm.
+#
+# Each optic's own mount is ignored, on the same reasoning that filters a joint's two
+# bodies from the clearance report: the adapter and holder surround the aperture by
+# design, so reporting them would bury every real finding. Nothing else is excluded -
+# any other part the beam touches is a genuine obstruction.
+#
+# `expected` lists the parts a beam is supposed to land on, so ending there is normal
+# rather than a fault: the crystal it reflects from, that stack's annular PIPS diode, and
+# the EPIX 100P at the end. A ray stopped anywhere else is drawn red.
+#
+# `subdivisions` counts hexagonal rings of sub-beams across the aperture: 0 is one solid
+# ray, 1 gives 7 and 2 gives 19. Splitting it is what shows partial blockage, since a
+# single ray can only ever be wholly clear or wholly stopped.
+beam_paths:
+  - name: South
+    diameter_mm: 20.0
+    subdivisions: 1
+    source:
+      ref: P1010                                   # REF-000221282 collimating optic
+      mesh: attached_A058_polycap_and_holder.obj
+      ignore: [P1011, P1012]                       # 40767 adapter and holder
+    crystal:
+      ref: P937                                    # DSG-000042292 Bragg xtal holder clip
+      mesh: attached_A052_crystal_and_holder.obj
+      ignore: [P939, P994]                         # 42294 adapter and 27467 holder
+    expected: [P938, P783]                         # South annular PIPS diode, EPIX 100P
+  - name: Middle
+    diameter_mm: 20.0
+    subdivisions: 1
+    source:
+      ref: P1054                                   # REF-000221282 collimating optic
+      mesh: attached_A061_polycap_and_holder.obj
+      ignore: [P1048, P1055]                       # 40909 adapter and holder
+    crystal:
+      ref: P871                                    # DSG-000041271 Bragg xtal holder clip
+      mesh: attached_A044_crystal_and_holder.obj
+      ignore: [P872, P873]                         # 27467 holder and 42294 adapter
+    expected: [P868, P783]                         # Middle annular PIPS diode, EPIX 100P
+  - name: North
+    diameter_mm: 20.0
+    subdivisions: 1
+    source:
+      ref: P1089                                   # REF-000221282 collimating optic
+      mesh: attached_A067_polycap_and_holder.obj
+      ignore: [P1090, P1091]                       # 40767 adapter and holder
+    crystal:
+      ref: P875                                    # DSG-000041271 Bragg xtal holder clip
+      mesh: attached_A047_crystal_and_holder.obj
+      ignore: [P876, P891]                         # 42294 adapter and 27467 holder
+    expected: [P877, P783]                         # North annular PIPS diode, EPIX 100P
