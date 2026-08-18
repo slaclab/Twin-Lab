@@ -1,0 +1,44 @@
+from __future__ import annotations
+
+import pytest
+
+pytest.importorskip("pydrake")
+
+from twin_lab.planning import load_planning_diagram, make_collision_checker  # noqa: E402
+
+
+SCENE = "tests/fixtures/three-stage-demo.dmd.yaml"
+
+
+def test_planning_diagram_loads_explicit_robot_group() -> None:
+    planning = load_planning_diagram(
+        SCENE,
+        robot_model_instances=("stage_left", "stage_center"),
+    )
+
+    assert planning.robot_model_instances == (
+        planning.plant.GetModelInstanceByName("stage_left"),
+        planning.plant.GetModelInstanceByName("stage_center"),
+    )
+    assert planning.plant.num_positions() == 9
+    assert planning.plant.num_positions(planning.robot_model_instances[0]) == 3
+    assert planning.plant.num_positions(planning.robot_model_instances[1]) == 3
+
+
+def test_planning_diagram_rejects_unknown_robot_group() -> None:
+    with pytest.raises(ValueError, match="missing_stage"):
+        load_planning_diagram(SCENE, robot_model_instances=("missing_stage",))
+
+
+def test_native_collision_checker_checks_full_configuration() -> None:
+    planning = load_planning_diagram(SCENE, robot_model_instances=("stage_left",))
+    checker = make_collision_checker(planning)
+
+    zero = checker.GetZeroConfiguration()
+    assert zero.shape == (planning.plant.num_positions(),)
+    assert checker.CheckConfigCollisionFree(zero)
+
+    colliding = zero.copy()
+    colliding[0] = 0.05
+    colliding[3] = -0.05
+    assert not checker.CheckConfigCollisionFree(colliding)
