@@ -1,113 +1,83 @@
-"""Protocol-independent EPICS integration primitives.
+"""Protocol-independent EPICS command-history primitives.
 
-The live transport is deliberately not part of this module.  EPICS channel
-access, recorded history, and tests can all produce the same observations.
+The controls are open-loop, so EPICS contributes timestamped commands rather
+than measured motor state. Stage type and model-coordinate conversion belong
+to the catalog and simulation model respectively.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from collections.abc import Mapping
+from math import pi
 from typing import Protocol
 
 
 @dataclass(frozen=True)
 class MotorPvMap:
-    """Map one normalized Twin-Lab joint to its controls PVs."""
+    """Map one normalized Twin-Lab joint to its command PV."""
 
     joint_name: str
     command_pv: str
-    readback_pv: str
-    done_pv: str | None = None
-    stop_pv: str | None = None
-    low_limit_pv: str | None = None
-    high_limit_pv: str | None = None
-    home_status_pv: str | None = None
-    units: str = ""
-    scale_to_sdf: float = 1.0
-    offset_to_sdf: float = 0.0
 
 
 @dataclass(frozen=True)
-class MotorObservation:
-    """One timestamped, normalized motor observation."""
+class MotorCommand:
+    """One timestamped open-loop motor command in controls units."""
 
     joint_name: str
     timestamp: datetime
-    readback: float | None
-    commanded: float | None = None
-    moving: bool | None = None
-    low_limit: bool | None = None
-    high_limit: bool | None = None
-    homed: bool | None = None
-    alarm: str | None = None
-    connected: bool = True
+    commanded: float
 
     def age_s(self, now: datetime | None = None) -> float:
-        """Return observation age, rejecting naive timestamps."""
+        """Return command age, rejecting naive timestamps."""
 
         current = now or datetime.now(timezone.utc)
         timestamp = self.timestamp
         if timestamp.tzinfo is None:
-            raise ValueError("Motor observation timestamps must include a timezone")
+            raise ValueError("Motor command timestamps must include a timezone")
         return max((current - timestamp).total_seconds(), 0.0)
 
-    def is_usable(self, *, max_age_s: float, now: datetime | None = None) -> bool:
-        """Whether this observation is connected, fresh, and has a readback."""
 
-        return self.connected and self.readback is not None and self.age_s(now) <= max_age_s
+class CommandHistoryClient(Protocol):
+    """Minimal command-history interface required by the simulation."""
 
-
-class ReadOnlyEpicsClient(Protocol):
-    """Minimal read-only transport required by the simulation."""
-
-    def observe(self, mapping: MotorPvMap) -> MotorObservation: ...
+    def commands(self, mapping: MotorPvMap) -> list[MotorCommand]: ...
 
 
 class RecordedEpicsClient:
-    """Read observations from an in-memory recorded stream."""
+    """Read commands from an in-memory recorded stream."""
 
-    def __init__(self, observations: list[MotorObservation]):
-        self._observations = {item.joint_name: item for item in observations}
+    def __init__(self, commands: list[MotorCommand]):
+        self._commands = commands
 
-    def observe(self, mapping: MotorPvMap) -> MotorObservation:
-        """Return the latest recorded observation for a mapped joint."""
+    def commands(self, mapping: MotorPvMap) -> list[MotorCommand]:
+        """Return commands for a mapped joint in recorded order."""
 
-        try:
-            return self._observations[mapping.joint_name]
-        except KeyError as error:
-            raise KeyError(f"No recorded observation for '{mapping.joint_name}'") from error
+        return [item for item in self._commands if item.joint_name == mapping.joint_name]
 
 
-def to_sdf_position(mapping: MotorPvMap, controls_value: float) -> float:
-    """Convert a controls engineering value into the SDF joint coordinate."""
+def to_sdf_position(controls_value: float, joint_type: str) -> float:
+    """Convert catalog-typed controls units to Drake's internal units."""
 
-    return float(controls_value) * mapping.scale_to_sdf + mapping.offset_to_sdf
+    if joint_type == "prismatic":
+        return float(controls_value) * 0.001
+    if joint_type == "revolute":
+        return float(controls_value) * pi / 180.0
+    raise ValueError(f"Unsupported catalog joint type: {joint_type!r}")
 
 
-def require_fresh_observations(
-    observations: list[MotorObservation],
-    mappings: Mapping[str, MotorPvMap],
+def require_recent_commands(
+    commands: list[MotorCommand],
     *,
     max_age_s: float,
     now: datetime | None = None,
-) -> dict[str, float]:
-    """Return usable SDF positions or fail closed when state is incomplete."""
+) -> list[MotorCommand]:
+    """Return recent commands; this does not claim physical motor position."""
 
-    unusable = [
-        item.joint_name
-        for item in observations
-        if not item.is_usable(max_age_s=max_age_s, now=now)
-    ]
-    if unusable:
-        names = ", ".join(sorted(unusable))
-        raise ValueError(f"Motor state is missing, stale, or disconnected: {names}")
-    missing_mappings = sorted({item.joint_name for item in observations} - set(mappings))
-    if missing_mappings:
-        names = ", ".join(missing_mappings)
-        raise ValueError(f"No PV-to-SDF mapping for: {names}")
-    return {
-        item.joint_name: to_sdf_position(mappings[item.joint_name], float(item.readback))
-        for item in observations
-    }
+    for item in commands:
+        if item.timestamp.tzinfo is None:
+            raise ValueError("Motor command timestamps must include a timezone")
+        if item.age_s(now) > max_age_s:
+            raise ValueError(f"Motor command is stale: {item.joint_name}")
+    return list(commands)

@@ -5,10 +5,10 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from twin_lab.epics import (
-    MotorObservation,
+    MotorCommand,
     MotorPvMap,
     RecordedEpicsClient,
-    require_fresh_observations,
+    require_recent_commands,
     to_sdf_position,
 )
 
@@ -17,53 +17,34 @@ NOW = datetime(2026, 8, 18, 12, 0, tzinfo=timezone.utc)
 
 
 def test_controls_value_converts_to_sdf_position() -> None:
-    mapping = MotorPvMap(
-        joint_name="detector::x",
-        command_pv="DET:X:VAL",
-        readback_pv="DET:X:RBV",
-        units="mm",
-        scale_to_sdf=0.001,
-        offset_to_sdf=-0.2,
-    )
+    mapping = MotorPvMap("detector::x", "DET:X:VAL")
 
-    assert to_sdf_position(mapping, 125.0) == pytest.approx(-0.075)
+    assert to_sdf_position(125.0, "prismatic") == pytest.approx(0.125)
+    assert mapping.command_pv == "DET:X:VAL"
 
 
 def test_recorded_client_returns_latest_observation() -> None:
-    mapping = MotorPvMap("stage::x", "X:VAL", "X:RBV")
-    observation = MotorObservation("stage::x", NOW, readback=0.12, commanded=0.1)
+    mapping = MotorPvMap("stage::x", "X:VAL")
+    command = MotorCommand("stage::x", NOW, commanded=0.1)
 
-    assert RecordedEpicsClient([observation]).observe(mapping) == observation
-
-
-def test_fresh_observations_fail_closed_for_stale_or_missing_readback() -> None:
-    mappings = {
-        name: MotorPvMap(name, f"{name}:VAL", f"{name}:RBV")
-        for name in ("fresh", "stale", "missing")
-    }
-    fresh = MotorObservation("fresh", NOW, readback=0.1)
-    stale = MotorObservation("stale", NOW - timedelta(seconds=5), readback=0.2)
-    missing = MotorObservation("missing", NOW, readback=None)
-
-    with pytest.raises(ValueError, match="missing, stale"):
-        require_fresh_observations(
-            [fresh, stale, missing], mappings, max_age_s=1.0, now=NOW
-        )
+    assert RecordedEpicsClient([command]).commands(mapping) == [command]
 
 
-def test_fresh_observations_are_converted_to_sdf_coordinates() -> None:
-    mapping = MotorPvMap("stage::x", "X:VAL", "X:RBV", scale_to_sdf=0.001)
-    observation = MotorObservation("stage::x", NOW, readback=125.0)
+def test_recent_commands_fail_closed_when_stale() -> None:
+    fresh = MotorCommand("fresh", NOW, commanded=0.1)
+    stale = MotorCommand("stale", NOW - timedelta(seconds=5), commanded=0.2)
 
-    positions = require_fresh_observations(
-        [observation], {"stage::x": mapping}, max_age_s=1.0, now=NOW
-    )
-
-    assert positions == {"stage::x": pytest.approx(0.125)}
+    with pytest.raises(ValueError, match="stale"):
+        require_recent_commands([fresh, stale], max_age_s=1.0, now=NOW)
 
 
-def test_naive_observation_timestamp_is_rejected() -> None:
-    observation = MotorObservation("stage::x", datetime(2026, 8, 18, 12), readback=0.1)
+def test_catalog_typed_commands_convert_to_sdf_coordinates() -> None:
+    assert to_sdf_position(125.0, "prismatic") == pytest.approx(0.125)
+    assert to_sdf_position(45.0, "revolute") == pytest.approx(0.7853981633974483)
+
+
+def test_naive_command_timestamp_is_rejected() -> None:
+    command = MotorCommand("stage::x", datetime(2026, 8, 18, 12), commanded=0.1)
 
     with pytest.raises(ValueError, match="timezone"):
-        observation.is_usable(max_age_s=1.0, now=NOW)
+        require_recent_commands([command], max_age_s=1.0, now=NOW)
