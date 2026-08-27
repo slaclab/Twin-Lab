@@ -272,7 +272,7 @@ def test_load_max_speeds_from_real_stage_catalog() -> None:
     assert speeds["A050"] == pytest.approx(0.01)  # SXA0750-R01-R-BM, 10 mm/s
     assert speeds["A048"] == pytest.approx(0.3490659, rel=1e-4)  # RA04A-W01, 20 deg/s
     assert speeds["A067:x"] == pytest.approx(0.005)  # YA04A-R102-RRN-BM, 5 mm/s
-    assert speeds["A040"] == float("inf")  # micronix_vt_50l_c0014, no known max_speed
+    assert speeds["A040"] == pytest.approx(0.01)  # VT-50L-C0014, 10 mm/s
 
 
 def test_load_recorded_commands_rejects_naive_timestamp(tmp_path) -> None:
