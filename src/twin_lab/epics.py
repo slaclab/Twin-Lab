@@ -57,6 +57,68 @@ class RecordedEpicsClient:
         return [item for item in self._commands if item.joint_name == mapping.joint_name]
 
 
+class ArchiverBackend(Protocol):
+    """The one archapp.interactive.EpicsArchive method this module relies on."""
+
+    def get(self, pv_name: str, xarray: bool = True): ...  # noqa: ANN401
+
+
+class ArchiverEpicsClient:
+    """Command history backed by the PCDS archiver appliance.
+
+    Wraps `archapp.interactive.EpicsArchive` (see
+    https://github.com/pcdshub/archapp), which is only importable inside the
+    PCDS conda environment. Pass an explicit `backend` to use this outside
+    that environment or in tests.
+    """
+
+    def __init__(
+        self,
+        *,
+        start: datetime,
+        end: datetime,
+        backend: ArchiverBackend | None = None,
+        source_tz: timezone = timezone.utc,
+    ):
+        if start.tzinfo is None or end.tzinfo is None:
+            raise ValueError("Archiver query window must use timezone-aware datetimes")
+        if backend is None:
+            try:
+                from archapp.interactive import EpicsArchive  # type: ignore[import-not-found]
+            except ImportError as exc:
+                raise ImportError(
+                    "archapp is required for ArchiverEpicsClient. Source the PCDS "
+                    "conda env (see https://github.com/pcdshub/archapp), or pass an "
+                    "explicit `backend=` for testing/outside that environment."
+                ) from exc
+            backend = EpicsArchive()
+        self._backend = backend
+        self._start = start
+        self._end = end
+        self._source_tz = source_tz
+
+    def commands(self, mapping: MotorPvMap) -> list[MotorCommand]:
+        """Fetch and window one PV's archived values into MotorCommands."""
+
+        dataset = self._backend.get(mapping.command_pv, xarray=True)
+        timestamps = dataset["time"].values
+        values = dataset["vals"].values
+        result = []
+        for raw_timestamp, raw_value in zip(timestamps, values):
+            moment = self._to_aware(raw_timestamp)
+            if self._start <= moment <= self._end:
+                result.append(MotorCommand(mapping.joint_name, moment, float(raw_value)))
+        return result
+
+    def _to_aware(self, raw_timestamp) -> datetime:  # noqa: ANN001
+        """Convert a numpy datetime64 (assumed naive, in `source_tz`) to aware UTC."""
+
+        moment = datetime.fromtimestamp(raw_timestamp.astype("datetime64[s]").astype(int), tz=timezone.utc)
+        if self._source_tz != timezone.utc:
+            moment = moment.replace(tzinfo=self._source_tz).astimezone(timezone.utc)
+        return moment
+
+
 def to_sdf_position(controls_value: float, joint_type: str) -> float:
     """Convert catalog-typed controls units to Drake's internal units."""
 

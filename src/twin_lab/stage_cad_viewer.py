@@ -22,6 +22,7 @@ from OCP.TopoDS import TopoDS
 
 from .cad_geometry import leaf_occurrences, placed_shape, write_group_obj
 from .constraints_wizard import _occurrence_shape_by_ref, _read_step_document
+from .epics_playback import PlaybackSource
 from .paths import CACHE_ROOT, resolve_repo_path, review_artifact_stem
 
 AUTO_MOTION_LABEL = "Animation"
@@ -339,8 +340,18 @@ def prepare_stage_cad(
     return scene_path
 
 
-def view_stage_cad(scene_path: str | Path, *, fps: float = 30.0) -> None:
-    """Show reusable real-CAD meshes with one transform per occurrence."""
+def view_stage_cad(
+    scene_path: str | Path,
+    *,
+    fps: float = 30.0,
+    playback: PlaybackSource | None = None,
+) -> None:
+    """Show reusable real-CAD meshes with one transform per occurrence.
+
+    If `playback` is given, every joint it has a track for is driven from the
+    recorded session instead of its slider/animation value each frame; other
+    joints keep the existing manual/auto-motion behavior.
+    """
 
     from pydrake.geometry import Mesh, Meshcat, Rgba
     from pydrake.math import RigidTransform, RotationMatrix
@@ -422,6 +433,7 @@ def view_stage_cad(scene_path: str | Path, *, fps: float = 30.0) -> None:
         )
 
     joints = [joint for chain in scene.get("motion_chains", []) for joint in chain["joints"]]
+    playback_keys = {joint["key"] for joint in joints if playback and joint["key"] in playback.joint_names}
     for joint in joints:
         scale, unit = _slider_scale(joint)
         meshcat.AddSlider(
@@ -452,6 +464,11 @@ def view_stage_cad(scene_path: str | Path, *, fps: float = 30.0) -> None:
     )
     print(f"Motion sliders: {len(joints)}")
     print("Tick 'Animation' to start and stop cyclic motion.")
+    if playback_keys:
+        print(
+            f"Playback: recreating recorded EPICS commands for {len(playback_keys)} joint(s); "
+            "their sliders are driven by the recording, not by hand."
+        )
     print_view_help()
     print("Press Escape in Meshcat or Ctrl-C here to stop.")
     frame_period = 1.0 / max(fps, 1.0)
@@ -500,6 +517,14 @@ def view_stage_cad(scene_path: str | Path, *, fps: float = 30.0) -> None:
                 _push_sliders(meshcat, labels, values)
             values = [meshcat.GetSliderValue(label) for label in labels]
         was_automatic = automatic
+        if playback_keys:
+            positions = playback.positions()
+            for index, joint in enumerate(joints):
+                if joint["key"] in playback_keys:
+                    values[index] = positions[joint["key"]] * scales[index]
+            if tick - last_slider_push >= slider_period:
+                last_slider_push = tick
+                _push_sliders(meshcat, labels, values)
         for index, joint in enumerate(joints):
             if published[index] == values[index]:
                 continue
@@ -696,6 +721,21 @@ def main() -> None:
         default=30.0,
         help="Animation frame rate; raise for smoother motion (e.g. 120)",
     )
+    parser.add_argument(
+        "--playback-recording",
+        help="JSON file of recorded EPICS commands to recreate (see epics_playback.load_recorded_commands)",
+    )
+    parser.add_argument(
+        "--playback-command-map",
+        default="config/crystal-stack-command-map.yaml",
+        help="Joint-to-PV map used to interpret --playback-recording",
+    )
+    parser.add_argument(
+        "--playback-speed",
+        type=float,
+        default=1.0,
+        help="Playback rate relative to real time (e.g. 0.25 to 2.0)",
+    )
     args = parser.parse_args()
 
     scene = prepare_stage_cad(
@@ -705,8 +745,18 @@ def main() -> None:
     )
     print(f"Stage CAD cache: {scene.parent}")
     if not args.prepare_only:
+        playback = None
+        if args.playback_recording:
+            from .epics_playback import build_playback_from_recording
+
+            playback = build_playback_from_recording(
+                args.playback_recording,
+                args.playback_command_map,
+                args.stage_inventory,
+                speed=args.playback_speed,
+            )
         try:
-            view_stage_cad(scene, fps=args.fps)
+            view_stage_cad(scene, fps=args.fps, playback=playback)
         except KeyboardInterrupt:
             print("\nStage CAD viewer stopped.")
 

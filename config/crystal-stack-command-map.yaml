@@ -1,0 +1,42 @@
+schema: slac-crystal-stack-command-map/v1
+# Maps the 12 crystal-stack joints (3 stacks x 4 axes) moved during today's
+# EPICS session to their real motor command PVs, for
+# twin_lab.epics_playback.load_command_map().
+#
+# Derived from cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
+# motion_chains (listed base-to-payload) crossed with each ref's joint_type
+# in config/stage-catalog.yaml, then matched to the PV list (POLYCAP:CRY:*)
+# by stack letter (S/M/N = South/Middle/North Crystal, confirmed via the
+# unambiguous SXA0750 X-stage model match) and stage model family:
+#   x      = bottom-most stage (closest to the base mount), translates
+#            parallel to the base-mount plane (SXA0750-R01-BM* -> PV suffix X)
+#   y      = next stage up, also translates parallel to the base-mount plane
+#            (SXA0530-R01-BM -> PV suffix Y)
+#   swivel = the stack's single Z-axis rotation stage, kohzu_ra04a_w01
+#            (RA04A-W01-BM -> PV suffix ROT)
+#   pivot  = the stack's single tip/tilt stage, offset from its pivot point,
+#            kohzu_sa04b_rt02*_bm (SA04B-RT02*-BM -> PV suffix SWI)
+#
+# NOTE: the mirrored/non-mirrored (R-BM vs BM) SA04B variant per stack does
+# not line up with which stack has the mirrored SXA0750 variant (e.g. North
+# has the mirrored SXA0750 but the non-mirrored SA04B). That's expected -
+# each stage's handedness is an independent build choice - and doesn't affect
+# this mapping, which only depends on stack letter + model family, both
+# unambiguous per row.
+joints:
+  North Crystal:
+    x:      {ref: A050, joint_type: prismatic, command_pv: "POLYCAP:CRY:N:X"}
+    y:      {ref: A049, joint_type: prismatic, command_pv: "POLYCAP:CRY:N:Y"}
+    swivel: {ref: A048, joint_type: revolute,  command_pv: "POLYCAP:CRY:N:ROT"}
+    pivot:  {ref: A047, joint_type: revolute,  command_pv: "POLYCAP:CRY:N:SWI"}
+  Middle Crystal:
+    x:      {ref: A043, joint_type: prismatic, command_pv: "POLYCAP:CRY:M:X"}
+    y:      {ref: A042, joint_type: prismatic, command_pv: "POLYCAP:CRY:M:Y"}
+    swivel: {ref: A045, joint_type: revolute,  command_pv: "POLYCAP:CRY:M:ROT"}
+    pivot:  {ref: A044, joint_type: revolute,  command_pv: "POLYCAP:CRY:M:SWI"}
+  South Crystal:
+    x:      {ref: A055, joint_type: prismatic, command_pv: "POLYCAP:CRY:S:X"}
+    y:      {ref: A054, joint_type: prismatic, command_pv: "POLYCAP:CRY:S:Y"}
+    swivel: {ref: A053, joint_type: revolute,  command_pv: "POLYCAP:CRY:S:ROT"}
+    pivot:  {ref: A052, joint_type: revolute,  command_pv: "POLYCAP:CRY:S:SWI"}
+
