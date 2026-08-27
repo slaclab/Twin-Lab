@@ -38,6 +38,9 @@ cad = [
 drake = [
     "drake>=1.54",
 ]
+epics = [
+    "archapp @ git+https://github.com/pcdshub/archapp.git",
+]
 collision = [
     "coacd>=1.0",
     "numpy>=1.26",

@@ -500,6 +500,7 @@ def view_stage_cad(
     published: list[float | None] = [None] * len(joints)
     last_speed_value = playback.speed if has_playback_controls else None
     last_paused_value = playback.is_paused if has_playback_controls else None
+    last_readout = 0.0
     while meshcat.GetButtonClicks("Stop viewer") == 0:
         tick = time.monotonic()
         elapsed = tick - previous_tick
@@ -522,6 +523,16 @@ def view_stage_cad(
             for index, joint in enumerate(joints):
                 if joint["key"] in playback_keys:
                     values[index] = positions[joint["key"]] * scales[index]
+            # With no manual sliders in this mode, this is the only numeric feedback that
+            # values are actually changing (vs. just holding steady between commands).
+            if playback_keys and tick - last_readout >= 1.0:
+                last_readout = tick
+                sample = ", ".join(
+                    f"{joint['key']}={values[index]:+.3f}{_slider_scale(joint)[1]}"
+                    for index, joint in enumerate(joints)
+                    if joint["key"] in playback_keys
+                )
+                print(f"[playback] {sample}")
         else:
             automatic = meshcat.GetSliderValue(AUTO_MOTION_LABEL) >= 0.5
             new_reset_clicks = meshcat.GetButtonClicks("Reset to home")

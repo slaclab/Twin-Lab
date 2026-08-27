@@ -1,11 +1,14 @@
 """Real-time (or scaled) playback of recorded open-loop motor commands.
 
 Recorded commands are discrete, timestamped set-points, not continuous
-samples, so playback holds the last commanded value between two commands
-(zero-order hold) rather than interpolating a physically unknown in-between
-motion. See docs/repo memory `controls-epics-integration.md` for why
-"current position" derived from EPICS is an ESTIMATE anchored to an
-unresolved per-power-cycle offset (`home_position` below), not a measurement.
+samples. Playback ramps continuously from one commanded set-point to the
+next at the stage's real datasheet max speed (see `JointTrack.max_speed`,
+config/stage-catalog.yaml), rather than jumping instantly - but where along
+that ramp the motor actually was is still not measured (no encoders), so
+this is a best-effort reconstruction, not observed motion. See docs/repo
+memory `controls-epics-integration.md` for why "current position" derived
+from EPICS is an ESTIMATE anchored to an unresolved per-power-cycle offset
+(`home_position` below), not a measurement.
 """
 
 from __future__ import annotations
@@ -15,27 +18,41 @@ import time
 from bisect import bisect_right
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from math import pi
+from math import copysign, pi
 from pathlib import Path
 
 import yaml
 
 from .epics import CommandHistoryClient, MotorCommand, MotorPvMap, RecordedEpicsClient, to_sdf_position
+from .paths import resolve_repo_path
 
 
 @dataclass
 class JointTrack:
-    """One joint's sorted command history, in Drake units, with a home offset."""
+    """One joint's sorted command history, in Drake units, with a home offset.
+
+    `max_speed` (Drake units/s: m/s for prismatic, rad/s for revolute) caps
+    how fast `position_at()` lets the position change between one command
+    and the next. Defaults to `inf` (instant zero-order hold) for joints
+    whose real max speed isn't known.
+    """
 
     joint_name: str
     joint_type: str
     commands: list[MotorCommand]
     home_position: float = 0.0
+    max_speed: float = float("inf")
+
+    def _target_at(self, index: int) -> float:
+        return self.home_position + to_sdf_position(self.commands[index].commanded, self.joint_type)
 
     def position_at(self, moment: datetime) -> float:
-        """Zero-order-hold Drake position for this joint at `moment`.
+        """Drake position for this joint at `moment`.
 
         Before the first recorded command, holds `home_position` unchanged.
+        After a command lands, ramps at `max_speed` toward its target and
+        holds there once reached - continuous motion, not an instant jump,
+        but still just a reconstruction from open-loop set-points.
         """
 
         if not self.commands:
@@ -44,7 +61,16 @@ class JointTrack:
         index = bisect_right(timestamps, moment) - 1
         if index < 0:
             return self.home_position
-        return self.home_position + to_sdf_position(self.commands[index].commanded, self.joint_type)
+        target = self._target_at(index)
+        if self.max_speed == float("inf") or self.max_speed <= 0.0:
+            return target
+        start = self._target_at(index - 1) if index > 0 else self.home_position
+        elapsed = max((moment - self.commands[index].timestamp).total_seconds(), 0.0)
+        max_delta = self.max_speed * elapsed
+        delta = target - start
+        if abs(delta) <= max_delta:
+            return target
+        return start + copysign(max_delta, delta)
 
 
 def build_tracks(
@@ -52,10 +78,12 @@ def build_tracks(
     mappings: dict[str, MotorPvMap],
     joint_types: dict[str, str],
     home_positions: dict[str, float] | None = None,
+    max_speeds: dict[str, float] | None = None,
 ) -> dict[str, JointTrack]:
     """Fetch each joint's archived command history and sort it for playback."""
 
     homes = home_positions or {}
+    speeds = max_speeds or {}
     tracks: dict[str, JointTrack] = {}
     for joint_name, mapping in mappings.items():
         commands = sorted(client.commands(mapping), key=lambda item: item.timestamp)
@@ -64,6 +92,7 @@ def build_tracks(
             joint_type=joint_types[joint_name],
             commands=commands,
             home_position=homes.get(joint_name, 0.0),
+            max_speed=speeds.get(joint_name, float("inf")),
         )
     return tracks
 
@@ -174,13 +203,15 @@ class PlaybackSource:
         return {name: track.position_at(moment) for name, track in self._tracks.items()}
 
     def is_finished(self, now: float | None = None) -> bool:
-        """True once every track has passed its last recorded command."""
+        """True once every track's position has reached its last commanded target."""
 
         moment = self._clock.current_moment(now)
-        return all(
-            not track.commands or moment >= track.commands[-1].timestamp
-            for track in self._tracks.values()
-        )
+        for track in self._tracks.values():
+            if not track.commands:
+                continue
+            if track.position_at(moment) != track._target_at(len(track.commands) - 1):
+                return False
+        return True
 
 
 def load_command_map(path: str | Path) -> tuple[dict[str, MotorPvMap], dict[str, str]]:
@@ -275,6 +306,30 @@ def load_home_positions(inventory_path: str | Path, joint_names: list[str]) -> d
     return homes
 
 
+def load_max_speeds(inventory_path: str | Path, joint_refs: list[str]) -> dict[str, float]:
+    """Max speed (Drake units/s) for each joint, from the stage catalog's datasheet specs.
+
+    Looks up each joint's stage instance (stripping a compound "stage_ref:axis"
+    suffix down to the bare stage ref) and its catalog `max_speed`. Joints
+    whose catalog stage has no known max speed fall back to `inf` - the
+    original instant zero-order hold.
+    """
+
+    inventory_file = resolve_repo_path(inventory_path).resolve()
+    inventory = yaml.safe_load(inventory_file.read_text(encoding="utf-8"))
+    catalog_path = resolve_repo_path(inventory["stage_catalog"], relative_to=inventory_file.parent)
+    catalog = yaml.safe_load(catalog_path.read_text(encoding="utf-8"))["stages"]
+    stage_by_ref = {str(item["ref"]): item["catalog"] for item in inventory["stage_instances"]}
+
+    speeds: dict[str, float] = {}
+    for joint_ref in joint_refs:
+        stage_ref = joint_ref.split(":", 1)[0]
+        catalog_id = stage_by_ref.get(stage_ref)
+        max_speed = catalog.get(catalog_id, {}).get("max_speed") if catalog_id else None
+        speeds[joint_ref] = float(max_speed) if max_speed is not None else float("inf")
+    return speeds
+
+
 def load_recorded_commands(path: str | Path) -> tuple[datetime | None, list[MotorCommand]]:
     """Load a JSON recording: `{"commands": [{joint, timestamp, commanded}, ...]}`.
 
@@ -308,7 +363,8 @@ def build_playback_from_recording(
     if session_start is None:
         raise ValueError(f"No recorded commands in {recording_path}")
     homes = load_home_positions(inventory_path, list(mappings))
-    tracks = build_tracks(RecordedEpicsClient(commands), mappings, joint_types, homes)
+    max_speeds = load_max_speeds(inventory_path, list(mappings))
+    tracks = build_tracks(RecordedEpicsClient(commands), mappings, joint_types, homes, max_speeds)
     clock = PlaybackClock(record_start=session_start, speed=speed)
     return PlaybackSource(tracks, clock)
 
@@ -330,8 +386,9 @@ def build_playback_from_archive(
 
     mappings, joint_types = load_command_map(command_map_path)
     homes = load_home_positions(inventory_path, list(mappings))
+    max_speeds = load_max_speeds(inventory_path, list(mappings))
     client = ArchiverEpicsClient(start=start, end=end)
-    tracks = build_tracks(client, mappings, joint_types, homes)
+    tracks = build_tracks(client, mappings, joint_types, homes, max_speeds)
     clock = PlaybackClock(record_start=start, speed=speed)
     return PlaybackSource(tracks, clock)
 
@@ -358,6 +415,7 @@ class LiveArchiveSource:
         joint_types: dict[str, str],
         home_positions: dict[str, float] | None = None,
         *,
+        max_speeds: dict[str, float] | None = None,
         lookback_s: float = 30.0,
         poll_period_s: float = 2.0,
         client_factory=None,
@@ -365,11 +423,18 @@ class LiveArchiveSource:
         self._mappings = mappings
         self._joint_types = joint_types
         self._homes = home_positions or {}
+        self._max_speeds = max_speeds or {}
         self._lookback_s = lookback_s
         self._poll_period_s = poll_period_s
         self._client_factory = client_factory or _default_archiver_factory
         self._tracks: dict[str, JointTrack] = {
-            name: JointTrack(name, joint_types[name], [], self._homes.get(name, 0.0))
+            name: JointTrack(
+                name,
+                joint_types[name],
+                [],
+                self._homes.get(name, 0.0),
+                self._max_speeds.get(name, float("inf")),
+            )
             for name in mappings
         }
         self._last_poll = float("-inf")
@@ -382,7 +447,9 @@ class LiveArchiveSource:
         end = datetime.now(timezone.utc)
         start = end - timedelta(seconds=self._lookback_s)
         client = self._client_factory(start, end)
-        self._tracks = build_tracks(client, self._mappings, self._joint_types, self._homes)
+        self._tracks = build_tracks(
+            client, self._mappings, self._joint_types, self._homes, self._max_speeds
+        )
         self._last_poll = now
 
     def positions(self, now: float | None = None) -> dict[str, float]:
@@ -412,8 +479,14 @@ def build_live_source(
 
     mappings, joint_types = load_command_map(command_map_path)
     homes = load_home_positions(inventory_path, list(mappings))
+    max_speeds = load_max_speeds(inventory_path, list(mappings))
     return LiveArchiveSource(
-        mappings, joint_types, homes, lookback_s=lookback_s, poll_period_s=poll_period_s
+        mappings,
+        joint_types,
+        homes,
+        max_speeds=max_speeds,
+        lookback_s=lookback_s,
+        poll_period_s=poll_period_s,
     )
 
 
@@ -439,15 +512,23 @@ class LiveFileSource:
         joint_types: dict[str, str],
         home_positions: dict[str, float] | None = None,
         *,
+        max_speeds: dict[str, float] | None = None,
         poll_period_s: float = 1.0,
     ) -> None:
         self._path = Path(path)
         self._mappings = mappings
         self._joint_types = joint_types
         self._homes = home_positions or {}
+        self._max_speeds = max_speeds or {}
         self._poll_period_s = poll_period_s
         self._tracks: dict[str, JointTrack] = {
-            name: JointTrack(name, joint_types[name], [], self._homes.get(name, 0.0))
+            name: JointTrack(
+                name,
+                joint_types[name],
+                [],
+                self._homes.get(name, 0.0),
+                self._max_speeds.get(name, float("inf")),
+            )
             for name in mappings
         }
         self._last_mtime: float | None = None
@@ -470,7 +551,11 @@ class LiveFileSource:
         self._last_mtime = mtime
         _, commands = load_recorded_commands(self._path)
         self._tracks = build_tracks(
-            RecordedEpicsClient(commands), self._mappings, self._joint_types, self._homes
+            RecordedEpicsClient(commands),
+            self._mappings,
+            self._joint_types,
+            self._homes,
+            self._max_speeds,
         )
 
     def positions(self, now: float | None = None) -> dict[str, float]:
@@ -493,4 +578,7 @@ def build_live_file_source(
 
     mappings, joint_types = load_command_map(command_map_path)
     homes = load_home_positions(inventory_path, list(mappings))
-    return LiveFileSource(path, mappings, joint_types, homes, poll_period_s=poll_period_s)
+    max_speeds = load_max_speeds(inventory_path, list(mappings))
+    return LiveFileSource(
+        path, mappings, joint_types, homes, max_speeds=max_speeds, poll_period_s=poll_period_s
+    )

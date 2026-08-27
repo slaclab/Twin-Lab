@@ -298,6 +298,24 @@ Expect `53 passed` in roughly 15 seconds. The suite exercises the CAD manifest,
 inventory remap, SDF compiler, and collision plumbing without opening a viewer.
 If this passes, setup is done.
 
+### 7. EPICS archiver access (optional, one-time)
+
+Only needed for `slac-stage-cad --playback-start/--playback-end` or
+`slac-live-feed` (recreating/mirroring real motor commands). Playback from a
+saved JSON recording (`--playback-recording`) does not need any of this.
+
+`archapp` (https://github.com/pcdshub/archapp), PCDS's Python interface to
+the archiver appliance, is already part of `uv sync --all-extras` from step 4
+above - it is a normal pip-installable package straight from its GitHub repo,
+not something that needs the PCDS conda environment. There is no separate
+one-time step here beyond the setup you already did.
+
+What this does *not* solve, and can't: actually reaching the archiver host
+still requires being on the PCDS network (on-site or VPN) at the time you run
+the command. Installing `archapp` only means the *code* is available; if
+`uv run slac-live-feed ...` fails to fetch data, that is a network reachability
+problem, not a missing-dependency problem - check the VPN/network first.
+
 ### Running commands
 
 Every command below is prefixed with `uv run`. Step 5 already puts you in the

@@ -22,6 +22,7 @@ from twin_lab.epics_playback import (
     load_command_map,
     load_home_positions,
     load_joint_chains,
+    load_max_speeds,
     load_recorded_commands,
     load_sdf_joint_names,
     sdf_joint_name,
@@ -47,6 +48,42 @@ def test_track_zero_order_holds_between_commands() -> None:
 
     assert track.position_at(T0 + timedelta(seconds=4)) == pytest.approx(0.010)
     assert track.position_at(T0 + timedelta(seconds=15)) == pytest.approx(0.020)
+
+
+def test_track_ramps_continuously_at_max_speed_then_holds() -> None:
+    # 0 -> 0.010 m over a command landing at t=0; capped at 0.002 m/s, so it
+    # should take 5s to arrive, not jump there instantly.
+    commands = [_command("j", 0, 10.0)]
+    track = JointTrack("j", "prismatic", commands, home_position=0.0, max_speed=0.002)
+
+    assert track.position_at(T0) == pytest.approx(0.0)
+    assert track.position_at(T0 + timedelta(seconds=2)) == pytest.approx(0.004)
+    assert track.position_at(T0 + timedelta(seconds=5)) == pytest.approx(0.010)
+    # Held at the target well past the ramp, not overshooting.
+    assert track.position_at(T0 + timedelta(seconds=50)) == pytest.approx(0.010)
+
+
+def test_track_ramp_direction_is_signed() -> None:
+    commands = [_command("j", 0, 10.0), _command("j", 10, -10.0)]
+    track = JointTrack("j", "prismatic", commands, max_speed=0.002)
+
+    # Second command ramps back down from +0.010 toward -0.010 (delta 0.020m),
+    # capped at 0.002 m/s -> 10s to arrive.
+    assert track.position_at(T0 + timedelta(seconds=15)) == pytest.approx(0.000)
+    assert track.position_at(T0 + timedelta(seconds=20)) == pytest.approx(-0.010)
+
+
+def test_playback_source_is_finished_waits_for_ramp_to_complete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("twin_lab.epics_playback.time.monotonic", lambda: 0.0)
+    commands = [_command("j", 0, 10.0)]
+    tracks = {"j": JointTrack("j", "prismatic", commands, max_speed=0.001)}
+    source = PlaybackSource(tracks, PlaybackClock(record_start=T0))
+
+    # 0.010m at 0.001 m/s takes 10s; right after the command it isn't finished yet.
+    assert source.is_finished(now=1.0) is False
+    assert source.is_finished(now=15.0) is True
 
 
 def test_build_tracks_sorts_out_of_order_commands() -> None:
@@ -224,6 +261,18 @@ def test_load_home_positions_converts_degrees_and_defaults_to_zero(tmp_path) -> 
     assert homes["A048"] == pytest.approx(3.141592653589793)
     assert homes["A004"] == pytest.approx(0.003)
     assert homes["A050"] == pytest.approx(0.0)
+
+
+def test_load_max_speeds_from_real_stage_catalog() -> None:
+    speeds = load_max_speeds(
+        "cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml",
+        ["A050", "A048", "A067:x", "A040"],
+    )
+
+    assert speeds["A050"] == pytest.approx(0.01)  # SXA0750-R01-R-BM, 10 mm/s
+    assert speeds["A048"] == pytest.approx(0.3490659, rel=1e-4)  # RA04A-W01, 20 deg/s
+    assert speeds["A067:x"] == pytest.approx(0.005)  # YA04A-R102-RRN-BM, 5 mm/s
+    assert speeds["A040"] == float("inf")  # micronix_vt_50l_c0014, no known max_speed
 
 
 def test_load_recorded_commands_rejects_naive_timestamp(tmp_path) -> None:
