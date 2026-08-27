@@ -300,9 +300,9 @@ If this passes, setup is done.
 
 ### 7. EPICS archiver access (optional, one-time)
 
-Only needed for `slac-stage-cad --playback-start/--playback-end` or
-`slac-live-feed` (recreating/mirroring real motor commands). Playback from a
-saved JSON recording (`--playback-recording`) does not need any of this.
+Only needed for recreating or mirroring real motor commands (see
+"Recreating a real EPICS session" below). Playback from a saved JSON
+recording (`--playback-recording`) does not need any of this.
 
 `archapp` (https://github.com/pcdshub/archapp), PCDS's Python interface to
 the archiver appliance, is already part of `uv sync --all-extras` from step 4
@@ -312,41 +312,10 @@ one-time step here beyond the setup you already did.
 
 What this does *not* solve, and can't: actually reaching the archiver host
 still requires being on the PCDS network (on-site or VPN) at the time you run
-the command. Installing `archapp` only means the *code* is available; if
-`uv run slac-live-feed ...` fails to fetch data, that is a network reachability
-problem, not a missing-dependency problem - check the VPN/network first.
-
-**Pulling data through your own connection.** An AI coding assistant's tool
-calls run in their own sandboxed environment and cannot reach PCDS at all,
-regardless of what network your own computer is on - so the assistant can
-prepare all of this tooling, but only you can actually run it somewhere with
-real archiver access (e.g. your SLAC-issued computer, on-site or on VPN).
-`slac-export-session` is built for exactly that: run it yourself, once you're
-on the PCDS network, and it does the one real archiver call and saves a plain
-JSON file that everything else in this repo (`--playback-recording`,
-`--live-file`) already knows how to read - no archiver access needed again
-after that.
-
-```bash
-# One-shot: export a fixed time window to a file you can replay anytime
-uv run slac-export-session --start "2026-08-26 15:52" --end "2026-08-26 15:57" \
-  --out recordings/session-2026-08-26.json
-
-# Then replay it (works anywhere, archiver access not needed again):
-uv run slac-stage-cad cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
-  --playback-recording recordings/session-2026-08-26.json
-
-# Continuous: keep re-exporting a trailing window for a live view during an
-# experiment run (this is the exporter slac-live-feed --live-file tails):
-uv run slac-export-session --follow --out /shared/live.json
-
-# In another terminal (or on another machine that can read that path):
-uv run slac-live-feed cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
-  --live-file /shared/live.json
-```
-
-If `--start`/`--end` are omitted in one-shot mode, it prompts for them
-interactively instead.
+the command. Installing `archapp` only means the *code* is available - if a
+command below fails to fetch data, that is a network reachability problem,
+not a missing-dependency problem, and the command will tell you so plainly
+rather than showing a raw error.
 
 ### Running commands
 
@@ -836,6 +805,114 @@ None of this touches the model or the clearance checking, only the camera, so th
 mouse still works normally afterwards. For a clean plate in a screenshot, clear
 **Collision detection** first so no parts are lit yellow or red.
 
+## Recreating a real EPICS session (playback)
+
+This lets you replay what the real hardware actually did during a session -
+using the archived motor commands from EPICS - as an animation in the
+simulator, instead of moving joints by hand. **You do not need to know EPICS,
+PVs, or the controls GUI for any of this** - the tooling asks plain questions
+(roughly when the motion happened) and does the rest.
+
+There are two separate steps, on purpose, and they can happen on two
+different computers:
+
+1. **Export** the real data to a plain file. This is the only step that needs
+   the archiver, so it's the only step that needs to run somewhere with PCDS
+   network access (your SLAC-issued computer, on-site or on VPN).
+2. **Replay** that file in the simulator. This never touches the archiver, so
+   it works anywhere - a laptop off-site, a shared machine, or handed to a
+   coworker as just a file.
+
+### 1. Export a session
+
+```bash
+uv run slac-export-session
+```
+
+Run with no arguments, it asks you two questions and shows you exactly what
+it's about to do before doing anything:
+
+```
+Start time (e.g. '2026-08-26 3:52pm', or just '3:52pm' for today): 2026-08-26 3:52pm
+End time (e.g. '2026-08-26 3:52pm', or just '3:52pm' for today): 2026-08-26 3:57pm
+
+About to export:
+  Joint map:    config/crystal-stack-command-map.yaml (19 joint(s))
+  Time window:  2026-08-26T15:52:00-07:00  to  2026-08-26T15:57:00-07:00  (duration 0:05:00)
+  Output file:  recordings/session-20260826T1552.json
+
+Continue? [Y/n]:
+```
+
+It accepts times in whatever format is convenient - `2026-08-26 15:52`,
+`2026-08-26 3:52pm`, `08/26/2026 3:52 PM`, or a bare `3:52pm` if you mean
+today - and re-asks if it doesn't understand rather than crashing. It then
+reports each joint by name as it fetches, including a flag on any joint that
+came back with no data (usually a sign of a mistyped time window, not a bug):
+
+```
+Connecting to the EPICS archiver...
+  - North Crystal x (A050): 4 command(s)
+  - North Crystal y (A049): 3 command(s)
+  ! Detector z (A040): no data found in this window
+...
+Wrote 42 command(s) across 19 joint(s) to recordings/session-20260826T1552.json
+```
+
+If the archiver can't be reached (wrong network, VPN not connected, `archapp`
+not installed), it says so in plain language and tells you what to do about
+it, instead of showing a Python error.
+
+`--start`/`--end`/`--out` can be passed directly to skip the prompts (useful
+for scripting); see `uv run slac-export-session --help`.
+
+### 2. Replay it
+
+```bash
+uv run slac-stage-cad cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
+  --playback-recording recordings/session-20260826T1552.json
+```
+
+This opens the same Meshcat viewer as normal, but view-only: no manual
+sliders, since the recording is what's driving the joints. Instead the panel
+has:
+
+| Control | Effect |
+| --- | --- |
+| `Playback speed (x)` | Slider, 0.1x-4x. Change it mid-playback without losing your place |
+| `Playback: paused` | Checkbox. Freezes the current pose; uncheck to continue from there |
+| `Restart playback` | Button. Jumps back to the start of the recording |
+
+Joints move continuously between recorded commands (at each stage's real
+datasheet max speed, see `config/stage-catalog.yaml`), not in instant jumps -
+but this is a reconstruction from open-loop set-points, not a measurement:
+there are no encoders on these motors, so what you see is "commanded to move
+here," never independently confirmed "arrived here."
+
+### 3. Mirror it live during an experiment (optional)
+
+For watching the simulator track the real hardware in near-real-time while an
+experiment is running, run the exporter in `--follow` mode on a
+PCDS-networked machine:
+
+```bash
+uv run slac-export-session --follow --out /shared/live.json
+```
+
+It keeps re-exporting a trailing window to that file every couple of seconds
+until you stop it (`Ctrl-C`). In another terminal (or on another machine that
+can read the same path, e.g. a network share):
+
+```bash
+uv run slac-live-feed cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
+  --live-file /shared/live.json
+```
+
+This viewer is also view-only, with no speed/pause/restart controls - it
+always mirrors whatever the real hardware is doing right now, with a lag of a
+couple of seconds (about how far the archiver itself trails the real
+hardware).
+
 ## Updating the 43841 STEP
 
 **Only when a new STEP revision arrives.** Nothing in this section is part of
@@ -978,7 +1055,9 @@ entry points, all installed with the package. Prefix each with `uv run`:
 
 | Command | Module | Purpose |
 | --- | --- | --- |
-| `slac-stage-cad` | `stage_cad_viewer` | Cached CAD viewer with manual sliders and animation |
+| `slac-stage-cad` | `stage_cad_viewer` | Cached CAD viewer with manual sliders and animation; also plays back recordings (`--playback-recording`/`--playback-start`/`--playback-end`) |
+| `slac-live-feed` | `stage_cad_viewer` | View-only viewer mirroring real EPICS commands live (see "Recreating a real EPICS session") |
+| `slac-export-session` | `archive_export` | Guided export of real EPICS archiver data to a replayable JSON file |
 | `slac-collision` | `collision_viewer` | Drake viewer with live clearance reporting |
 | `slac-compile-sdf` | `sdf_compiler` | Portable SDF share package |
 | `slac-decompose` | `convex_collision` | Convex-decompose cached meshes ahead of time |

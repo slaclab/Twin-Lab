@@ -101,8 +101,19 @@ class ArchiverEpicsClient:
         """Fetch and window one PV's archived values into MotorCommands."""
 
         dataset = self._backend.get(mapping.command_pv, xarray=True)
-        timestamps = dataset["time"].values
-        values = dataset["vals"].values
+        try:
+            timestamps = dataset["time"].values
+            values = dataset["vals"].values
+        except KeyError as exc:
+            # archapp swallows its own connection failures (prints "No connection
+            # to archiver..." to stdout) and returns a dataset with no variables
+            # at all, rather than raising - this turns that into something
+            # catchable and diagnosable instead of a confusing bare KeyError.
+            raise ConnectionError(
+                f"The archiver returned no data for {mapping.command_pv!r} - this usually "
+                "means it could not be reached (check PCDS network/VPN), not that the PV "
+                "has no history."
+            ) from exc
         result = []
         for raw_timestamp, raw_value in zip(timestamps, values):
             moment = self._to_aware(raw_timestamp)
