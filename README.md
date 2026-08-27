@@ -316,6 +316,38 @@ the command. Installing `archapp` only means the *code* is available; if
 `uv run slac-live-feed ...` fails to fetch data, that is a network reachability
 problem, not a missing-dependency problem - check the VPN/network first.
 
+**Pulling data through your own connection.** An AI coding assistant's tool
+calls run in their own sandboxed environment and cannot reach PCDS at all,
+regardless of what network your own computer is on - so the assistant can
+prepare all of this tooling, but only you can actually run it somewhere with
+real archiver access (e.g. your SLAC-issued computer, on-site or on VPN).
+`slac-export-session` is built for exactly that: run it yourself, once you're
+on the PCDS network, and it does the one real archiver call and saves a plain
+JSON file that everything else in this repo (`--playback-recording`,
+`--live-file`) already knows how to read - no archiver access needed again
+after that.
+
+```bash
+# One-shot: export a fixed time window to a file you can replay anytime
+uv run slac-export-session --start "2026-08-26 15:52" --end "2026-08-26 15:57" \
+  --out recordings/session-2026-08-26.json
+
+# Then replay it (works anywhere, archiver access not needed again):
+uv run slac-stage-cad cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
+  --playback-recording recordings/session-2026-08-26.json
+
+# Continuous: keep re-exporting a trailing window for a live view during an
+# experiment run (this is the exporter slac-live-feed --live-file tails):
+uv run slac-export-session --follow --out /shared/live.json
+
+# In another terminal (or on another machine that can read that path):
+uv run slac-live-feed cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
+  --live-file /shared/live.json
+```
+
+If `--start`/`--end` are omitted in one-shot mode, it prompts for them
+interactively instead.
+
 ### Running commands
 
 Every command below is prefixed with `uv run`. Step 5 already puts you in the
