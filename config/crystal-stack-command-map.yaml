@@ -1,13 +1,22 @@
 schema: slac-crystal-stack-command-map/v1
-# Maps the 12 crystal-stack joints (3 stacks x 4 axes) moved during today's
-# EPICS session to their real motor command PVs, for
-# twin_lab.epics_playback.load_command_map().
+# Maps known stage joints to their real motor command PVs, for
+# twin_lab.epics_playback.load_command_map(). Originally just the 12
+# crystal-stack joints (3 stacks x 4 axes) moved during the 2026-08-26
+# session; now also covers the Detector and the three Polycap stacks from
+# the same controls PV table (image supplied 2026-08-26).
 #
-# Derived from cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
-# motion_chains (listed base-to-payload) crossed with each ref's joint_type
-# in config/stage-catalog.yaml, then matched to the PV list (POLYCAP:CRY:*)
-# by stack letter (S/M/N = South/Middle/North Crystal, confirmed via the
-# unambiguous SXA0750 X-stage model match) and stage model family:
+# Each top-level key is the exact chain name from
+# cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
+# (motion_chains / compound_motion_chains) - twin_lab.epics_playback relies
+# on that exact match to derive the compiled SDF joint name (see
+# sdf_joint_name()), so don't rename these groups without also checking
+# stage_cad_viewer.py's motion_chains output and the compiled SDF.
+#
+# Crystal stacks derived from motion_chains (listed base-to-payload) crossed
+# with each ref's joint_type in config/stage-catalog.yaml, then matched to
+# the PV list (POLYCAP:CRY:*) by stack letter (S/M/N = South/Middle/North
+# Crystal, confirmed via the unambiguous SXA0750 X-stage model match) and
+# stage model family:
 #   x      = bottom-most stage (closest to the base mount), translates
 #            parallel to the base-mount plane (SXA0750-R01-BM* -> PV suffix X)
 #   y      = next stage up, also translates parallel to the base-mount plane
@@ -23,6 +32,11 @@ schema: slac-crystal-stack-command-map/v1
 # each stage's handedness is an independent build choice - and doesn't affect
 # this mapping, which only depends on stack letter + model family, both
 # unambiguous per row.
+#
+# Detector and Polycap `ref` values use the compound-chain "stage_ref:axis"
+# form (e.g. "A067:x") to match stage_cad_viewer.py's joint["key"] for
+# compound_motion_chains joints; crystal/Detector joints are simple
+# motion_chains, so their `ref` is just the bare stage ref.
 joints:
   North Crystal:
     x:      {ref: A050, joint_type: prismatic, command_pv: "POLYCAP:CRY:N:X"}
@@ -39,4 +53,19 @@ joints:
     y:      {ref: A054, joint_type: prismatic, command_pv: "POLYCAP:CRY:S:Y"}
     swivel: {ref: A053, joint_type: revolute,  command_pv: "POLYCAP:CRY:S:ROT"}
     pivot:  {ref: A052, joint_type: revolute,  command_pv: "POLYCAP:CRY:S:SWI"}
+  Detector:
+    z: {ref: A040, joint_type: prismatic, command_pv: "POLYCAP:DET:Z"}
+  North Polycap:
+    z: {ref: "A065:z", joint_type: prismatic, command_pv: "POLYCAP:PC:N:Z"}
+    x: {ref: "A067:x", joint_type: prismatic, command_pv: "POLYCAP:PC:N:X"}
+    # y (A067:y) has no PV in the supplied PV table - the YA04A-R102 stage is
+    # a two-axis unit, so this joint can't be replayed until that PV shows up.
+  Middle Polycap:
+    z: {ref: "A063:z", joint_type: prismatic, command_pv: "POLYCAP:PC:M:Z"}
+    x: {ref: "A061:x", joint_type: prismatic, command_pv: "POLYCAP:PC:M:X"}
+    # y (A061:y): same gap as North Polycap above.
+  South Polycap:
+    z: {ref: "A059:z", joint_type: prismatic, command_pv: "POLYCAP:PC:S:Z"}
+    x: {ref: "A058:x", joint_type: prismatic, command_pv: "POLYCAP:PC:S:X"}
+    # y (A058:y): same gap as North Polycap above.
 

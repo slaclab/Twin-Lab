@@ -28,6 +28,8 @@ from .paths import CACHE_ROOT, resolve_repo_path, review_artifact_stem
 AUTO_MOTION_LABEL = "Animation"
 AUTO_RANGE_LABEL = "Auto motion range (% of travel)"
 AUTO_PERIOD_LABEL = "Auto motion period (s)"
+PLAYBACK_SPEED_LABEL = "Playback speed (x)"
+PLAYBACK_PAUSED_LABEL = "Playback: paused"
 # While animating, the sliders report the pose rather than drive it, so they only have to
 # keep up with the eye. Pushing all of them every frame costs a dat.GUI redraw each, which
 # is far more work than the browser can absorb at the frame rate.
@@ -434,20 +436,29 @@ def view_stage_cad(
 
     joints = [joint for chain in scene.get("motion_chains", []) for joint in chain["joints"]]
     playback_keys = {joint["key"] for joint in joints if playback and joint["key"] in playback.joint_names}
-    for joint in joints:
-        scale, unit = _slider_scale(joint)
-        meshcat.AddSlider(
-            _slider_label(joint, unit),
-            joint["limits"][0] * scale,
-            joint["limits"][1] * scale,
-            0.1,
-            joint["home"] * scale,
-        )
-    # Drake can publish a slider but not a checkbox, so this steps 0 to 1 and
-    # meshcat_ui.TOGGLE_JS swaps a real checkbox into its row.
-    meshcat.AddSlider(AUTO_MOTION_LABEL, 0.0, 1.0, 1.0, 0.0)
-    meshcat.AddSlider(AUTO_RANGE_LABEL, 0.0, 100.0, 1.0, 25.0)
-    meshcat.AddSlider(AUTO_PERIOD_LABEL, 2.0, 60.0, 0.5, 12.0)
+    # Playback/live modes are view-only: the recording (or the real hardware) is the only
+    # thing allowed to move a joint, so the manual sliders and cyclic-animation controls
+    # that would otherwise fight it are left off entirely.
+    has_playback_controls = playback is not None and hasattr(playback, "set_speed")
+    if playback is None:
+        for joint in joints:
+            scale, unit = _slider_scale(joint)
+            meshcat.AddSlider(
+                _slider_label(joint, unit),
+                joint["limits"][0] * scale,
+                joint["limits"][1] * scale,
+                0.1,
+                joint["home"] * scale,
+            )
+        # Drake can publish a slider but not a checkbox, so this steps 0 to 1 and
+        # meshcat_ui.TOGGLE_JS swaps a real checkbox into its row.
+        meshcat.AddSlider(AUTO_MOTION_LABEL, 0.0, 1.0, 1.0, 0.0)
+        meshcat.AddSlider(AUTO_RANGE_LABEL, 0.0, 100.0, 1.0, 25.0)
+        meshcat.AddSlider(AUTO_PERIOD_LABEL, 2.0, 60.0, 0.5, 12.0)
+    if has_playback_controls:
+        meshcat.AddSlider(PLAYBACK_SPEED_LABEL, 0.1, 4.0, 0.05, playback.speed)
+        meshcat.AddSlider(PLAYBACK_PAUSED_LABEL, 0.0, 1.0, 1.0, 1.0 if playback.is_paused else 0.0)
+        meshcat.AddButton("Restart playback")
 
     center = [
         sum(item["translation_m"][axis] for item in instances) / len(instances) for axis in range(3)
@@ -455,25 +466,29 @@ def view_stage_cad(
     eye = [center[0] + 0.8, center[1] + 0.8, center[2] + 0.8]
     # pydrake's stub gives SetCameraPose a malformed Eigen shape; lists convert at runtime.
     meshcat.SetCameraPose(eye, center)  # pyright: ignore[reportArgumentType]
-    meshcat.AddButton("Reset to home")
+    if playback is None:
+        meshcat.AddButton("Reset to home")
     meshcat.AddButton("Stop viewer", "Escape")
     announce_viewer("Reusable stage CAD", meshcat)
     print(
         f"Showing {len(instances)} real stages and {scene['attached_part_count']} attached "
         "non-fastener parts."
     )
-    print(f"Motion sliders: {len(joints)}")
-    print("Tick 'Animation' to start and stop cyclic motion.")
-    if playback_keys:
+    if playback is None:
+        print(f"Motion sliders: {len(joints)}")
+        print("Tick 'Animation' to start and stop cyclic motion.")
+    elif playback_keys:
+        label = "Live EPICS feed" if not has_playback_controls else "Playback"
         print(
-            f"Playback: recreating recorded EPICS commands for {len(playback_keys)} joint(s); "
-            "their sliders are driven by the recording, not by hand."
+            f"{label}: recreating recorded EPICS commands for {len(playback_keys)} joint(s). "
+            "This is view-only - use the Meshcat panel controls to pause/speed/restart it."
         )
     print_view_help()
     print("Press Escape in Meshcat or Ctrl-C here to stop.")
     frame_period = 1.0 / max(fps, 1.0)
     slider_period = 1.0 / SLIDER_PUSH_HZ
     reset_clicks = 0
+    restart_clicks = 0
     phase = 0.0
     previous_tick = time.monotonic()
     last_slider_push = 0.0
@@ -483,48 +498,61 @@ def view_stage_cad(
     homes = [joint["home"] * scale for joint, scale in zip(joints, scales, strict=True)]
     values = list(homes)
     published: list[float | None] = [None] * len(joints)
+    last_speed_value = playback.speed if has_playback_controls else None
+    last_paused_value = playback.is_paused if has_playback_controls else None
     while meshcat.GetButtonClicks("Stop viewer") == 0:
         tick = time.monotonic()
         elapsed = tick - previous_tick
         previous_tick = tick
-        automatic = meshcat.GetSliderValue(AUTO_MOTION_LABEL) >= 0.5
-        new_reset_clicks = meshcat.GetButtonClicks("Reset to home")
-        if new_reset_clicks != reset_clicks:
-            reset_clicks = new_reset_clicks
-            phase = 0.0
-            automatic = False
-            meshcat.SetSliderValue(AUTO_MOTION_LABEL, 0.0)
-            values = list(homes)
-            _push_sliders(meshcat, labels, values)
-        if automatic:
-            period = max(meshcat.GetSliderValue(AUTO_PERIOD_LABEL), 0.1)
-            span_fraction = meshcat.GetSliderValue(AUTO_RANGE_LABEL) / 100.0
-            phase = math.fmod(phase + 2.0 * math.pi * elapsed / period, 2.0 * math.pi)
-            values = []
-            for index, joint in enumerate(joints):
-                offset = 2.0 * math.pi * index / max(len(joints), 1)
-                target = joint["home"] + _auto_amplitude(joint, span_fraction) * math.sin(
-                    phase + offset
-                )
-                values.append(target * scales[index])
-            if tick - last_slider_push >= slider_period:
-                last_slider_push = tick
-                _push_sliders(meshcat, labels, values)
-        else:
-            if was_automatic:
-                # The sliders only catch up a few times a second while animating, so hand
-                # them the pose that is actually on screen before they become the input.
-                _push_sliders(meshcat, labels, values)
-            values = [meshcat.GetSliderValue(label) for label in labels]
-        was_automatic = automatic
-        if playback_keys:
+        if playback is not None:
+            if has_playback_controls:
+                speed_value = meshcat.GetSliderValue(PLAYBACK_SPEED_LABEL)
+                if speed_value != last_speed_value:
+                    playback.set_speed(max(speed_value, 0.05))
+                    last_speed_value = speed_value
+                paused_value = meshcat.GetSliderValue(PLAYBACK_PAUSED_LABEL) >= 0.5
+                if paused_value != last_paused_value:
+                    (playback.pause if paused_value else playback.resume)()
+                    last_paused_value = paused_value
+                new_restart_clicks = meshcat.GetButtonClicks("Restart playback")
+                if new_restart_clicks != restart_clicks:
+                    restart_clicks = new_restart_clicks
+                    playback.restart()
             positions = playback.positions()
             for index, joint in enumerate(joints):
                 if joint["key"] in playback_keys:
                     values[index] = positions[joint["key"]] * scales[index]
-            if tick - last_slider_push >= slider_period:
-                last_slider_push = tick
+        else:
+            automatic = meshcat.GetSliderValue(AUTO_MOTION_LABEL) >= 0.5
+            new_reset_clicks = meshcat.GetButtonClicks("Reset to home")
+            if new_reset_clicks != reset_clicks:
+                reset_clicks = new_reset_clicks
+                phase = 0.0
+                automatic = False
+                meshcat.SetSliderValue(AUTO_MOTION_LABEL, 0.0)
+                values = list(homes)
                 _push_sliders(meshcat, labels, values)
+            if automatic:
+                period = max(meshcat.GetSliderValue(AUTO_PERIOD_LABEL), 0.1)
+                span_fraction = meshcat.GetSliderValue(AUTO_RANGE_LABEL) / 100.0
+                phase = math.fmod(phase + 2.0 * math.pi * elapsed / period, 2.0 * math.pi)
+                values = []
+                for index, joint in enumerate(joints):
+                    offset = 2.0 * math.pi * index / max(len(joints), 1)
+                    target = joint["home"] + _auto_amplitude(joint, span_fraction) * math.sin(
+                        phase + offset
+                    )
+                    values.append(target * scales[index])
+                if tick - last_slider_push >= slider_period:
+                    last_slider_push = tick
+                    _push_sliders(meshcat, labels, values)
+            else:
+                if was_automatic:
+                    # The sliders only catch up a few times a second while animating, so hand
+                    # them the pose that is actually on screen before they become the input.
+                    _push_sliders(meshcat, labels, values)
+                values = [meshcat.GetSliderValue(label) for label in labels]
+            was_automatic = automatic
         for index, joint in enumerate(joints):
             if published[index] == values[index]:
                 continue
@@ -726,9 +754,18 @@ def main() -> None:
         help="JSON file of recorded EPICS commands to recreate (see epics_playback.load_recorded_commands)",
     )
     parser.add_argument(
+        "--playback-start",
+        help="ISO-8601 start of an archiver time window to replay, e.g. 2026-08-26T15:52:00-07:00 "
+        "(requires archapp; alternative to --playback-recording)",
+    )
+    parser.add_argument(
+        "--playback-end",
+        help="ISO-8601 end of the archiver time window given by --playback-start",
+    )
+    parser.add_argument(
         "--playback-command-map",
         default="config/crystal-stack-command-map.yaml",
-        help="Joint-to-PV map used to interpret --playback-recording",
+        help="Joint-to-PV map used to interpret --playback-recording/--playback-start",
     )
     parser.add_argument(
         "--playback-speed",
@@ -755,10 +792,94 @@ def main() -> None:
                 args.stage_inventory,
                 speed=args.playback_speed,
             )
+        elif args.playback_start or args.playback_end:
+            if not (args.playback_start and args.playback_end):
+                raise SystemExit("--playback-start and --playback-end must be given together")
+            from datetime import datetime
+
+            from .epics_playback import build_playback_from_archive
+
+            playback = build_playback_from_archive(
+                datetime.fromisoformat(args.playback_start),
+                datetime.fromisoformat(args.playback_end),
+                args.playback_command_map,
+                args.stage_inventory,
+                speed=args.playback_speed,
+            )
         try:
             view_stage_cad(scene, fps=args.fps, playback=playback)
         except KeyboardInterrupt:
             print("\nStage CAD viewer stopped.")
+
+
+def main_live() -> None:
+    """Entry point for `slac-live-feed`: view-only, mirrors real EPICS commands.
+
+    Two mutually exclusive sources:
+    - Direct archiver polling (`--lookback-s`/`--poll-period-s`, default): needs
+      `archapp` + PCDS network access.
+    - `--live-file PATH`: watches a recording JSON file that something else
+      (running wherever archapp *is* available) keeps overwriting - the
+      workaround for environments that cannot reach the archiver directly.
+    """
+
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Mirror real EPICS motor commands live during an experiment run"
+    )
+    parser.add_argument("stage_inventory")
+    parser.add_argument("--rebuild", action="store_true")
+    parser.add_argument("--deflection-mm", type=float, default=2.0)
+    parser.add_argument("--fps", type=float, default=30.0)
+    parser.add_argument("--command-map", default="config/crystal-stack-command-map.yaml")
+    parser.add_argument(
+        "--live-file",
+        help="Watch this recording JSON file instead of polling the archiver directly "
+        "(for environments without archapp/PCDS network access - see "
+        "epics_playback.LiveFileSource)",
+    )
+    parser.add_argument(
+        "--lookback-s",
+        type=float,
+        default=30.0,
+        help="How far back each archiver poll looks for the latest command per joint "
+        "(ignored with --live-file)",
+    )
+    parser.add_argument(
+        "--poll-period-s",
+        type=float,
+        default=2.0,
+        help="How often to re-poll the archiver, or re-check --live-file's mtime (the "
+        "archiver itself trails real hardware by roughly this much already, so shorter "
+        "than ~1-2s buys little)",
+    )
+    args = parser.parse_args()
+
+    scene = prepare_stage_cad(
+        args.stage_inventory, rebuild=args.rebuild, linear_deflection_mm=args.deflection_mm
+    )
+    print(f"Stage CAD cache: {scene.parent}")
+    if args.live_file:
+        from .epics_playback import build_live_file_source
+
+        live = build_live_file_source(
+            args.live_file, args.command_map, args.stage_inventory, poll_period_s=args.poll_period_s
+        )
+        print(f"Watching {args.live_file} for updates every {args.poll_period_s}s.")
+    else:
+        from .epics_playback import build_live_source
+
+        live = build_live_source(
+            args.command_map,
+            args.stage_inventory,
+            lookback_s=args.lookback_s,
+            poll_period_s=args.poll_period_s,
+        )
+    try:
+        view_stage_cad(scene, fps=args.fps, playback=live)
+    except KeyboardInterrupt:
+        print("\nLive feed viewer stopped.")
 
 
 if __name__ == "__main__":

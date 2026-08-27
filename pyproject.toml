@@ -46,6 +46,7 @@ collision = [
 [project.scripts]
 slac-cad-manifest = "twin_lab.constraints_wizard:main"
 slac-stage-cad = "twin_lab.stage_cad_viewer:main"
+slac-live-feed = "twin_lab.stage_cad_viewer:main_live"
 slac-compile-sdf = "twin_lab.sdf_compiler:main"
 slac-collision = "twin_lab.collision_viewer:main"
 slac-decompose = "twin_lab.convex_collision:main"

@@ -13,13 +13,18 @@ import yaml
 from twin_lab.epics import MotorCommand, MotorPvMap, RecordedEpicsClient
 from twin_lab.epics_playback import (
     JointTrack,
+    LiveArchiveSource,
+    LiveFileSource,
     PlaybackClock,
     PlaybackSource,
     build_playback_from_recording,
     build_tracks,
     load_command_map,
     load_home_positions,
+    load_joint_chains,
     load_recorded_commands,
+    load_sdf_joint_names,
+    sdf_joint_name,
 )
 
 
@@ -57,7 +62,7 @@ def test_playback_clock_advances_with_speed(monkeypatch: pytest.MonkeyPatch) -> 
     fake_time = [0.0]
     monkeypatch.setattr("twin_lab.epics_playback.time.monotonic", lambda: fake_time[0])
 
-    clock = PlaybackClock(session_start=T0, speed=2.0)
+    clock = PlaybackClock(record_start=T0, speed=2.0)
     fake_time[0] = 3.0
 
     assert clock.current_moment() == T0 + timedelta(seconds=6)
@@ -67,7 +72,7 @@ def test_playback_clock_set_speed_does_not_jump(monkeypatch: pytest.MonkeyPatch)
     fake_time = [0.0]
     monkeypatch.setattr("twin_lab.epics_playback.time.monotonic", lambda: fake_time[0])
 
-    clock = PlaybackClock(session_start=T0, speed=1.0)
+    clock = PlaybackClock(record_start=T0, speed=1.0)
     fake_time[0] = 4.0
     before = clock.current_moment()
     clock.set_speed(0.25)
@@ -75,20 +80,76 @@ def test_playback_clock_set_speed_does_not_jump(monkeypatch: pytest.MonkeyPatch)
     assert clock.current_moment() == before
 
 
+def test_playback_clock_pause_freezes_and_resume_continues(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_time = [0.0]
+    monkeypatch.setattr("twin_lab.epics_playback.time.monotonic", lambda: fake_time[0])
+
+    clock = PlaybackClock(record_start=T0, speed=1.0)
+    fake_time[0] = 5.0
+    clock.pause()
+    assert clock.is_paused is True
+    frozen = clock.current_moment()
+    fake_time[0] = 50.0
+    # Time passing while paused must not move the recorded moment.
+    assert clock.current_moment() == frozen
+
+    clock.resume()
+    fake_time[0] = 53.0
+    assert clock.is_paused is False
+    assert clock.current_moment() == frozen + timedelta(seconds=3)
+
+
+def test_playback_clock_restart_seeks_to_record_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_time = [0.0]
+    monkeypatch.setattr("twin_lab.epics_playback.time.monotonic", lambda: fake_time[0])
+
+    clock = PlaybackClock(record_start=T0, speed=2.0)
+    fake_time[0] = 10.0
+    clock.set_speed(0.5)
+    clock.restart()
+    fake_time[0] = 12.0
+
+    assert clock.current_moment() == T0 + timedelta(seconds=1)
+
+
 def test_playback_source_reports_positions_and_finished(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("twin_lab.epics_playback.time.monotonic", lambda: 0.0)
     commands = [_command("j", 0, 10.0), _command("j", 10, 20.0)]
     tracks = {"j": JointTrack("j", "prismatic", commands)}
-    clock = PlaybackClock(session_start=T0 + timedelta(seconds=10))
+    clock = PlaybackClock(record_start=T0 + timedelta(seconds=10))
     source = PlaybackSource(tracks, clock)
 
     assert source.positions(now=0.0) == pytest.approx({"j": 0.020})
     assert source.is_finished(now=0.0) is True
 
 
+def test_playback_source_pause_resume_restart_delegate_to_clock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_time = [0.0]
+    monkeypatch.setattr("twin_lab.epics_playback.time.monotonic", lambda: fake_time[0])
+    tracks: dict[str, JointTrack] = {}
+    source = PlaybackSource(tracks, PlaybackClock(record_start=T0, speed=1.0))
+
+    assert source.speed == pytest.approx(1.0)
+    assert source.is_paused is False
+
+    source.set_speed(2.0)
+    assert source.speed == pytest.approx(2.0)
+
+    source.pause()
+    assert source.is_paused is True
+
+    source.resume()
+    assert source.is_paused is False
+
+    source.restart()
+    assert source.positions(now=0.0) == {}
+
+
 def test_playback_clock_rejects_naive_start() -> None:
     with pytest.raises(ValueError, match="timezone"):
-        PlaybackClock(session_start=datetime(2026, 8, 26))
+        PlaybackClock(record_start=datetime(2026, 8, 26))
 
 
 def test_load_command_map_raises_on_missing_pv(tmp_path) -> None:
@@ -120,7 +181,34 @@ def test_real_crystal_stack_command_map_is_fully_filled_in() -> None:
 
     assert mappings["A047"].command_pv == "POLYCAP:CRY:N:SWI"
     assert joint_types["A047"] == "revolute"
-    assert len(mappings) == 12
+    assert mappings["A040"].command_pv == "POLYCAP:DET:Z"
+    assert mappings["A067:x"].command_pv == "POLYCAP:PC:N:X"
+    assert mappings["A065:z"].command_pv == "POLYCAP:PC:N:Z"
+    assert joint_types["A067:x"] == "prismatic"
+    assert len(mappings) == 19  # 12 crystal + 1 detector + 3 polycap stacks x 2 axes
+
+
+def test_sdf_joint_name_matches_the_real_compiled_sdf() -> None:
+    chains = load_joint_chains("config/crystal-stack-command-map.yaml")
+
+    assert sdf_joint_name(chains["A047"], "A047") == "north_crystal_a047_motion"
+    assert sdf_joint_name(chains["A040"], "A040") == "detector_a040_motion"
+    assert sdf_joint_name(chains["A067:x"], "A067:x") == "north_polycap_a067_x"
+    assert sdf_joint_name(chains["A065:z"], "A065:z") == "north_polycap_a065_z"
+    assert sdf_joint_name(chains["A058:x"], "A058:x") == "south_polycap_a058_x"
+
+
+def test_load_sdf_joint_names_covers_every_command_map_joint() -> None:
+    sdf_names = load_sdf_joint_names("config/crystal-stack-command-map.yaml")
+
+    assert sdf_names["A053"] == "south_crystal_a053_motion"
+    assert sdf_names["A061:x"] == "middle_polycap_a061_x"
+    # Every name here should be one the real compiled SDF actually has.
+    real_sdf = Path(
+        "exports/DSG-000040389.43841-stage-stack.collision/dsg_000040389_43841_stage_stack.sdf"
+    ).read_text()
+    for name in sdf_names.values():
+        assert f'name="{name}"' in real_sdf, f"{name} not found in the compiled SDF"
 
 
 def test_load_home_positions_converts_degrees_and_defaults_to_zero(tmp_path) -> None:
@@ -200,7 +288,7 @@ def test_full_crystal_stack_playback_recreates_a_reasonable_session(tmp_path) ->
             return math.radians(lo), math.radians(hi)
         return lo, hi
 
-    wall_start = playback._clock._wall_start  # test drives the clock deterministically
+    wall_start = playback._clock._wall_anchor  # test drives the clock deterministically
     before_first_command = playback.positions(now=wall_start)
     # North swivel (A048) is mounted at 180deg home; before any command its
     # position must be that reviewed home, not zero.
@@ -219,3 +307,82 @@ def test_full_crystal_stack_playback_recreates_a_reasonable_session(tmp_path) ->
             continue
         lo, hi = reviewed_limits(ref)
         assert lo <= value <= hi, f"{ref} at {value} is outside reviewed limits ({lo}, {hi})"
+
+
+def test_live_archive_source_repolls_only_after_poll_period(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_time = [0.0]
+    monkeypatch.setattr("twin_lab.epics_playback.time.monotonic", lambda: fake_time[0])
+    poll_count = [0]
+
+    def fake_factory(start: datetime, end: datetime) -> RecordedEpicsClient:
+        poll_count[0] += 1
+        # The "live" value ratchets up each poll, standing in for new commands
+        # having landed in the archiver since the last one.
+        return RecordedEpicsClient([MotorCommand("j", end - timedelta(seconds=1), float(poll_count[0]))])
+
+    source = LiveArchiveSource(
+        {"j": MotorPvMap("j", "J:VAL")},
+        {"j": "prismatic"},
+        poll_period_s=2.0,
+        client_factory=fake_factory,
+    )
+
+    first = source.positions(now=0.0)
+    assert poll_count[0] == 1
+    # Still inside the poll period: no new archiver query, same cached value.
+    second = source.positions(now=1.0)
+    assert poll_count[0] == 1
+    assert second == first
+    # Past the poll period: re-queries and picks up the "new" value.
+    fake_time[0] = 2.5
+    third = source.positions(now=2.5)
+    assert poll_count[0] == 2
+    assert third["j"] != first["j"]
+
+
+def test_live_file_source_reloads_only_when_file_changes(tmp_path) -> None:
+    path = tmp_path / "live.json"
+    now = datetime.now(timezone.utc)
+
+    def write(value: float) -> None:
+        path.write_text(
+            json.dumps(
+                {
+                    "commands": [
+                        {"joint": "j", "timestamp": now.isoformat(), "commanded": value}
+                    ]
+                }
+            )
+        )
+
+    write(1.0)
+    source = LiveFileSource(
+        path, {"j": MotorPvMap("j", "J:VAL")}, {"j": "prismatic"}, poll_period_s=0.0
+    )
+
+    first = source.positions()
+    assert first["j"] == pytest.approx(0.001)
+
+    # No file change: still the same value even though poll_period_s is 0 (always checks).
+    unchanged = source.positions()
+    assert unchanged == first
+
+    write(5.0)
+    # mtime resolution can be coarse; force it forward so the reload is detected.
+    new_mtime = path.stat().st_mtime + 1.0
+    import os
+
+    os.utime(path, (new_mtime, new_mtime))
+    updated = source.positions()
+    assert updated["j"] == pytest.approx(0.005)
+
+
+def test_live_file_source_missing_file_holds_home(tmp_path) -> None:
+    source = LiveFileSource(
+        tmp_path / "does-not-exist.json",
+        {"j": MotorPvMap("j", "J:VAL")},
+        {"j": "prismatic"},
+        {"j": 0.25},
+    )
+
+    assert source.positions()["j"] == pytest.approx(0.25)
