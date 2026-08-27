@@ -10,6 +10,7 @@ from twin_lab.archive_export import (
     JointDescription,
     _default_output_path,
     _diagnose_error,
+    _joint_progress_printer,
     describe_joints,
     export_session,
     follow_session,
@@ -100,6 +101,18 @@ def test_default_output_path_is_deterministic_from_start_time() -> None:
     assert _default_output_path(start) == Path("recordings") / "session-20260826T1552.json"
 
 
+def test_joint_progress_printer_toggles_between_joint_and_pv_labels(capsys) -> None:
+    joint_style = _joint_progress_printer(pv_names=False)
+    pv_style = _joint_progress_printer(pv_names=True)
+
+    joint_style("A050", "North Crystal", "x", "POLYCAP:CRY:N:X", 3)
+    pv_style("A050", "North Crystal", "x", "POLYCAP:CRY:N:X", 3)
+
+    out = capsys.readouterr().out
+    assert "North Crystal x (A050)" in out
+    assert "POLYCAP:CRY:N:X" in out
+
+
 def test_export_session_writes_expected_commands(tmp_path) -> None:
     commands = [
         MotorCommand("A050", T0 + timedelta(seconds=10), 2.0),
@@ -138,7 +151,7 @@ def test_export_session_reports_per_joint_progress_including_zero_counts(tmp_pat
         "    pivot: {ref: A047, joint_type: revolute, command_pv: 'A047:VAL'}\n"
     )
     output = tmp_path / "session.json"
-    reported: list[tuple[str, str, str, int]] = []
+    reported: list[tuple[str, str, str, str, int]] = []
 
     export_session(
         T0,
@@ -149,8 +162,8 @@ def test_export_session_reports_per_joint_progress_including_zero_counts(tmp_pat
         on_joint=lambda *args: reported.append(args),
     )
 
-    assert ("A050", "North Crystal", "x", 1) in reported
-    assert ("A047", "North Crystal", "pivot", 0) in reported
+    assert ("A050", "North Crystal", "x", "A050:VAL", 1) in reported
+    assert ("A047", "North Crystal", "pivot", "A047:VAL", 0) in reported
 
 
 def test_export_session_creates_missing_output_directory(tmp_path) -> None:

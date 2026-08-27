@@ -347,8 +347,12 @@ def view_stage_cad(
     *,
     fps: float = 30.0,
     playback: PlaybackSource | None = None,
+    joint_labels: dict[str, str] | None = None,
 ) -> None:
     """Show reusable real-CAD meshes with one transform per occurrence.
+
+    `joint_labels` (joint key -> display label) is only used in the playback
+    terminal readout, e.g. to show EPICS PV names instead of joint refs.
 
     If `playback` is given, every joint it has a track for is driven from the
     recorded session instead of its slider/animation value each frame; other
@@ -528,7 +532,8 @@ def view_stage_cad(
             if playback_keys and tick - last_readout >= 1.0:
                 last_readout = tick
                 sample = ", ".join(
-                    f"{joint['key']}={values[index]:+.3f}{_slider_scale(joint)[1]}"
+                    f"{(joint_labels or {}).get(joint['key'], joint['key'])}="
+                    f"{values[index]:+.3f}{_slider_scale(joint)[1]}"
                     for index, joint in enumerate(joints)
                     if joint["key"] in playback_keys
                 )
@@ -746,6 +751,15 @@ def _is_current(outputs: list[Path], sources: list[Path]) -> bool:
     return all(source.exists() and source.stat().st_mtime_ns <= oldest_output for source in sources)
 
 
+def _pv_name_labels(command_map_path: str | Path) -> dict[str, str]:
+    """joint key -> EPICS PV name, for the playback readout's `--pv-names` toggle."""
+
+    from .epics_playback import load_command_map
+
+    mappings, _ = load_command_map(command_map_path)
+    return {key: mapping.command_pv for key, mapping in mappings.items()}
+
+
 def main() -> None:
     import argparse
 
@@ -784,6 +798,12 @@ def main() -> None:
         default=1.0,
         help="Playback rate relative to real time (e.g. 0.25 to 2.0)",
     )
+    parser.add_argument(
+        "--pv-names",
+        action="store_true",
+        help="Label joints by their EPICS PV in the playback readout instead of this repo's "
+        "chain/axis naming (e.g. 'POLYCAP:CRY:N:X' instead of 'A050')",
+    )
     args = parser.parse_args()
 
     scene = prepare_stage_cad(
@@ -794,6 +814,7 @@ def main() -> None:
     print(f"Stage CAD cache: {scene.parent}")
     if not args.prepare_only:
         playback = None
+        joint_labels = None
         if args.playback_recording:
             from .epics_playback import build_playback_from_recording
 
@@ -817,8 +838,10 @@ def main() -> None:
                 args.stage_inventory,
                 speed=args.playback_speed,
             )
+        if playback is not None and args.pv_names:
+            joint_labels = _pv_name_labels(args.playback_command_map)
         try:
-            view_stage_cad(scene, fps=args.fps, playback=playback)
+            view_stage_cad(scene, fps=args.fps, playback=playback, joint_labels=joint_labels)
         except KeyboardInterrupt:
             print("\nStage CAD viewer stopped.")
 
@@ -865,6 +888,12 @@ def main_live() -> None:
         "archiver itself trails real hardware by roughly this much already, so shorter "
         "than ~1-2s buys little)",
     )
+    parser.add_argument(
+        "--pv-names",
+        action="store_true",
+        help="Label joints by their EPICS PV in the playback readout instead of this repo's "
+        "chain/axis naming (e.g. 'POLYCAP:CRY:N:X' instead of 'A050')",
+    )
     args = parser.parse_args()
 
     scene = prepare_stage_cad(
@@ -887,8 +916,9 @@ def main_live() -> None:
             lookback_s=args.lookback_s,
             poll_period_s=args.poll_period_s,
         )
+    joint_labels = _pv_name_labels(args.command_map) if args.pv_names else None
     try:
-        view_stage_cad(scene, fps=args.fps, playback=live)
+        view_stage_cad(scene, fps=args.fps, playback=live, joint_labels=joint_labels)
     except KeyboardInterrupt:
         print("\nLive feed viewer stopped.")
 

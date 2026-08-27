@@ -823,6 +823,13 @@ different computers:
    it works anywhere - a laptop off-site, a shared machine, or handed to a
    coworker as just a file.
 
+Exporting a fixed past window (for replay) and continuously mirroring live
+hardware (for watching an experiment run) are two separate commands, not one
+command with a mode flag - `slac-export-session` and `slac-export-live`,
+mirroring the `slac-stage-cad`/`slac-live-feed` split below. They serve
+different enough purposes in practice that keeping them separate keeps each
+one's prompts and options free of the other's.
+
 ### 1. Export a session
 
 ```bash
@@ -859,6 +866,11 @@ Connecting to the EPICS archiver...
 Wrote 42 command(s) across 19 joint(s) to recordings/session-20260826T1552.json
 ```
 
+Add `--pv-names` if you'd rather see this repo's joints by their EPICS PV
+(e.g. `POLYCAP:CRY:N:X`) instead of the chain/axis naming above - useful if
+you're a controls engineer who already knows this assembly's PV table better
+than its internal joint refs.
+
 If the archiver can't be reached (wrong network, VPN not connected, `archapp`
 not installed), it says so in plain language and tells you what to do about
 it, instead of showing a Python error.
@@ -889,23 +901,29 @@ but this is a reconstruction from open-loop set-points, not a measurement:
 there are no encoders on these motors, so what you see is "commanded to move
 here," never independently confirmed "arrived here."
 
+Add `--pv-names` here too if you'd rather the terminal readout label joints
+by their EPICS PV instead of chain/axis naming - same toggle, same meaning,
+as the exporters above.
+
 ### 3. Mirror it live during an experiment (optional)
 
 For watching the simulator track the real hardware in near-real-time while an
-experiment is running, run the exporter in `--follow` mode on a
-PCDS-networked machine:
+experiment is running, run the live exporter on a PCDS-networked machine:
 
 ```bash
-uv run slac-export-session --follow --out /shared/live.json
+uv run slac-export-live
 ```
 
-It keeps re-exporting a trailing window to that file every couple of seconds
-until you stop it (`Ctrl-C`). In another terminal (or on another machine that
+It keeps re-exporting a trailing window (default: the last 30s, refreshed
+every 2s - both adjustable with `--lookback-s`/`--poll-period-s`) to
+`recordings/live.json` (or wherever `--out` points) until you stop it with
+`Ctrl-C`. Same per-joint progress reporting and `--pv-names` toggle as
+`slac-export-session` above. In another terminal (or on another machine that
 can read the same path, e.g. a network share):
 
 ```bash
 uv run slac-live-feed cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
-  --live-file /shared/live.json
+  --live-file recordings/live.json
 ```
 
 This viewer is also view-only, with no speed/pause/restart controls - it
@@ -1057,7 +1075,8 @@ entry points, all installed with the package. Prefix each with `uv run`:
 | --- | --- | --- |
 | `slac-stage-cad` | `stage_cad_viewer` | Cached CAD viewer with manual sliders and animation; also plays back recordings (`--playback-recording`/`--playback-start`/`--playback-end`) |
 | `slac-live-feed` | `stage_cad_viewer` | View-only viewer mirroring real EPICS commands live (see "Recreating a real EPICS session") |
-| `slac-export-session` | `archive_export` | Guided export of real EPICS archiver data to a replayable JSON file |
+| `slac-export-session` | `archive_export` | Guided one-time export of a fixed past EPICS window to a replayable JSON file |
+| `slac-export-live` | `archive_export` | Guided continuous export of a trailing EPICS window, for `slac-live-feed --live-file` to tail |
 | `slac-collision` | `collision_viewer` | Drake viewer with live clearance reporting |
 | `slac-compile-sdf` | `sdf_compiler` | Portable SDF share package |
 | `slac-decompose` | `convex_collision` | Convex-decompose cached meshes ahead of time |

@@ -4,15 +4,28 @@ Run this on whatever machine actually has `archapp` + PCDS network access
 (e.g. a SLAC-issued computer on-site or on VPN) - it makes the one real
 archiver call, and writes a plain JSON file. Nothing else in this repo
 (playback, `LiveFileSource`, the Meshcat viewer) needs that access itself;
-they only ever read the file this produces. See README "EPICS archiver
-access" and `epics_playback.LiveFileSource`.
+they only ever read the file this produces. See README "Recreating a real
+EPICS session" and `epics_playback.LiveFileSource`.
 
-The CLI (`main`) is written for mechanical engineers who don't know EPICS or
-the controls GUI: it asks plain questions (approximate start/end time), shows
-what it is about to do before doing it, reports per-joint results (including
-which joints came back with no data - a likely sign of a mistyped window, not
-necessarily a bug), and turns common failures (archapp missing, no network)
-into a plain-English explanation instead of a Python traceback.
+There are two separate entry points, deliberately not one command with a
+mode flag - a one-time export for offline replay and a continuous live
+mirror are used for very different purposes in practice (post-session
+analysis vs. watching an experiment run), so keeping them as separate
+commands (mirroring `slac-stage-cad` vs. `slac-live-feed`) keeps each one's
+help text and arguments free of the other's:
+  - `main` -> `slac-export-session`: one-shot, fixed --start/--end window.
+  - `main_live` -> `slac-export-live`: continuous, re-exports a trailing
+    window until stopped.
+
+Both are written for mechanical engineers who don't know EPICS or the
+controls GUI: they ask plain questions (approximate start/end time), show
+what they are about to do before doing it, report per-joint results
+(including which joints came back with no data - a likely sign of a
+mistyped window, not necessarily a bug), and turn common failures (archapp
+missing, no network) into a plain-English explanation instead of a Python
+traceback. Pass `--pv-names` to label joints by their EPICS PV instead of
+this repo's chain/axis naming, if that's more familiar (e.g. for a controls
+engineer who knows this assembly's PV table better than its joint refs).
 """
 
 from __future__ import annotations
@@ -29,7 +42,7 @@ import yaml
 from .epics import CommandHistoryClient, MotorCommand
 from .epics_playback import load_command_map
 
-OnJoint = Callable[[str, str, str, int], None]
+OnJoint = Callable[[str, str, str, str, int], None]
 
 _DATE_TIME_FORMATS = [
     "%Y-%m-%d %H:%M:%S",
@@ -157,7 +170,8 @@ def _fetch_commands(
             label = labels.get(joint_key)
             chain_name = label.chain_name if label else ""
             axis_label = label.axis_label if label else ""
-            on_joint(joint_key, chain_name, axis_label, len(found))
+            command_pv = label.command_pv if label else mapping.command_pv
+            on_joint(joint_key, chain_name, axis_label, command_pv, len(found))
     return commands
 
 
@@ -257,12 +271,26 @@ def _diagnose_error(exc: Exception) -> str:
     )
 
 
-def _print_joint_progress(joint_key: str, chain_name: str, axis_label: str, count: int) -> None:
-    label = f"{chain_name} {axis_label} ({joint_key})" if chain_name else joint_key
+def _print_joint_progress(
+    joint_key: str, chain_name: str, axis_label: str, command_pv: str, count: int, *, pv_names: bool = False
+) -> None:
+    if pv_names:
+        label = command_pv
+    else:
+        label = f"{chain_name} {axis_label} ({joint_key})" if chain_name else joint_key
     if count == 0:
         print(f"  ! {label}: no data found in this window")
     else:
         print(f"  - {label}: {count} command(s)")
+
+
+def _joint_progress_printer(*, pv_names: bool) -> OnJoint:
+    """Bind the `--pv-names` choice into a plain 5-arg `on_joint` callback."""
+
+    def printer(joint_key: str, chain_name: str, axis_label: str, command_pv: str, count: int) -> None:
+        _print_joint_progress(joint_key, chain_name, axis_label, command_pv, count, pv_names=pv_names)
+
+    return printer
 
 
 def _confirm(prompt: str) -> bool:
@@ -293,68 +321,44 @@ def _prompt_moment(label: str, provided: str | None, *, reference: datetime | No
             print(f"Sorry, could not understand that: {exc}")
 
 
-def main() -> None:
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        description=(
-            "Pull real motor position data from the EPICS archiver and save it as a file "
-            "the simulator can play back. No EPICS or controls-GUI knowledge needed beyond "
-            "roughly when the motion happened."
-        )
-    )
+def _add_common_args(parser) -> None:  # noqa: ANN001
     parser.add_argument(
         "--command-map",
         default="config/crystal-stack-command-map.yaml",
         help="Joint-to-PV map to export (default: the crystal-stack map)",
     )
     parser.add_argument(
+        "--pv-names",
+        action="store_true",
+        help="Label joints by their EPICS PV instead of this repo's chain/axis naming "
+        "(e.g. 'POLYCAP:CRY:N:X' instead of 'North Crystal x (A050)')",
+    )
+
+
+def main() -> None:
+    """`slac-export-session`: one-shot export of a fixed time window, for later replay."""
+
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description=(
+            "Pull real motor position data from the EPICS archiver for a fixed time window "
+            "and save it as a file the simulator can play back. No EPICS or controls-GUI "
+            "knowledge needed beyond roughly when the motion happened. For continuously "
+            "mirroring live hardware instead, use `slac-export-live`."
+        )
+    )
+    _add_common_args(parser)
+    parser.add_argument(
         "--out", help="Output JSON recording file path (default: recordings/session-<start>.json)"
     )
     parser.add_argument("--start", help="Start of the time window, e.g. '2026-08-26 3:52pm'")
     parser.add_argument("--end", help="End of the time window, e.g. '2026-08-26 3:57pm'")
     parser.add_argument("--yes", "-y", action="store_true", help="Skip the confirmation prompt")
-    parser.add_argument(
-        "--follow",
-        action="store_true",
-        help="Keep running, re-exporting a trailing window every --poll-period-s "
-        "(for `slac-live-feed --live-file` to tail) instead of a fixed --start/--end window",
-    )
-    parser.add_argument("--lookback-s", type=float, default=30.0)
-    parser.add_argument("--poll-period-s", type=float, default=2.0)
     args = parser.parse_args()
 
-    try:
-        joints = describe_joints(args.command_map)
-    except Exception as exc:
-        raise SystemExit(f"Could not read the joint map at {args.command_map}: {exc}") from exc
-    if not joints:
-        raise SystemExit(
-            f"{args.command_map} has no joints with a command_pv filled in - nothing to export."
-        )
-
-    if args.follow:
-        if args.start or args.end:
-            raise SystemExit("--follow exports a live trailing window; it doesn't take --start/--end")
-        out = Path(args.out) if args.out else Path("recordings") / "live.json"
-        print(
-            f"This will continuously mirror the last {args.lookback_s:.0f}s of real motor "
-            f"commands into {out}, refreshing every {args.poll_period_s:.0f}s, tracking "
-            f"{len(joints)} joint(s), until you stop it with Ctrl-C."
-        )
-        try:
-            follow_session(
-                args.command_map,
-                out,
-                lookback_s=args.lookback_s,
-                poll_period_s=args.poll_period_s,
-                on_joint=_print_joint_progress,
-            )
-        except KeyboardInterrupt:
-            print("\nStopped.")
-        except Exception as exc:
-            raise SystemExit(_diagnose_error(exc)) from exc
-        return
+    joints = _load_joints_or_exit(args.command_map)
+    on_joint = _joint_progress_printer(pv_names=args.pv_names)
 
     print(
         "This pulls real motor position data from the EPICS archiver for a time window "
@@ -380,7 +384,7 @@ def main() -> None:
 
     print("\nConnecting to the EPICS archiver...")
     try:
-        count = export_session(start, end, args.command_map, out, on_joint=_print_joint_progress)
+        count = export_session(start, end, args.command_map, out, on_joint=on_joint)
     except Exception as exc:
         raise SystemExit(_diagnose_error(exc)) from exc
 
@@ -395,6 +399,86 @@ def main() -> None:
         "  uv run slac-stage-cad cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \\\n"
         f"    --playback-recording {out}"
     )
+
+
+def main_live() -> None:
+    """`slac-export-live`: continuously mirror a trailing window, for watching a live run.
+
+    Kept as a separate command from `slac-export-session` on purpose: a one-time
+    export for offline replay and a continuous live mirror serve very different
+    workflows in practice (post-session analysis vs. watching an experiment run
+    happen), so each gets its own focused command instead of one command with a
+    mode flag to remember - the same split as `slac-stage-cad` vs. `slac-live-feed`.
+    """
+
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description=(
+            "Continuously mirror real EPICS motor commands into a local file, for watching "
+            "the simulator track live hardware during an experiment run. For a one-time "
+            "export of a fixed past time window instead, use `slac-export-session`."
+        )
+    )
+    _add_common_args(parser)
+    parser.add_argument(
+        "--out",
+        default=str(Path("recordings") / "live.json"),
+        help="Output JSON file to keep refreshing (default: recordings/live.json)",
+    )
+    parser.add_argument(
+        "--lookback-s",
+        type=float,
+        default=30.0,
+        help="How far back each refresh looks for the latest command per joint",
+    )
+    parser.add_argument(
+        "--poll-period-s",
+        type=float,
+        default=2.0,
+        help="How often to refresh (the archiver itself trails real hardware by roughly "
+        "this much already, so shorter than ~1-2s buys little)",
+    )
+    args = parser.parse_args()
+
+    joints = _load_joints_or_exit(args.command_map)
+    on_joint = _joint_progress_printer(pv_names=args.pv_names)
+    out = Path(args.out)
+
+    print(
+        f"This will continuously mirror the last {args.lookback_s:.0f}s of real motor "
+        f"commands into {out}, refreshing every {args.poll_period_s:.0f}s, tracking "
+        f"{len(joints)} joint(s), until you stop it with Ctrl-C."
+    )
+    print(
+        "Point `uv run slac-live-feed --live-file "
+        f"{out}` (in another terminal, or another machine that can read this path) at it "
+        "to watch the simulator follow along.\n"
+    )
+    try:
+        follow_session(
+            args.command_map,
+            out,
+            lookback_s=args.lookback_s,
+            poll_period_s=args.poll_period_s,
+            on_joint=on_joint,
+        )
+    except KeyboardInterrupt:
+        print("\nStopped.")
+    except Exception as exc:
+        raise SystemExit(_diagnose_error(exc)) from exc
+
+
+def _load_joints_or_exit(command_map_path: str | Path) -> list[JointDescription]:
+    try:
+        joints = describe_joints(command_map_path)
+    except Exception as exc:
+        raise SystemExit(f"Could not read the joint map at {command_map_path}: {exc}") from exc
+    if not joints:
+        raise SystemExit(
+            f"{command_map_path} has no joints with a command_pv filled in - nothing to export."
+        )
+    return joints
 
 
 if __name__ == "__main__":

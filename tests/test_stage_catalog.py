@@ -9,12 +9,21 @@ from twin_lab.stage_cad_viewer import (
     _is_fastener_name,
     _joint_displacement,
     _joint_origin_m,
+    _pv_name_labels,
     _reviewed_cad_position,
     _reviewed_home,
     _reviewed_limits,
     _rotate_vector,
     _transform_data,
 )
+
+
+def test_pv_name_labels_matches_real_crystal_stack_command_map() -> None:
+    labels = _pv_name_labels("config/crystal-stack-command-map.yaml")
+
+    assert labels["A047"] == "POLYCAP:CRY:N:SWI"
+    assert labels["A067:x"] == "POLYCAP:PC:N:X"
+    assert len(labels) == 19
 
 
 def test_43841_inventory_uses_reusable_stage_catalog() -> None:
