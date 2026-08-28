@@ -31,6 +31,7 @@ engineer who knows this assembly's PV table better than its joint refs).
 from __future__ import annotations
 
 import json
+import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -147,8 +148,10 @@ def describe_joints(command_map_path: str | Path) -> list[JointDescription]:
 
 
 def _default_client_factory(start: datetime, end: datetime) -> CommandHistoryClient:
-    from .epics import ArchiverEpicsClient
+    from .epics import ArchiverEpicsClient, PyDMArchiverClient
 
+    if os.environ.get("PYDM_ARCHIVER_URL"):
+        return PyDMArchiverClient(start=start, end=end)
     return ArchiverEpicsClient(start=start, end=end)
 
 
@@ -261,8 +264,15 @@ def _diagnose_error(exc: Exception) -> str:
     if isinstance(exc, (ConnectionError, TimeoutError, OSError)):
         return (
             "Could not reach the EPICS archiver over the network.\n"
-            "Make sure you're on the PCDS network (on-site or connected to the VPN),\n"
-            f"then try again. (Details: {exc})"
+            "Make sure you're on the PCDS network (on-site or connected to the VPN).\n"
+            "If you can use TRACE, copy its 'Archive URL' field and run again with:\n"
+            "  PYDM_ARCHIVER_URL=http://that-archive-url uv run slac-export-session ...\n"
+            "If you ARE on VPN and this still fails to resolve a hostname (e.g. "
+            "'name resolution' or 'non-existent domain' in the details below), the "
+            "archiver's default hostname ('psctlws01') may not be the right one for your "
+            "connection - ask the controls team for the correct one, then set it with:\n"
+            "  ARCHAPP_HOSTNAME=the-right-hostname uv run slac-export-session ...\n"
+            f"(Details: {exc})"
         )
     return (
         "Something went wrong while talking to the EPICS archiver:\n"

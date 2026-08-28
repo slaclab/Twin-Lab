@@ -8,6 +8,7 @@ import pytest
 
 from twin_lab.archive_export import (
     JointDescription,
+    _default_client_factory,
     _default_output_path,
     _diagnose_error,
     _joint_progress_printer,
@@ -16,7 +17,7 @@ from twin_lab.archive_export import (
     follow_session,
     parse_moment,
 )
-from twin_lab.epics import MotorCommand, RecordedEpicsClient
+from twin_lab.epics import MotorCommand, PyDMArchiverClient, RecordedEpicsClient
 
 T0 = datetime(2026, 8, 26, 22, 52, tzinfo=timezone.utc)
 
@@ -86,6 +87,15 @@ def test_diagnose_error_recognizes_network_failure() -> None:
     message = _diagnose_error(ConnectionError("Name or service not known"))
 
     assert "PCDS network" in message
+    assert "ARCHAPP_HOSTNAME" in message
+
+
+def test_default_client_factory_prefers_trace_pydm_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PYDM_ARCHIVER_URL", "https://trace-archiver.example.org")
+
+    client = _default_client_factory(T0, T0 + timedelta(seconds=1))
+
+    assert isinstance(client, PyDMArchiverClient)
 
 
 def test_diagnose_error_falls_back_to_plain_exception_text() -> None:

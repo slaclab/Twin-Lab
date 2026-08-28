@@ -317,6 +317,30 @@ command below fails to fetch data, that is a network reachability problem,
 not a missing-dependency problem, and the command will tell you so plainly
 rather than showing a raw error.
 
+TRACE uses PyDM's Archiver Appliance URL instead of `archapp`'s default
+hostname. If TRACE works from your SLAC computer, copy the **Archive URL**
+shown in TRACE and set it before running the Twin-Lab exporter:
+
+```bash
+PYDM_ARCHIVER_URL=https://the-trace-archive-url uv run slac-export-session
+```
+
+Twin-Lab will prefer `PYDM_ARCHIVER_URL` when it is set, and will query the
+same REST endpoint TRACE uses:
+`/retrieval/data/getData.json?pv=...&from=...&to=...`.
+
+If there is no TRACE/PyDM URL available, the fallback is `archapp`, which
+defaults to a hostname of `psctlws01` (overridable via the `ARCHAPP_HOSTNAME`
+environment variable, `ARCHAPP_DATA_PORT`/`ARCHAPP_MGMT_PORT` for the ports).
+If that default doesn't resolve for your connection even while on VPN - your
+own DNS server explicitly says it doesn't exist, rather than timing out -
+that's a sign the archiver's real hostname is different for how you're
+connecting; ask the controls team for the right one and set it, e.g.:
+
+```bash
+ARCHAPP_HOSTNAME=the-right-hostname uv run slac-export-session
+```
+
 ### Running commands
 
 Every command below is prefixed with `uv run`. Step 5 already puts you in the
