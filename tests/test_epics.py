@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -9,7 +8,6 @@ from twin_lab.epics import (
     ArchiverEpicsClient,
     MotorCommand,
     MotorPvMap,
-    PyDMArchiverClient,
     RecordedEpicsClient,
     require_recent_commands,
     to_sdf_position,
@@ -67,45 +65,3 @@ def test_archiver_client_reports_unreachable_archiver_as_connection_error() -> N
 
     with pytest.raises(ConnectionError, match="could not be reached"):
         client.commands(MotorPvMap("stage::x", "STAGE:X:VAL"))
-
-
-def test_pydm_archiver_client_uses_trace_rest_endpoint() -> None:
-    opened_urls: list[str] = []
-
-    class Response:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return False
-
-        def read(self) -> bytes:
-            return b'[{"data": [{"secs": 1787064000.0, "val": 12.5}]}]'
-
-    def opener(url: str, timeout: float):
-        opened_urls.append(url)
-        assert timeout == pytest.approx(15.0)
-        return Response()
-
-    client = PyDMArchiverClient(
-        start=NOW,
-        end=NOW + timedelta(minutes=5),
-        base_url="https://trace-archiver.example.org/",
-        opener=opener,
-    )
-
-    commands = client.commands(MotorPvMap("stage::x", "POLYCAP:CRY:N:X"))
-
-    assert commands == [
-        MotorCommand(
-            "stage::x",
-            datetime.fromtimestamp(1787064000.0, tz=timezone.utc),
-            commanded=12.5,
-        )
-    ]
-    parsed = urlparse(opened_urls[0])
-    assert parsed.path == "/retrieval/data/getData.json"
-    query = parse_qs(parsed.query)
-    assert query["pv"] == ["POLYCAP:CRY:N:X"]
-    assert query["from"] == ["2026-08-18T12:00:00.000Z"]
-    assert query["to"] == ["2026-08-18T12:05:00.000Z"]

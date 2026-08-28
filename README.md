@@ -310,6 +310,15 @@ above - it is a normal pip-installable package straight from its GitHub repo,
 not something that needs the PCDS conda environment. There is no separate
 one-time step here beyond the setup you already did.
 
+Do not clone `archapp` into the Twin-Lab checkout. The upstream `archapp`
+README's old "go to archapp/lib and type ipython" instruction is a manual
+developer workflow for that standalone package; in Twin-Lab, `uv` has already
+installed it into `.venv`. You can verify that with:
+
+```bash
+uv run python3 -c "from archapp.interactive import EpicsArchive; print('archapp OK')"
+```
+
 What this does *not* solve, and can't: actually reaching the archiver host
 still requires being on the PCDS network (on-site or VPN) at the time you run
 the command. Installing `archapp` only means the *code* is available - if a
@@ -317,25 +326,15 @@ command below fails to fetch data, that is a network reachability problem,
 not a missing-dependency problem, and the command will tell you so plainly
 rather than showing a raw error.
 
-TRACE uses PyDM's Archiver Appliance URL instead of `archapp`'s default
-hostname. If TRACE works from your SLAC computer, copy the **Archive URL**
-shown in TRACE and set it before running the Twin-Lab exporter:
-
-```bash
-PYDM_ARCHIVER_URL=https://the-trace-archive-url uv run slac-export-session
-```
-
-Twin-Lab will prefer `PYDM_ARCHIVER_URL` when it is set, and will query the
-same REST endpoint TRACE uses:
-`/retrieval/data/getData.json?pv=...&from=...&to=...`.
-
-If there is no TRACE/PyDM URL available, the fallback is `archapp`, which
-defaults to a hostname of `psctlws01` (overridable via the `ARCHAPP_HOSTNAME`
-environment variable, `ARCHAPP_DATA_PORT`/`ARCHAPP_MGMT_PORT` for the ports).
-If that default doesn't resolve for your connection even while on VPN - your
-own DNS server explicitly says it doesn't exist, rather than timing out -
-that's a sign the archiver's real hostname is different for how you're
-connecting; ask the controls team for the right one and set it, e.g.:
+Twin-Lab uses `archapp` for real archiver access. `archapp` defaults to a
+hostname of `psctlws01` (overridable via the `ARCHAPP_HOSTNAME` environment
+variable, `ARCHAPP_DATA_PORT`/`ARCHAPP_MGMT_PORT` for the ports). If that
+default doesn't resolve for your connection even while on VPN - your own DNS
+server explicitly says it doesn't exist, rather than timing out - that's a
+sign you are not on the PCDS network view that exposes that hostname, or the
+archiver's real hostname is different for how you're connecting. Ask the PCDS
+controls team for the correct `archapp` hostname or for the supported host
+where `/reg/g/pcds/setup` is available, then set the hostname, e.g.:
 
 ```bash
 ARCHAPP_HOSTNAME=the-right-hostname uv run slac-export-session
@@ -860,6 +859,12 @@ one's prompts and options free of the other's.
 uv run slac-export-session
 ```
 
+If PCDS gives you a specific archiver hostname, set it before the command:
+
+```bash
+ARCHAPP_HOSTNAME=the-right-hostname uv run slac-export-session
+```
+
 Run with no arguments, it asks you two questions and shows you exactly what
 it's about to do before doing anything:
 
@@ -899,8 +904,8 @@ If the archiver can't be reached (wrong network, VPN not connected, `archapp`
 not installed), it says so in plain language and tells you what to do about
 it, instead of showing a Python error.
 
-`--start`/`--end`/`--out` can be passed directly to skip the prompts (useful
-for scripting); see `uv run slac-export-session --help`.
+`--start`/`--end`/`--out` can be passed directly to skip the prompts where
+possible (useful for scripting); see `uv run slac-export-session --help`.
 
 ### 2. Replay it
 
@@ -936,6 +941,12 @@ experiment is running, run the live exporter on a PCDS-networked machine:
 
 ```bash
 uv run slac-export-live
+```
+
+With a PCDS-provided archiver hostname:
+
+```bash
+ARCHAPP_HOSTNAME=the-right-hostname uv run slac-export-live
 ```
 
 It keeps re-exporting a trailing window (default: the last 30s, refreshed

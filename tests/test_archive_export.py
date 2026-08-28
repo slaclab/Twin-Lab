@@ -17,7 +17,7 @@ from twin_lab.archive_export import (
     follow_session,
     parse_moment,
 )
-from twin_lab.epics import MotorCommand, PyDMArchiverClient, RecordedEpicsClient
+from twin_lab.epics import ArchiverEpicsClient, MotorCommand, RecordedEpicsClient
 
 T0 = datetime(2026, 8, 26, 22, 52, tzinfo=timezone.utc)
 
@@ -90,12 +90,10 @@ def test_diagnose_error_recognizes_network_failure() -> None:
     assert "ARCHAPP_HOSTNAME" in message
 
 
-def test_default_client_factory_prefers_trace_pydm_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("PYDM_ARCHIVER_URL", "https://trace-archiver.example.org")
-
+def test_default_client_factory_uses_archapp_client() -> None:
     client = _default_client_factory(T0, T0 + timedelta(seconds=1))
 
-    assert isinstance(client, PyDMArchiverClient)
+    assert isinstance(client, ArchiverEpicsClient)
 
 
 def test_diagnose_error_falls_back_to_plain_exception_text() -> None:
