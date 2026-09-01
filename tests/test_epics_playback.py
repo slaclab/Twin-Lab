@@ -517,6 +517,8 @@ def test_ongoing_archive_playback_extends_window_without_playback_controls(
     assert not hasattr(source, "set_speed")
     assert not hasattr(source, "pause")
     assert not hasattr(source, "seek_fraction")
+    assert hasattr(source, "stop_feed")
+    assert hasattr(source, "resume_feed")
 
     assert source.positions(now=0.0)["j"] == pytest.approx(0.0)
     assert windows == [(T0, T0)]
@@ -527,6 +529,40 @@ def test_ongoing_archive_playback_extends_window_without_playback_controls(
     assert source.positions(now=2.5)["j"] == pytest.approx(0.005)
     assert windows[-1] == (T0, T0 + timedelta(seconds=2.5))
     assert source.has_commands is True
+
+
+def test_ongoing_archive_playback_stop_and_resume_are_distinct_from_pause(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("twin_lab.epics_playback.time.monotonic", lambda: 0.0)
+    poll_count = [0]
+
+    def factory(start: datetime, end: datetime) -> RecordedEpicsClient:
+        poll_count[0] += 1
+        return RecordedEpicsClient([MotorCommand("j", end, float(poll_count[0]))])
+
+    source = OngoingArchivePlaybackSource(
+        {"j": MotorPvMap("j", "J:VAL")},
+        {"j": "prismatic"},
+        T0,
+        poll_period_s=1.0,
+        client_factory=factory,
+    )
+
+    source.positions(now=2.0)
+    source.stop_feed(now=2.0)
+
+    assert source.is_stopped is True
+    assert source.current_moment(now=20.0) == T0 + timedelta(seconds=2.0)
+    source.positions(now=20.0)
+    assert poll_count[0] == 1
+
+    source.resume_feed(now=20.0)
+
+    assert source.is_stopped is False
+    assert source.current_moment(now=23.0) == T0 + timedelta(seconds=5.0)
+    source.positions(now=23.0)
+    assert poll_count[0] == 2
 
 
 def test_live_file_source_reloads_only_when_file_changes(tmp_path) -> None:

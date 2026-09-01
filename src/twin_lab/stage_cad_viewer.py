@@ -33,6 +33,8 @@ PLAYBACK_SPEED_LABEL = "Playback speed (x)"
 PLAYBACK_PAUSED_LABEL = "Playback: paused"
 TRAVEL_SPEED_LABEL = "Travel speed (% of max)"
 SCRUB_LABEL = "Playback position (% of completion)"
+CONTINUOUS_STOP_LABEL = "Stop continuous playback"
+CONTINUOUS_RESUME_LABEL = "Resume continuous playback"
 ONGOING_PLAYBACK_ENDS = {"ongoing", "continuous"}
 ONGOING_PLAYBACK_RESUME_STARTS = {"resume", "previous", "last"}
 DEFAULT_ONGOING_RESUME_PATH = Path("recordings/ongoing-playback-resume.json")
@@ -479,6 +481,7 @@ def view_stage_cad(
     # that would otherwise fight it are left off entirely.
     has_playback_controls = playback is not None and hasattr(playback, "set_speed")
     has_travel_control = playback is not None and hasattr(playback, "set_travel_fraction")
+    has_ongoing_controls = playback is not None and hasattr(playback, "stop_feed")
     if playback is None:
         for joint in joints:
             scale, unit = _slider_scale(joint)
@@ -500,6 +503,9 @@ def view_stage_cad(
         meshcat.AddButton("Restart playback")
     if has_travel_control:
         meshcat.AddSlider(TRAVEL_SPEED_LABEL, 0.0, 100.0, 1.0, playback.travel_fraction * 100.0)
+    if has_ongoing_controls:
+        meshcat.AddButton(CONTINUOUS_STOP_LABEL)
+        meshcat.AddButton(CONTINUOUS_RESUME_LABEL)
     can_scrub = playback is not None and getattr(playback, "record_end", None) is not None
     if can_scrub:
         meshcat.AddSlider(SCRUB_LABEL, 0.0, 100.0, 0.1, 0.0)
@@ -512,7 +518,7 @@ def view_stage_cad(
     meshcat.SetCameraPose(eye, center)  # pyright: ignore[reportArgumentType]
     if playback is None:
         meshcat.AddButton("Reset to home")
-    stop_label = "Stop live feed" if playback is not None and not has_playback_controls else "Stop viewer"
+    stop_label = "Stop live feed" if playback is not None and not (has_playback_controls or has_ongoing_controls) else "Stop viewer"
     meshcat.AddButton(stop_label, "Escape")
     announce_viewer("Reusable stage CAD", meshcat, open_browser=should_open_browser(open_browser))
     print(
@@ -523,12 +529,18 @@ def view_stage_cad(
         print(f"Motion sliders: {len(joints)}")
         print("Tick 'Animation' to start and stop cyclic motion.")
     elif playback_keys:
-        label = "Live EPICS feed" if not has_playback_controls else "Playback"
+        label = "Continuous playback" if has_ongoing_controls else "Live EPICS feed" if not has_playback_controls else "Playback"
         if getattr(playback, "has_commands", True):
-            print(
-                f"{label}: recreating recorded EPICS commands for {len(playback_keys)} joint(s). "
-                "This is view-only - use the Meshcat panel controls to pause/speed/restart it."
-            )
+            if has_ongoing_controls:
+                print(
+                    f"{label}: replaying archived EPICS commands for {len(playback_keys)} "
+                    "joint(s) at 1x. Use the Meshcat stop/resume buttons to control the feed."
+                )
+            else:
+                print(
+                    f"{label}: recreating recorded EPICS commands for {len(playback_keys)} joint(s). "
+                    "This is view-only - use the Meshcat panel controls to pause/speed/restart it."
+                )
         else:
             print(
                 f"{label}: no commands in this window, so nothing will move. Showing the "
@@ -540,6 +552,8 @@ def view_stage_cad(
     slider_period = 1.0 / SLIDER_PUSH_HZ
     reset_clicks = 0
     restart_clicks = 0
+    continuous_stop_clicks = 0
+    continuous_resume_clicks = 0
     phase = 0.0
     previous_tick = time.monotonic()
     last_slider_push = 0.0
@@ -589,6 +603,15 @@ def view_stage_cad(
                 if new_restart_clicks != restart_clicks:
                     restart_clicks = new_restart_clicks
                     playback.restart()
+            if has_ongoing_controls:
+                new_stop_clicks = meshcat.GetButtonClicks(CONTINUOUS_STOP_LABEL)
+                if new_stop_clicks != continuous_stop_clicks:
+                    continuous_stop_clicks = new_stop_clicks
+                    playback.stop_feed(tick)
+                new_resume_clicks = meshcat.GetButtonClicks(CONTINUOUS_RESUME_LABEL)
+                if new_resume_clicks != continuous_resume_clicks:
+                    continuous_resume_clicks = new_resume_clicks
+                    playback.resume_feed(tick)
             if can_scrub:
                 scrub_value = meshcat.GetSliderValue(SCRUB_LABEL)
                 # Only a viewer-side move counts as a seek; the loop writes this slider
@@ -1034,9 +1057,10 @@ def main() -> None:
                     args.playback_resume_file, playback.current_moment()
                 )
                 print(
-                    "Ongoing playback resume saved. Restart with "
+                    "Ongoing playback resume saved. To restart this viewer from that point, run:\n"
+                    f"  uv run slac-stage-cad {args.stage_inventory} "
                     "--playback-start resume --playback-end ongoing "
-                    f"(state: {resume_path})."
+                    f"--playback-resume-file {resume_path}"
                 )
 
 

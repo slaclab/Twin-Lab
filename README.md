@@ -70,8 +70,8 @@ readback or proof that the hardware physically arrived.
 | --- | --- | --- | --- |
 | Saved session replay | `slac-export-session`, then `slac-stage-cad --playback-recording recordings/session-....json` | Speed, pause, restart, scrub | Portable and repeatable. Use it for design reviews, demos, and sharing an exact historical run without needing archiver access later. |
 | Fixed archive replay | `slac-stage-cad --playback-start ISO --playback-end ISO` | Speed, pause, restart, scrub | Fastest path when this machine can reach the archiver and you just want to inspect one finite time window. The top-left viewer label is `fixed playback mode`. |
-| Pseudo-live archive replay | `slac-stage-cad --playback-start ISO --playback-end ongoing` | Stop only, plus travel-speed derating | Starts from a user-selected historical time and keeps extending the archive query at 1x until stopped. The top-left viewer label is `continuous playback mode`, matching its role as the integration bridge for true live feed. |
-| Resumed pseudo-live replay | `slac-stage-cad --playback-start resume --playback-end ongoing` | Stop only, plus travel-speed derating | Restarts continuous mode from the timestamp where the previous pseudo-live viewer stopped, so a dropped/restarted viewer can continue the same stream instead of starting over. |
+| Pseudo-live archive replay | `slac-stage-cad --playback-start ISO --playback-end ongoing` | `Stop continuous playback`, `Resume continuous playback`, plus travel-speed derating | Starts from a user-selected historical time and keeps extending the archive query at 1x. The top-left viewer label is `continuous playback mode`, matching its role as the integration bridge for true live feed. |
+| Resumed pseudo-live replay | `slac-stage-cad --playback-start resume --playback-end ongoing` | `Stop continuous playback`, `Resume continuous playback`, plus travel-speed derating | Reopens continuous mode from the timestamp saved when the previous viewer process closed. Inside an already-open viewer, use **Resume continuous playback** instead of switching back to VS Code. |
 | Current archiver live mirror | `slac-export-live` plus `slac-live-feed --live-file recordings/live.json`, or direct `slac-live-feed` where archive access works | Stop only, plus travel-speed derating | Tracks the present hardware run with a few seconds of archiver lag. This is the practical near-live workflow available now. |
 | Future true EPICS live feed | Not implemented yet; waiting on controls-system details | Stop only | This should swap the data source under the same live viewer contract once the controls person gives us the supported direct live feed path. It matters because it removes archiver lag and makes Twin Lab a real run-time mirror. |
 
@@ -118,12 +118,16 @@ uv run slac-stage-cad cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
 ```
 
 This mode is labeled `continuous playback mode` in the viewer. It advances at
-real time, re-polls the archiver as the replay window grows, and stops only
-when you press **Stop live feed**, Escape, or `Ctrl-C`. It deliberately has no
-speed multiplier, pause, restart, or scrub controls.
-When it stops, it saves the last archive timestamp to
-`recordings/ongoing-playback-resume.json` by default. Restart from that point
-with:
+real time and re-polls the archiver as the replay window grows. Press
+**Stop continuous playback** to stop the feed at the current archive timestamp,
+then **Resume continuous playback** to continue from that same timestamp without
+leaving the browser. This is intentionally separate from finite playback's
+pause control, and continuous mode still has no speed multiplier, restart, or
+scrub controls.
+
+Escape or **Stop viewer** closes the viewer process. On close, it saves the last
+archive timestamp to `recordings/ongoing-playback-resume.json` by default. If
+you later need to reopen from that point, run the full command:
 
 ```bash
 uv run slac-stage-cad cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \

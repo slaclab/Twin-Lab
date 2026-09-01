@@ -494,9 +494,9 @@ class OngoingArchivePlaybackSource:
     This is the bridge mode between historical playback and a true live feed:
     the user chooses the start moment, the source advances forward from there
     in real time, and each poll extends the archive query up to the current
-    pseudo-live moment. It intentionally does not expose pause, restart, seek,
-    or playback-speed controls - stopping the viewer is the only way to end the
-    run.
+    pseudo-live moment. It intentionally does not expose the finite playback
+    pause, restart, seek, or playback-speed controls; continuous playback has
+    its own stop/resume feed controls instead.
     """
 
     def __init__(
@@ -554,6 +554,20 @@ class OngoingArchivePlaybackSource:
         for track in self._tracks.values():
             track.speed_fraction = fraction
 
+    @property
+    def is_stopped(self) -> bool:
+        return self._clock.is_paused
+
+    def stop_feed(self, now: float | None = None) -> None:
+        """Stop continuous playback at the current archive timestamp."""
+
+        self._clock.pause(now)
+
+    def resume_feed(self, now: float | None = None) -> None:
+        """Continue continuous playback from the timestamp where it was stopped."""
+
+        self._clock.resume(now)
+
     def current_moment(self, now: float | None = None) -> datetime:
         return self._clock.current_moment(now)
 
@@ -562,7 +576,7 @@ class OngoingArchivePlaybackSource:
 
     def positions(self, now: float | None = None) -> dict[str, float]:
         moment_wall = now if now is not None else time.monotonic()
-        if moment_wall - self._last_poll >= self._poll_period_s:
+        if not self.is_stopped and moment_wall - self._last_poll >= self._poll_period_s:
             self._refresh(moment_wall)
         moment = self.current_moment(moment_wall)
         return {name: track.position_at(moment) for name, track in self._tracks.items()}
