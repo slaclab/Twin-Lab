@@ -941,6 +941,21 @@ Add `--pv-names` here too if you'd rather the terminal readout label joints
 by their EPICS PV instead of chain/axis naming - same toggle, same meaning,
 as the exporters above.
 
+To run the same archive stream in pseudo-live mode, give a start time and set
+the end to `ongoing` or `continuous`:
+
+```bash
+uv run slac-stage-cad cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
+  --playback-start 2026-08-26T15:32:20-07:00 \
+  --playback-end ongoing
+```
+
+This starts at the requested archive time, advances at real time, keeps
+polling the archiver as the replay window grows, and runs until you press the
+viewer stop button or `Ctrl-C`. It has no playback-speed, pause, restart, or
+scrub controls, so it behaves like the eventual live feed while still using
+archived data as the source.
+
 ### 3. Mirror it live during an experiment (optional)
 
 For watching the simulator track the real hardware in near-real-time while an

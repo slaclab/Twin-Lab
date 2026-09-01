@@ -256,9 +256,12 @@ class PlaybackSource:
         return {name: track.position_at(moment) for name, track in self._tracks.items()}
 
     def current_moment(self, now: float | None = None) -> datetime:
-        """Where in the recorded session playback currently is."""
+        """Where in the recorded session playback currently is, capped at its end."""
 
-        return self._clock.current_moment(now)
+        moment = self._clock.current_moment(now)
+        if self._record_end is not None:
+            return min(moment, self._record_end)
+        return moment
 
     def progress_fraction(self, now: float | None = None) -> float | None:
         """How far through the window playback is, or None without a known end."""
@@ -483,6 +486,131 @@ def build_playback_from_archive(
     tracks = build_tracks(client, mappings, joint_types, homes, max_speeds)
     clock = PlaybackClock(record_start=start, speed=speed)
     return PlaybackSource(tracks, clock, end)
+
+
+class OngoingArchivePlaybackSource:
+    """Replay an archive window from a fixed start, extending it at 1x wall time.
+
+    This is the bridge mode between historical playback and a true live feed:
+    the user chooses the start moment, the source advances forward from there
+    in real time, and each poll extends the archive query up to the current
+    pseudo-live moment. It intentionally does not expose pause, restart, seek,
+    or playback-speed controls - stopping the viewer is the only way to end the
+    run.
+    """
+
+    def __init__(
+        self,
+        mappings: dict[str, MotorPvMap],
+        joint_types: dict[str, str],
+        record_start: datetime,
+        home_positions: dict[str, float] | None = None,
+        *,
+        max_speeds: dict[str, float] | None = None,
+        poll_period_s: float = 2.0,
+        client_factory=None,
+    ) -> None:
+        if record_start.tzinfo is None:
+            raise ValueError("Ongoing archive playback start must be timezone-aware")
+        self._mappings = mappings
+        self._joint_types = joint_types
+        self._clock = PlaybackClock(record_start=record_start, speed=1.0)
+        self._homes = home_positions or {}
+        self._max_speeds = max_speeds or {}
+        self._poll_period_s = poll_period_s
+        self._client_factory = client_factory or _default_ongoing_archiver_factory
+        self._tracks: dict[str, JointTrack] = self._empty_tracks()
+        self._last_poll = float("-inf")
+        self._travel_fraction = 1.0
+
+    @property
+    def record_start(self) -> datetime:
+        return self._clock.record_start
+
+    @property
+    def record_end(self) -> None:
+        return None
+
+    @property
+    def joint_names(self) -> frozenset[str]:
+        return frozenset(self._tracks)
+
+    @property
+    def has_commands(self) -> bool:
+        return any(track.commands for track in self._tracks.values())
+
+    @property
+    def travel_fraction(self) -> float:
+        return self._travel_fraction
+
+    def set_travel_fraction(self, fraction: float) -> None:
+        """Derate every joint's travel speed to `fraction` of its datasheet max."""
+
+        self._travel_fraction = fraction
+        for track in self._tracks.values():
+            track.speed_fraction = fraction
+
+    def current_moment(self, now: float | None = None) -> datetime:
+        return self._clock.current_moment(now)
+
+    def is_complete(self, now: float | None = None) -> bool:
+        return False
+
+    def positions(self, now: float | None = None) -> dict[str, float]:
+        moment_wall = now if now is not None else time.monotonic()
+        if moment_wall - self._last_poll >= self._poll_period_s:
+            self._refresh(moment_wall)
+        moment = self.current_moment(moment_wall)
+        return {name: track.position_at(moment) for name, track in self._tracks.items()}
+
+    def _refresh(self, now: float) -> None:
+        end = self.current_moment(now)
+        client = self._client_factory(self.record_start, end)
+        self._tracks = build_tracks(
+            client, self._mappings, self._joint_types, self._homes, self._max_speeds
+        )
+        self.set_travel_fraction(self._travel_fraction)
+        self._last_poll = now
+
+    def _empty_tracks(self) -> dict[str, JointTrack]:
+        return {
+            name: JointTrack(
+                name,
+                self._joint_types[name],
+                [],
+                self._homes.get(name, 0.0),
+                self._max_speeds.get(name, float("inf")),
+            )
+            for name in self._mappings
+        }
+
+
+def _default_ongoing_archiver_factory(start: datetime, end: datetime) -> CommandHistoryClient:
+    from .epics import ArchiveRestClient
+
+    return ArchiveRestClient(start=start, end=end, initial_lookback=timedelta(days=1))
+
+
+def build_ongoing_playback_from_archive(
+    start: datetime,
+    command_map_path: str | Path,
+    inventory_path: str | Path,
+    *,
+    poll_period_s: float = 2.0,
+) -> OngoingArchivePlaybackSource:
+    """Wire a start-only archive replay into a pseudo-live source."""
+
+    mappings, joint_types = load_command_map(command_map_path)
+    homes = load_home_positions(inventory_path, list(mappings))
+    max_speeds = load_max_speeds(inventory_path, list(mappings))
+    return OngoingArchivePlaybackSource(
+        mappings,
+        joint_types,
+        start,
+        homes,
+        max_speeds=max_speeds,
+        poll_period_s=poll_period_s,
+    )
 
 
 class LiveArchiveSource:

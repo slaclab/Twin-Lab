@@ -32,6 +32,7 @@ PLAYBACK_SPEED_LABEL = "Playback speed (x)"
 PLAYBACK_PAUSED_LABEL = "Playback: paused"
 TRAVEL_SPEED_LABEL = "Travel speed (% of max)"
 SCRUB_LABEL = "Playback position (% of completion)"
+ONGOING_PLAYBACK_ENDS = {"ongoing", "continuous"}
 # While animating, the sliders report the pose rather than drive it, so they only have to
 # keep up with the eye. Pushing all of them every frame costs a dat.GUI redraw each, which
 # is far more work than the browser can absorb at the frame rate.
@@ -507,7 +508,8 @@ def view_stage_cad(
     meshcat.SetCameraPose(eye, center)  # pyright: ignore[reportArgumentType]
     if playback is None:
         meshcat.AddButton("Reset to home")
-    meshcat.AddButton("Stop viewer", "Escape")
+    stop_label = "Stop live feed" if playback is not None and not has_playback_controls else "Stop viewer"
+    meshcat.AddButton(stop_label, "Escape")
     announce_viewer("Reusable stage CAD", meshcat, open_browser=should_open_browser(open_browser))
     print(
         f"Showing {len(instances)} real stages and {scene['attached_part_count']} attached "
@@ -558,7 +560,7 @@ def view_stage_cad(
         set_viewer_mode(meshcat, MODE_NONE)
     else:
         set_viewer_mode(meshcat, MODE_ARCHIVE if has_playback_controls else MODE_LIVE)
-    while meshcat.GetButtonClicks("Stop viewer") == 0:
+    while meshcat.GetButtonClicks(stop_label) == 0:
         tick = time.monotonic()
         elapsed = tick - previous_tick
         previous_tick = tick
@@ -849,6 +851,10 @@ def _pv_name_labels(command_map_path: str | Path) -> dict[str, str]:
     return {key: mapping.command_pv for key, mapping in mappings.items()}
 
 
+def _is_ongoing_playback_end(value: str) -> bool:
+    return value.casefold() in ONGOING_PLAYBACK_ENDS
+
+
 def _add_viewer_args(parser) -> None:  # noqa: ANN001
     parser.add_argument(
         "--port",
@@ -890,7 +896,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--playback-end",
-        help="ISO-8601 end of the archiver time window given by --playback-start",
+        help="ISO-8601 end of the archiver time window given by --playback-start, or "
+        "'ongoing'/'continuous' to replay forward at 1x until stopped",
     )
     parser.add_argument(
         "--playback-command-map",
@@ -902,6 +909,12 @@ def main() -> None:
         type=float,
         default=1.0,
         help="Playback rate relative to real time, up to the panel slider's 8x (e.g. 0.25 to 8)",
+    )
+    parser.add_argument(
+        "--playback-poll-period-s",
+        type=float,
+        default=2.0,
+        help="How often --playback-end ongoing/continuous extends its archive query",
     )
     parser.add_argument(
         "--pv-names",
@@ -935,15 +948,31 @@ def main() -> None:
                 raise SystemExit("--playback-start and --playback-end must be given together")
             from datetime import datetime
 
-            from .epics_playback import build_playback_from_archive
+            start = datetime.fromisoformat(args.playback_start)
+            if _is_ongoing_playback_end(args.playback_end):
+                if args.playback_speed != 1.0:
+                    raise SystemExit(
+                        "--playback-speed is only for finite playback; ongoing playback always "
+                        "runs at 1x"
+                    )
+                from .epics_playback import build_ongoing_playback_from_archive
 
-            playback = build_playback_from_archive(
-                datetime.fromisoformat(args.playback_start),
-                datetime.fromisoformat(args.playback_end),
-                args.playback_command_map,
-                args.stage_inventory,
-                speed=args.playback_speed,
-            )
+                playback = build_ongoing_playback_from_archive(
+                    start,
+                    args.playback_command_map,
+                    args.stage_inventory,
+                    poll_period_s=args.playback_poll_period_s,
+                )
+            else:
+                from .epics_playback import build_playback_from_archive
+
+                playback = build_playback_from_archive(
+                    start,
+                    datetime.fromisoformat(args.playback_end),
+                    args.playback_command_map,
+                    args.stage_inventory,
+                    speed=args.playback_speed,
+                )
         if playback is not None and args.pv_names:
             joint_labels = _pv_name_labels(args.playback_command_map)
         try:

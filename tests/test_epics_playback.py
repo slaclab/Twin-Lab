@@ -15,6 +15,7 @@ from twin_lab.epics_playback import (
     JointTrack,
     LiveArchiveSource,
     LiveFileSource,
+    OngoingArchivePlaybackSource,
     PlaybackClock,
     PlaybackSource,
     build_playback_from_recording,
@@ -309,6 +310,8 @@ def test_playback_reports_complete_only_past_the_window_end() -> None:
 
     assert source.is_complete(now=wall) is False
     assert source.is_complete(now=wall + 11) is True
+    assert source.current_moment(now=wall + 11) == T0 + timedelta(seconds=10)
+    assert source.current_moment(now=wall + 100) == T0 + timedelta(seconds=10)
 
     source.restart(now=wall + 11)
     assert source.is_complete(now=wall + 11) is False
@@ -476,6 +479,54 @@ def test_live_archive_source_repolls_only_after_poll_period(monkeypatch: pytest.
     third = source.positions(now=2.5)
     assert poll_count[0] == 2
     assert third["j"] != first["j"]
+
+
+def test_ongoing_archive_playback_extends_window_without_playback_controls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("twin_lab.epics_playback.time.monotonic", lambda: 0.0)
+    commands = [_command("j", 1.0, 5.0), _command("j", 3.0, 9.0)]
+    windows: list[tuple[datetime, datetime]] = []
+
+    class WindowedClient:
+        def __init__(self, start: datetime, end: datetime):
+            self.start = start
+            self.end = end
+
+        def commands(self, mapping: MotorPvMap) -> list[MotorCommand]:
+            return [
+                command
+                for command in commands
+                if command.joint_name == mapping.joint_name and self.start <= command.timestamp <= self.end
+            ]
+
+    def factory(start: datetime, end: datetime) -> WindowedClient:
+        windows.append((start, end))
+        return WindowedClient(start, end)
+
+    source = OngoingArchivePlaybackSource(
+        {"j": MotorPvMap("j", "J:VAL")},
+        {"j": "prismatic"},
+        T0,
+        poll_period_s=2.0,
+        client_factory=factory,
+    )
+
+    assert source.record_end is None
+    assert source.is_complete() is False
+    assert not hasattr(source, "set_speed")
+    assert not hasattr(source, "pause")
+    assert not hasattr(source, "seek_fraction")
+
+    assert source.positions(now=0.0)["j"] == pytest.approx(0.0)
+    assert windows == [(T0, T0)]
+    # Still inside the poll period: the source keeps the cached tracks.
+    assert source.positions(now=1.0)["j"] == pytest.approx(0.0)
+    assert len(windows) == 1
+
+    assert source.positions(now=2.5)["j"] == pytest.approx(0.005)
+    assert windows[-1] == (T0, T0 + timedelta(seconds=2.5))
+    assert source.has_commands is True
 
 
 def test_live_file_source_reloads_only_when_file_changes(tmp_path) -> None:

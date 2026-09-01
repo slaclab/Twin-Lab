@@ -113,6 +113,8 @@ body { background: #1a1a1a; }
 #twinlab-readout > div { font: 12px/1.4 monospace; color: #d8d8d8;
                          background: rgba(26,26,26,0.6); padding: 3px 7px;
                          border-radius: 3px; white-space: pre; }
+#twinlab-readout > div.twinlab-complete { color: #79dc8c; }
+#twinlab-readout > div.twinlab-warning { color: #f3d36b; }
 /* The scrubber spans the canvas rather than the panel: it starts clear of the view cube's
    132px box in the bottom-left corner and stops short of the control panel's width.
    dat.GUI lays a row out in fixed percentages, which leaves the slider short while the
@@ -374,8 +376,9 @@ window.addEventListener("load", function () {
   var fpsBadge = badge("twinlab-fps");
   var motorsBadge = badge("twinlab-motors");
 
-  function show(element, text) {
+  function show(element, text, tone) {
     element.style.display = text === null ? "none" : "";
+    element.className = tone || "";
     if (text !== null) element.textContent = text;
   }
 
@@ -429,15 +432,16 @@ window.addEventListener("load", function () {
     frames = 0;
     since = now;
 
-    show(modeBadge, viewerMode());
+        show(modeBadge, viewerMode());
     var status = viewerStatus();
-    show(statusBadge, status);
+        show(statusBadge, status, status === "playback complete" ? "twinlab-complete" : "");
 
     var rate = drawn ? fps.toFixed(0).padStart(2, " ") + " fps" : "idle";
     var clock = sessionClock();
     show(fpsBadge, clock === null ? rate : rate + "  |  " + clock);
     var moving = motorsMoving();
-    show(motorsBadge, moving === null ? null : (moving ? "motors moving" : "no motors moving"));
+        show(motorsBadge, moving === null ? null : (moving ? "motors moving" : "no motors moving"),
+          moving ? "twinlab-warning" : "");
   }, 500);
 });
 """

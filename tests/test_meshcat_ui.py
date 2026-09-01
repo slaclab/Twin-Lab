@@ -122,6 +122,8 @@ def test_set_viewer_status_reports_standby_and_completion() -> None:
     ]
     assert '1: "standby"' in meshcat_ui.FPS_JS
     assert '2: "playback complete"' in meshcat_ui.FPS_JS
+    assert 'status === "playback complete" ? "twinlab-complete" : ""' in meshcat_ui.FPS_JS
+    assert ".twinlab-complete { color: #79dc8c; }" in meshcat_ui.PANEL_CSS
 
 
 def test_scrub_js_targets_the_playback_position_slider() -> None:
@@ -153,6 +155,8 @@ def test_set_viewer_mode_distinguishes_archive_playback_from_live() -> None:
     ]
     assert '1: "archive playback"' in meshcat_ui.FPS_JS
     assert '2: "live"' in meshcat_ui.FPS_JS
+    assert 'moving ? "twinlab-warning" : ""' in meshcat_ui.FPS_JS
+    assert ".twinlab-warning { color: #f3d36b; }" in meshcat_ui.PANEL_CSS
 
 
 def test_should_open_browser_respects_the_global_opt_out(monkeypatch) -> None:

@@ -6,6 +6,7 @@ import yaml
 
 from twin_lab.stage_cad_viewer import (
     _auto_amplitude,
+    _is_ongoing_playback_end,
     _is_fastener_name,
     _joint_displacement,
     _joint_origin_m,
@@ -16,6 +17,12 @@ from twin_lab.stage_cad_viewer import (
     _rotate_vector,
     _transform_data,
 )
+
+
+def test_ongoing_playback_end_sentinel_is_case_insensitive() -> None:
+    assert _is_ongoing_playback_end("ongoing") is True
+    assert _is_ongoing_playback_end("Continuous") is True
+    assert _is_ongoing_playback_end("2026-08-26T15:36:40-07:00") is False
 
 
 def test_pv_name_labels_matches_real_crystal_stack_command_map() -> None:
