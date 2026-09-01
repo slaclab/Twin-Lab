@@ -7,10 +7,16 @@ to the catalog and simulation model respectively.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import pi
 from typing import Protocol
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urlencode
+from urllib.request import urlopen
+
+ARCHIVE_RETRIEVAL_URL = "https://pswww.slac.stanford.edu/archiveviewer/retrieval/data/getData.json"
 
 
 @dataclass(frozen=True)
@@ -128,6 +134,83 @@ class ArchiverEpicsClient:
         if self._source_tz != timezone.utc:
             moment = moment.replace(tzinfo=self._source_tz).astimezone(timezone.utc)
         return moment
+
+
+class ArchiveRestClient:
+    """Command history read straight from the Archive Viewer REST endpoint.
+
+    Needs only the standard library plus PCDS network access (on-site or VPN),
+    so it works in environments where `archapp` cannot be installed. Returns
+    the same `MotorCommand` list as `ArchiverEpicsClient`.
+    """
+
+    def __init__(
+        self,
+        *,
+        start: datetime,
+        end: datetime,
+        url: str = ARCHIVE_RETRIEVAL_URL,
+        timeout_s: float = 30.0,
+    ):
+        if start.tzinfo is None or end.tzinfo is None:
+            raise ValueError("Archiver query window must use timezone-aware datetimes")
+        if start > end:
+            raise ValueError("Archiver query window must start before it ends")
+        self._start = start
+        self._end = end
+        self._url = url
+        self._timeout_s = timeout_s
+
+    def commands(self, mapping: MotorPvMap) -> list[MotorCommand]:
+        """Fetch and window one PV's archived values into MotorCommands."""
+
+        payload = self._fetch(mapping.command_pv)
+        if not payload:
+            return []
+        result = []
+        for point in payload[0].get("data", []):
+            moment = datetime.fromtimestamp(
+                point["secs"] + point.get("nanos", 0) / 1e9, tz=timezone.utc
+            )
+            if self._start <= moment <= self._end:
+                result.append(MotorCommand(mapping.joint_name, moment, float(point["val"])))
+        return result
+
+    def _fetch(self, pv_name: str) -> list:
+        query = urlencode(
+            {
+                "pv": pv_name,
+                "from": _archive_timestamp(self._start),
+                "to": _archive_timestamp(self._end),
+            },
+            quote_via=quote,
+        )
+        url = f"{self._url}?{query}&donotchunk"
+        try:
+            with urlopen(url, timeout=self._timeout_s) as response:  # noqa: S310
+                return json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            if exc.code == 403:
+                raise ConnectionError(
+                    f"The archiver refused the request for {pv_name!r} (HTTP 403). This "
+                    "usually means you are not on the PCDS network - connect to the SLAC "
+                    "VPN (or work on-site) and try again."
+                ) from exc
+            raise ConnectionError(
+                f"The archiver returned HTTP {exc.code} for {pv_name!r}."
+            ) from exc
+        except URLError as exc:
+            raise ConnectionError(
+                f"Could not reach the archiver at {self._url} - check PCDS network/VPN."
+            ) from exc
+
+
+def _archive_timestamp(moment: datetime) -> str:
+    """Format an aware datetime as the UTC millisecond stamp the archiver expects."""
+
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + (
+        f"{moment.microsecond // 1000:03d}Z"
+    )
 
 
 def to_sdf_position(controls_value: float, joint_type: str) -> float:

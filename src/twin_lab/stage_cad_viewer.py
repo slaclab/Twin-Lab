@@ -34,6 +34,12 @@ PLAYBACK_PAUSED_LABEL = "Playback: paused"
 # keep up with the eye. Pushing all of them every frame costs a dat.GUI redraw each, which
 # is far more work than the browser can absorb at the frame rate.
 SLIDER_PUSH_HZ = 5.0
+# A joint holding between commands publishes nothing, so motion is reported for this long
+# after the last change to keep the readout from flickering during slow moves.
+MOTION_HOLD_S = 0.5
+# The browser readout only repaints twice a second, so pushing the clock faster than that
+# would just queue updates the viewer never shows.
+TIME_PUSH_S = 0.5
 
 
 def prepare_stage_cad(
@@ -366,6 +372,8 @@ def view_stage_cad(
         announce_viewer,
         patch_meshcat_page,
         print_view_help,
+        set_motors_moving,
+        set_playback_time,
         viewer_params,
     )
 
@@ -483,10 +491,16 @@ def view_stage_cad(
         print("Tick 'Animation' to start and stop cyclic motion.")
     elif playback_keys:
         label = "Live EPICS feed" if not has_playback_controls else "Playback"
-        print(
-            f"{label}: recreating recorded EPICS commands for {len(playback_keys)} joint(s). "
-            "This is view-only - use the Meshcat panel controls to pause/speed/restart it."
-        )
+        if getattr(playback, "has_commands", True):
+            print(
+                f"{label}: recreating recorded EPICS commands for {len(playback_keys)} joint(s). "
+                "This is view-only - use the Meshcat panel controls to pause/speed/restart it."
+            )
+        else:
+            print(
+                f"{label}: no commands in this window, so nothing will move. Showing the "
+                "assembly at its reviewed home - check the time window if that's unexpected."
+            )
     print_view_help()
     print("Press Escape in Meshcat or Ctrl-C here to stop.")
     frame_period = 1.0 / max(fps, 1.0)
@@ -505,6 +519,10 @@ def view_stage_cad(
     last_speed_value = playback.speed if has_playback_controls else None
     last_paused_value = playback.is_paused if has_playback_controls else None
     last_readout = 0.0
+    last_motion_tick = float("-inf")
+    reported_moving: bool | None = None
+    last_time_push = 0.0
+    set_motors_moving(meshcat, False)
     while meshcat.GetButtonClicks("Stop viewer") == 0:
         tick = time.monotonic()
         elapsed = tick - previous_tick
@@ -524,6 +542,10 @@ def view_stage_cad(
                     restart_clicks = new_restart_clicks
                     playback.restart()
             positions = playback.positions()
+            moment = playback.current_moment()
+            if tick - last_time_push >= TIME_PUSH_S:
+                last_time_push = tick
+                set_playback_time(meshcat, moment.timestamp())
             for index, joint in enumerate(joints):
                 if joint["key"] in playback_keys:
                     values[index] = positions[joint["key"]] * scales[index]
@@ -537,7 +559,8 @@ def view_stage_cad(
                     for index, joint in enumerate(joints)
                     if joint["key"] in playback_keys
                 )
-                print(f"[playback] {sample}")
+                stamp = moment.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+                print(f"[playback {stamp}] {sample}")
         else:
             automatic = meshcat.GetSliderValue(AUTO_MOTION_LABEL) >= 0.5
             new_reset_clicks = meshcat.GetButtonClicks("Reset to home")
@@ -573,6 +596,7 @@ def view_stage_cad(
             if published[index] == values[index]:
                 continue
             published[index] = values[index]
+            last_motion_tick = tick
             value = _joint_displacement(joint, values[index] / scales[index])
             if joint["joint_type"] == "prismatic":
                 offset = [component * value for component in joint["axis_world"]]
@@ -583,6 +607,12 @@ def view_stage_cad(
                     joint["axis_world"], joint["origin_m"], value, RigidTransform, RotationMatrix
                 )
             meshcat.SetTransform(joint_paths[joint["key"]], transform)
+        # Held between commands a joint publishes nothing, so a short tail keeps the
+        # readout from flickering to "no motors moving" during slow continuous motion.
+        moving = (tick - last_motion_tick) < MOTION_HOLD_S
+        if moving != reported_moving:
+            reported_moving = moving
+            set_motors_moving(meshcat, moving)
         # Backpressure. Meshcat buffers without limit, so a loop that publishes faster than
         # the browser can draw builds a queue that never drains, and a stop request cannot
         # be seen until the browser has chewed through it.
@@ -781,7 +811,7 @@ def main() -> None:
     parser.add_argument(
         "--playback-start",
         help="ISO-8601 start of an archiver time window to replay, e.g. 2026-08-26T15:52:00-07:00 "
-        "(requires archapp; alternative to --playback-recording)",
+        "(needs PCDS network access; alternative to --playback-recording)",
     )
     parser.add_argument(
         "--playback-end",

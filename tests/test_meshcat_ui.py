@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import webbrowser
 
 import pytest
@@ -61,7 +62,11 @@ def test_open_in_browser_hands_wsl_urls_to_windows(monkeypatch) -> None:
         "which",
         lambda name: "/mnt/c/WINDOWS/explorer.exe" if name == "explorer.exe" else None,
     )
-    monkeypatch.setattr(meshcat_ui.subprocess, "run", lambda cmd, **kw: calls.append(cmd))
+    monkeypatch.setattr(
+        meshcat_ui.subprocess,
+        "run",
+        lambda cmd, **kw: calls.append(cmd) or _completed(cmd, 1),
+    )
     monkeypatch.setattr(
         meshcat_ui.webbrowser,
         "open",
@@ -71,6 +76,70 @@ def test_open_in_browser_hands_wsl_urls_to_windows(monkeypatch) -> None:
     meshcat_ui.open_in_browser("http://localhost:7000")
 
     assert calls == [["/mnt/c/WINDOWS/explorer.exe", "http://localhost:7000"]]
+
+
+def test_open_in_browser_prefers_powershell_over_explorer(monkeypatch) -> None:
+    """explorer.exe silently fails from a Linux cwd, so a working launcher must win."""
+
+    calls: list[list[str]] = []
+    monkeypatch.setenv("WSL_DISTRO_NAME", "Ubuntu-26.04")
+    monkeypatch.setattr(
+        meshcat_ui.shutil,
+        "which",
+        lambda name: f"/mnt/c/{name}" if name in ("powershell.exe", "explorer.exe") else None,
+    )
+    monkeypatch.setattr(
+        meshcat_ui.subprocess,
+        "run",
+        lambda cmd, **kw: calls.append(cmd) or _completed(cmd, 0),
+    )
+
+    meshcat_ui.open_in_browser("http://localhost:7000")
+
+    assert len(calls) == 1
+    assert calls[0][0] == "/mnt/c/powershell.exe"
+    assert "http://localhost:7000" in calls[0][-1]
+
+
+def _completed(cmd, returncode: int):
+    return subprocess.CompletedProcess(cmd, returncode)
+
+
+def test_set_motors_moving_reports_state_on_the_readout_node() -> None:
+    """FPS_JS reads this node's visibility, so the path and property must match it."""
+
+    calls: list[tuple[str, str, bool]] = []
+
+    class _Meshcat:
+        def SetProperty(self, path: str, prop: str, value: bool) -> None:  # noqa: N802
+            calls.append((path, prop, value))
+
+    meshcat_ui.set_motors_moving(_Meshcat(), True)
+    meshcat_ui.set_motors_moving(_Meshcat(), False)
+
+    assert calls == [
+        (meshcat_ui.MOTORS_PATH, "visible", True),
+        (meshcat_ui.MOTORS_PATH, "visible", False),
+    ]
+    assert 'readNode("twinlab_motors")' in meshcat_ui.FPS_JS
+    assert meshcat_ui.MOTORS_PATH == "/twinlab_motors"
+
+
+def test_set_playback_time_reports_epoch_seconds_on_the_readout_node() -> None:
+    """FPS_JS formats this number locally, so it must arrive as epoch seconds."""
+
+    calls: list[tuple[str, str, float]] = []
+
+    class _Meshcat:
+        def SetProperty(self, path: str, prop: str, value: float) -> None:  # noqa: N802
+            calls.append((path, prop, value))
+
+    meshcat_ui.set_playback_time(_Meshcat(), 1787782441.5)
+
+    assert calls == [(meshcat_ui.TIME_PATH, "renderOrder", 1787782441.5)]
+    assert 'readNode("twinlab_time")' in meshcat_ui.FPS_JS
+    assert "renderOrder" in meshcat_ui.FPS_JS
+    assert meshcat_ui.TIME_PATH == "/twinlab_time"
 
 
 def test_open_in_browser_survives_a_missing_browser(monkeypatch) -> None:

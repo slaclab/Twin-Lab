@@ -177,6 +177,12 @@ class PlaybackSource:
         return frozenset(self._tracks)
 
     @property
+    def has_commands(self) -> bool:
+        """Whether any track holds a recorded command, i.e. anything will move."""
+
+        return any(track.commands for track in self._tracks.values())
+
+    @property
     def speed(self) -> float:
         return self._clock.speed
 
@@ -201,6 +207,11 @@ class PlaybackSource:
 
         moment = self._clock.current_moment(now)
         return {name: track.position_at(moment) for name, track in self._tracks.items()}
+
+    def current_moment(self, now: float | None = None) -> datetime:
+        """Where in the recorded session playback currently is."""
+
+        return self._clock.current_moment(now)
 
     def is_finished(self, now: float | None = None) -> bool:
         """True once every track's position has reached its last commanded target."""
@@ -360,8 +371,10 @@ def build_playback_from_recording(
 
     mappings, joint_types = load_command_map(command_map_path)
     session_start, commands = load_recorded_commands(recording_path)
+    # A window with no commands still describes a real assembly, so it renders statically
+    # at the reviewed home rather than refusing to open.
     if session_start is None:
-        raise ValueError(f"No recorded commands in {recording_path}")
+        session_start = datetime.now(timezone.utc)
     homes = load_home_positions(inventory_path, list(mappings))
     max_speeds = load_max_speeds(inventory_path, list(mappings))
     tracks = build_tracks(RecordedEpicsClient(commands), mappings, joint_types, homes, max_speeds)
@@ -379,15 +392,15 @@ def build_playback_from_archive(
 ) -> PlaybackSource:
     """Wire a real archiver time window into a ready-to-drive PlaybackSource.
 
-    Requires `archapp` (PCDS conda env / network) - see `ArchiverEpicsClient`.
+    Needs PCDS network access (on-site or VPN), but no archapp install.
     """
 
-    from .epics import ArchiverEpicsClient
+    from .epics import ArchiveRestClient
 
     mappings, joint_types = load_command_map(command_map_path)
     homes = load_home_positions(inventory_path, list(mappings))
     max_speeds = load_max_speeds(inventory_path, list(mappings))
-    client = ArchiverEpicsClient(start=start, end=end)
+    client = ArchiveRestClient(start=start, end=end)
     tracks = build_tracks(client, mappings, joint_types, homes, max_speeds)
     clock = PlaybackClock(record_start=start, speed=speed)
     return PlaybackSource(tracks, clock)
@@ -461,11 +474,16 @@ class LiveArchiveSource:
         reference = datetime.now(timezone.utc)
         return {name: track.position_at(reference) for name, track in self._tracks.items()}
 
+    def current_moment(self, now: float | None = None) -> datetime:
+        """Live mirroring always sits at the present, not a point in a recording."""
+
+        return datetime.now(timezone.utc)
+
 
 def _default_archiver_factory(start: datetime, end: datetime) -> CommandHistoryClient:
-    from .epics import ArchiverEpicsClient
+    from .epics import ArchiveRestClient
 
-    return ArchiverEpicsClient(start=start, end=end)
+    return ArchiveRestClient(start=start, end=end)
 
 
 def build_live_source(
@@ -565,6 +583,11 @@ class LiveFileSource:
         self._maybe_reload(moment_wall)
         reference = datetime.now(timezone.utc)
         return {name: track.position_at(reference) for name, track in self._tracks.items()}
+
+    def current_moment(self, now: float | None = None) -> datetime:
+        """Live mirroring always sits at the present, not a point in a recording."""
+
+        return datetime.now(timezone.utc)
 
 
 def build_live_file_source(

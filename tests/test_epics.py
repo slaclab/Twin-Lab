@@ -6,13 +6,13 @@ import pytest
 
 from twin_lab.epics import (
     ArchiverEpicsClient,
+    ArchiveRestClient,
     MotorCommand,
     MotorPvMap,
     RecordedEpicsClient,
     require_recent_commands,
     to_sdf_position,
 )
-
 
 NOW = datetime(2026, 8, 18, 12, 0, tzinfo=timezone.utc)
 
@@ -65,3 +65,55 @@ def test_archiver_client_reports_unreachable_archiver_as_connection_error() -> N
 
     with pytest.raises(ConnectionError, match="could not be reached"):
         client.commands(MotorPvMap("stage::x", "STAGE:X:VAL"))
+
+
+# Shape captured from a real POLYCAP:CRY:N:X query against the archiver.
+_ARCHIVE_PAYLOAD = [
+    {
+        "meta": {"name": "POLYCAP:CRY:N:X", "EGU": "mm", "PREC": "3"},
+        "data": [
+            {"secs": 1787782441, "val": 2.0, "nanos": 563924530, "severity": 0, "status": 0},
+            {"secs": 1787782563, "val": 0.0, "nanos": 879580942, "severity": 0, "status": 0},
+        ],
+    }
+]
+
+_WINDOW_START = datetime(2026, 8, 24, tzinfo=timezone.utc)
+_WINDOW_END = datetime(2026, 8, 31, tzinfo=timezone.utc)
+
+
+def _rest_client_returning(payload, **kwargs):
+    client = ArchiveRestClient(start=_WINDOW_START, end=_WINDOW_END, **kwargs)
+    client._fetch = lambda pv_name: payload  # type: ignore[method-assign]
+    return client
+
+
+def test_rest_client_parses_archiver_points_into_commands() -> None:
+    client = _rest_client_returning(_ARCHIVE_PAYLOAD)
+
+    commands = client.commands(MotorPvMap("A050", "POLYCAP:CRY:N:X"))
+
+    assert [item.commanded for item in commands] == [2.0, 0.0]
+    assert all(item.joint_name == "A050" for item in commands)
+    assert all(item.timestamp.tzinfo is not None for item in commands)
+
+
+def test_rest_client_drops_points_outside_the_requested_window() -> None:
+    client = ArchiveRestClient(start=_WINDOW_START, end=_WINDOW_START)
+    client._fetch = lambda pv_name: _ARCHIVE_PAYLOAD  # type: ignore[method-assign]
+
+    assert client.commands(MotorPvMap("A050", "POLYCAP:CRY:N:X")) == []
+
+
+def test_rest_client_returns_nothing_for_a_pv_with_no_history() -> None:
+    client = _rest_client_returning([])
+
+    assert client.commands(MotorPvMap("A050", "POLYCAP:CRY:N:X")) == []
+
+
+def test_rest_client_rejects_naive_and_backwards_windows() -> None:
+    with pytest.raises(ValueError, match="timezone-aware"):
+        ArchiveRestClient(start=datetime(2026, 8, 24), end=_WINDOW_END)
+
+    with pytest.raises(ValueError, match="start before it ends"):
+        ArchiveRestClient(start=_WINDOW_END, end=_WINDOW_START)

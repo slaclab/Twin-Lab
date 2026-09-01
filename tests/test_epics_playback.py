@@ -285,6 +285,29 @@ def test_load_recorded_commands_rejects_naive_timestamp(tmp_path) -> None:
         load_recorded_commands(path)
 
 
+def test_empty_recording_still_builds_a_static_playback(tmp_path) -> None:
+    """An empty window is a real answer ("nothing moved"), and the assembly is
+    known from CAD regardless, so this must render statically rather than refuse
+    to open the viewer.
+    """
+
+    recording = tmp_path / "empty.json"
+    recording.write_text(json.dumps({"commands": []}))
+
+    playback = build_playback_from_recording(
+        recording,
+        "config/crystal-stack-command-map.yaml",
+        "cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml",
+    )
+
+    assert playback.has_commands is False
+    assert playback.joint_names  # every mapped joint is still present, just idle
+    positions = playback.positions()
+    assert positions["A050"] == pytest.approx(0.0)
+    # A048's reviewed home is 180 deg, so "static" must mean the reviewed home, not zero.
+    assert positions["A048"] == pytest.approx(math.pi)
+
+
 def test_full_crystal_stack_playback_recreates_a_reasonable_session(tmp_path) -> None:
     """End-to-end regression covering the manual dry-run: real command map +
     real inventory homes + a synthetic small-movement recording for a subset

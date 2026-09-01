@@ -337,6 +337,30 @@ window.addEventListener("load", function () {
   var render = viewer.render.bind(viewer);
   viewer.render = function () { frames += 1; return render.apply(null, arguments); };
 
+  // The server reports motor activity by flipping the visibility of an empty node, which
+  // is read here rather than created, so "unknown" stays distinct from "not moving".
+  function readNode(name) {
+    var tree = viewer.scene_tree;
+    var node = tree && tree.children && tree.children[name];
+    return node && node.object ? node.object : null;
+  }
+
+  function motorsMoving() {
+    var object = readNode("twinlab_motors");
+    return object ? object.visible : null;
+  }
+
+  // Seconds since the epoch, so the browser formats the session clock in local time.
+  function sessionClock() {
+    var object = readNode("twinlab_time");
+    var epoch = object ? object.renderOrder : null;
+    if (typeof epoch !== "number" || epoch <= 0) return null;
+    var when = new Date(epoch * 1000);
+    var pad = function (value) { return String(value).padStart(2, "0"); };
+    return when.getFullYear() + "-" + pad(when.getMonth() + 1) + "-" + pad(when.getDate()) +
+      " " + pad(when.getHours()) + ":" + pad(when.getMinutes()) + ":" + pad(when.getSeconds());
+  }
+
   var since = performance.now();
   setInterval(function () {
     var now = performance.now();
@@ -344,7 +368,12 @@ window.addEventListener("load", function () {
     var fps = drawn * 1000 / Math.max(now - since, 1);
     frames = 0;
     since = now;
-    readout.textContent = drawn ? fps.toFixed(0).padStart(2, " ") + " fps" : "idle";
+    var parts = [drawn ? fps.toFixed(0).padStart(2, " ") + " fps" : "idle"];
+    var moving = motorsMoving();
+    if (moving !== null) parts.push(moving ? "motors moving" : "no motors moving");
+    var clock = sessionClock();
+    if (clock !== null) parts.push(clock);
+    readout.textContent = parts.join("  |  ");
   }, 500);
 });
 """
@@ -686,6 +715,32 @@ def viewer_params(*, show_stats_plot: bool = False):
     return MeshcatParams(host="0.0.0.0", show_stats_plot=show_stats_plot)
 
 
+MOTORS_PATH = "/twinlab_motors"
+TIME_PATH = "/twinlab_time"
+
+
+def set_motors_moving(meshcat, moving: bool) -> None:
+    """Report motor activity to the browser's fps readout (see ``FPS_JS``).
+
+    Rides on an empty scene node's visibility because Meshcat has no text channel; the
+    node carries no geometry, so it never renders or affects the model's bounds.
+    """
+
+    meshcat.SetProperty(MOTORS_PATH, "visible", moving)
+
+
+def set_playback_time(meshcat, epoch_s: float) -> None:
+    """Report the moment being replayed, as seconds since the epoch (see ``FPS_JS``).
+
+    Sent as a number rather than formatted text so the browser can render it in the
+    viewer's own local time. It rides on ``renderOrder`` because Meshcat refuses to set a
+    property the object does not already have, and an empty group never draws, so its
+    draw order is inert.
+    """
+
+    meshcat.SetProperty(TIME_PATH, "renderOrder", epoch_s)
+
+
 def announce_viewer(label: str, meshcat, *, open_browser: bool = True) -> None:
     """Print the viewer's localhost URL and open it.
 
@@ -720,23 +775,45 @@ def open_in_browser(url: str) -> None:
     """Show ``url`` in the desktop browser, falling back to the printed link in silence.
 
     WSL has no Linux browser to hand the URL to, so it goes to the Windows default browser
-    instead; ``explorer.exe`` exits non-zero even when it worked, so its status is ignored.
+    instead. ``explorer.exe`` is tried last because it fails silently when the working
+    directory is a Linux path, which is the normal case when running from this repo.
     """
 
     if "WSL_DISTRO_NAME" in os.environ:
-        launcher = shutil.which("wslview") or shutil.which("explorer.exe")
-        if launcher is not None:
-            subprocess.run(
-                [launcher, url],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+        if _run_launcher([shutil.which("wslview"), url]):
+            return
+        powershell = shutil.which("powershell.exe")
+        if powershell is not None and _run_launcher(
+            [powershell, "-NoProfile", "-Command", "Start-Process", f"'{url}'"]
+        ):
+            return
+        # explorer.exe reports failure even when it worked, so its status can't be trusted.
+        explorer = shutil.which("explorer.exe")
+        if explorer is not None:
+            _run_launcher([explorer, url])
             return
     try:
         webbrowser.open(url)
     except (webbrowser.Error, OSError):
         pass
+
+
+def _run_launcher(command: list[str | None]) -> bool:
+    """Run a browser-launcher command, reporting whether it exited cleanly."""
+
+    if command[0] is None:
+        return False
+    try:
+        completed = subprocess.run(
+            [str(part) for part in command],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return completed.returncode == 0
 
 
 def wsl_ipv4_address() -> str | None:

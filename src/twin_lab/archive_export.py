@@ -147,9 +147,10 @@ def describe_joints(command_map_path: str | Path) -> list[JointDescription]:
 
 
 def _default_client_factory(start: datetime, end: datetime) -> CommandHistoryClient:
-    from .epics import ArchiverEpicsClient
+    # REST needs only PCDS network access, so it works without the archapp/conda setup.
+    from .epics import ArchiveRestClient
 
-    return ArchiverEpicsClient(start=start, end=end)
+    return ArchiveRestClient(start=start, end=end)
 
 
 def _fetch_commands(
@@ -259,6 +260,12 @@ def _diagnose_error(exc: Exception) -> str:
             "then try this command again."
         )
     if isinstance(exc, (ConnectionError, TimeoutError, OSError)):
+        if "403" in text:
+            return (
+                "The EPICS archiver refused the request (HTTP 403).\n"
+                "This means you're reaching the server but aren't recognized as being on "
+                "the PCDS network - connect to the SLAC VPN (or work on-site) and try again."
+            )
         return (
             "Could not reach the EPICS archiver over the network.\n"
             "Make sure you're on the PCDS network (on-site or connected to the VPN).\n"

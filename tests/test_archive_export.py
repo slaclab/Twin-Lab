@@ -17,7 +17,7 @@ from twin_lab.archive_export import (
     follow_session,
     parse_moment,
 )
-from twin_lab.epics import ArchiverEpicsClient, MotorCommand, RecordedEpicsClient
+from twin_lab.epics import ArchiveRestClient, MotorCommand, RecordedEpicsClient
 
 T0 = datetime(2026, 8, 26, 22, 52, tzinfo=timezone.utc)
 
@@ -90,10 +90,16 @@ def test_diagnose_error_recognizes_network_failure() -> None:
     assert "ARCHAPP_HOSTNAME" in message
 
 
-def test_default_client_factory_uses_archapp_client() -> None:
+def test_default_client_factory_uses_rest_client() -> None:
     client = _default_client_factory(T0, T0 + timedelta(seconds=1))
 
-    assert isinstance(client, ArchiverEpicsClient)
+    assert isinstance(client, ArchiveRestClient)
+
+
+def test_diagnose_error_explains_403_as_missing_vpn() -> None:
+    message = _diagnose_error(ConnectionError("refused the request (HTTP 403)"))
+
+    assert "VPN" in message
 
 
 def test_diagnose_error_falls_back_to_plain_exception_text() -> None:
