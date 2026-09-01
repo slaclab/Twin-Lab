@@ -971,6 +971,12 @@ def main() -> None:
         help="How often --playback-end ongoing/continuous extends its archive query",
     )
     parser.add_argument(
+        "--playback-lookahead-s",
+        type=float,
+        default=8.0,
+        help="How far ahead of the continuous playback clock to buffer archived commands",
+    )
+    parser.add_argument(
         "--playback-resume-file",
         default=str(DEFAULT_ONGOING_RESUME_PATH),
         help="Where ongoing playback saves its last archive timestamp; use "
@@ -1026,6 +1032,7 @@ def main() -> None:
                     args.playback_command_map,
                     args.stage_inventory,
                     poll_period_s=args.playback_poll_period_s,
+                    lookahead_s=args.playback_lookahead_s,
                 )
             else:
                 from .epics_playback import build_playback_from_archive

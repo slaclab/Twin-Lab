@@ -494,8 +494,8 @@ class OngoingArchivePlaybackSource:
 
     This is the bridge mode between historical playback and a true live feed:
     the user chooses the start moment, the source advances forward from there
-    in real time, and each poll extends the archive query up to the current
-    pseudo-live moment. It intentionally does not expose the finite playback
+    in real time, and each poll extends the archive query a little ahead of
+    the current pseudo-live moment. It intentionally does not expose the finite playback
     pause, restart, seek, or playback-speed controls; continuous playback has
     its own stop/resume feed controls instead.
     """
@@ -509,16 +509,20 @@ class OngoingArchivePlaybackSource:
         *,
         max_speeds: dict[str, float] | None = None,
         poll_period_s: float = 2.0,
+        lookahead_s: float = 8.0,
         client_factory=None,
     ) -> None:
         if record_start.tzinfo is None:
             raise ValueError("Ongoing archive playback start must be timezone-aware")
+        if lookahead_s < 0:
+            raise ValueError("Ongoing archive playback lookahead must be non-negative")
         self._mappings = mappings
         self._joint_types = joint_types
         self._clock = PlaybackClock(record_start=record_start, speed=1.0)
         self._homes = home_positions or {}
         self._max_speeds = max_speeds or {}
         self._poll_period_s = poll_period_s
+        self._lookahead_s = lookahead_s
         self._client_factory = client_factory or _default_ongoing_archiver_factory
         self._tracks: dict[str, JointTrack] = self._empty_tracks()
         self._last_poll = float("-inf")
@@ -590,7 +594,7 @@ class OngoingArchivePlaybackSource:
         self._executor.shutdown(wait=False, cancel_futures=True)
 
     def _start_refresh(self, now: float) -> None:
-        end = self.current_moment(now)
+        end = self.current_moment(now) + timedelta(seconds=self._lookahead_s)
         self._pending_refresh = self._executor.submit(self._fetch_tracks, end)
         self._last_poll = now
 
@@ -630,6 +634,7 @@ def build_ongoing_playback_from_archive(
     inventory_path: str | Path,
     *,
     poll_period_s: float = 2.0,
+    lookahead_s: float = 8.0,
 ) -> OngoingArchivePlaybackSource:
     """Wire a start-only archive replay into a pseudo-live source."""
 
@@ -643,6 +648,7 @@ def build_ongoing_playback_from_archive(
         homes,
         max_speeds=max_speeds,
         poll_period_s=poll_period_s,
+        lookahead_s=lookahead_s,
     )
 
 

@@ -509,6 +509,7 @@ def test_ongoing_archive_playback_extends_window_without_playback_controls(
         {"j": "prismatic"},
         T0,
         poll_period_s=2.0,
+        lookahead_s=8.0,
         client_factory=factory,
     )
 
@@ -521,14 +522,23 @@ def test_ongoing_archive_playback_extends_window_without_playback_controls(
     assert hasattr(source, "resume_feed")
 
     assert source.positions(now=0.0)["j"] == pytest.approx(0.0)
-    assert windows == [(T0, T0)]
-    # Still inside the poll period: the source keeps the cached tracks.
-    assert source.positions(now=1.0)["j"] == pytest.approx(0.0)
+    assert source._pending_refresh is not None
+    source._pending_refresh.result(timeout=1.0)
+    assert source.positions(now=0.0)["j"] == pytest.approx(0.0)
+    assert windows == [(T0, T0 + timedelta(seconds=8.0))]
+    # Still inside the poll period: the source keeps the cached tracks, but those
+    # tracks already include lookahead commands and apply them only when their
+    # timestamp arrives on the playback clock.
+    assert source.positions(now=1.0)["j"] == pytest.approx(0.005)
     assert len(windows) == 1
 
     assert source.positions(now=2.5)["j"] == pytest.approx(0.005)
-    assert windows[-1] == (T0, T0 + timedelta(seconds=2.5))
+    assert source._pending_refresh is not None
+    source._pending_refresh.result(timeout=1.0)
+    assert source.positions(now=2.5)["j"] == pytest.approx(0.005)
+    assert windows[-1] == (T0, T0 + timedelta(seconds=10.5))
     assert source.has_commands is True
+    source.close()
 
 
 def test_ongoing_archive_playback_stop_and_resume_are_distinct_from_pause(
@@ -546,9 +556,13 @@ def test_ongoing_archive_playback_stop_and_resume_are_distinct_from_pause(
         {"j": "prismatic"},
         T0,
         poll_period_s=1.0,
+        lookahead_s=8.0,
         client_factory=factory,
     )
 
+    source.positions(now=2.0)
+    assert source._pending_refresh is not None
+    source._pending_refresh.result(timeout=1.0)
     source.positions(now=2.0)
     source.stop_feed(now=2.0)
 
@@ -562,7 +576,11 @@ def test_ongoing_archive_playback_stop_and_resume_are_distinct_from_pause(
     assert source.is_stopped is False
     assert source.current_moment(now=23.0) == T0 + timedelta(seconds=5.0)
     source.positions(now=23.0)
+    assert source._pending_refresh is not None
+    source._pending_refresh.result(timeout=1.0)
+    source.positions(now=23.0)
     assert poll_count[0] == 2
+    source.close()
 
 
 def test_live_file_source_reloads_only_when_file_changes(tmp_path) -> None:

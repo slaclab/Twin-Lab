@@ -118,7 +118,10 @@ uv run slac-stage-cad cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
 ```
 
 This mode is labeled `continuous playback mode` in the viewer. It advances at
-real time and re-polls the archiver as the replay window grows. Press
+real time and refreshes the growing archive window in the background with an
+8-second lookahead buffer, so commands should already be cached before their
+timestamp reaches the viewer clock and a slow archiver response should not
+freeze frame updates. Press
 **Stop continuous playback** to stop the feed at the current archive timestamp,
 then **Resume continuous playback** to continue from that same timestamp without
 leaving the browser. This is intentionally separate from finite playback's
@@ -137,7 +140,9 @@ uv run slac-stage-cad cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
 
 Use `--playback-resume-file path/to/resume.json` if you need separate resume
 state for two different runs. Use `--playback-poll-period-s` to tune how often
-the growing archive window is refreshed.
+the growing archive window is refreshed, and `--playback-lookahead-s` to adjust
+the buffer if 8 seconds is too short or too conservative for a particular
+network path.
 
 ### Current archiver live mirror
 
