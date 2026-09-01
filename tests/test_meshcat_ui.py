@@ -136,7 +136,7 @@ def test_scrub_js_targets_the_playback_position_slider() -> None:
     assert "#twinlab-scrub" in meshcat_ui.PANEL_CSS
 
 
-def test_set_viewer_mode_distinguishes_archive_playback_from_live() -> None:
+def test_set_viewer_mode_distinguishes_playback_and_live_modes() -> None:
     """Both modes just move joints on screen, so the source has to be stated."""
 
     calls: list[tuple[str, str, float]] = []
@@ -148,13 +148,16 @@ def test_set_viewer_mode_distinguishes_archive_playback_from_live() -> None:
     meshcat = _Meshcat()
     meshcat_ui.set_viewer_mode(meshcat, meshcat_ui.MODE_ARCHIVE)
     meshcat_ui.set_viewer_mode(meshcat, meshcat_ui.MODE_LIVE)
+    meshcat_ui.set_viewer_mode(meshcat, meshcat_ui.MODE_CONTINUOUS_PLAYBACK)
 
     assert calls == [
         (meshcat_ui.MODE_PATH, "renderOrder", 1.0),
         (meshcat_ui.MODE_PATH, "renderOrder", 2.0),
+        (meshcat_ui.MODE_PATH, "renderOrder", 3.0),
     ]
-    assert '1: "archive playback"' in meshcat_ui.FPS_JS
+    assert '1: "fixed playback mode"' in meshcat_ui.FPS_JS
     assert '2: "live"' in meshcat_ui.FPS_JS
+    assert '3: "continuous playback mode"' in meshcat_ui.FPS_JS
     assert 'moving ? "twinlab-warning" : ""' in meshcat_ui.FPS_JS
     assert ".twinlab-warning { color: #f3d36b; }" in meshcat_ui.PANEL_CSS
 

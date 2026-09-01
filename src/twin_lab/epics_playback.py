@@ -532,6 +532,10 @@ class OngoingArchivePlaybackSource:
         return None
 
     @property
+    def is_ongoing_playback(self) -> bool:
+        return True
+
+    @property
     def joint_names(self) -> frozenset[str]:
         return frozenset(self._tracks)
 

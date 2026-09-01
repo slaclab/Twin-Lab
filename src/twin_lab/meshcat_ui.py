@@ -417,8 +417,8 @@ window.addEventListener("load", function () {
     return object ? STATUS[object.renderOrder] || null : "standby";
   }
 
-  // 1 replaying archived commands, 2 mirroring the live hardware.
-  var MODES = { 1: "archive playback", 2: "live" };
+  // 1 replaying a fixed window, 2 mirroring the live hardware, 3 replaying a growing window.
+  var MODES = { 1: "fixed playback mode", 2: "live", 3: "continuous playback mode" };
   function viewerMode() {
     var object = readNode("twinlab_mode");
     return object ? MODES[object.renderOrder] || null : null;
@@ -844,10 +844,11 @@ MODE_PATH = "/twinlab_mode"
 MODE_NONE = 0
 MODE_ARCHIVE = 1
 MODE_LIVE = 2
+MODE_CONTINUOUS_PLAYBACK = 3
 
 
 def set_viewer_mode(meshcat, mode: int) -> None:
-    """Label the readout ``archive playback`` or ``live`` (see ``FPS_JS``).
+    """Label the readout's playback/live source mode (see ``FPS_JS``).
 
     The two look identical once running - both just move joints - so the source of the
     motion has to be stated rather than inferred.

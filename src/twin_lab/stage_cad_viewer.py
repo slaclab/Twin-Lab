@@ -377,6 +377,7 @@ def view_stage_cad(
     from pydrake.math import RigidTransform, RotationMatrix
 
     from .meshcat_ui import (
+        MODE_CONTINUOUS_PLAYBACK,
         MODE_ARCHIVE,
         MODE_LIVE,
         MODE_NONE,
@@ -561,6 +562,8 @@ def view_stage_cad(
     set_viewer_status(meshcat, STATUS_NONE)
     if playback is None:
         set_viewer_mode(meshcat, MODE_NONE)
+    elif getattr(playback, "is_ongoing_playback", False):
+        set_viewer_mode(meshcat, MODE_CONTINUOUS_PLAYBACK)
     else:
         set_viewer_mode(meshcat, MODE_ARCHIVE if has_playback_controls else MODE_LIVE)
     while meshcat.GetButtonClicks(stop_label) == 0:
