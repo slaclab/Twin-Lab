@@ -84,7 +84,7 @@ _WINDOW_END = datetime(2026, 8, 31, tzinfo=timezone.utc)
 
 def _rest_client_returning(payload, **kwargs):
     client = ArchiveRestClient(start=_WINDOW_START, end=_WINDOW_END, **kwargs)
-    client._fetch = lambda pv_name: payload  # type: ignore[method-assign]
+    client._fetch = lambda pv_name, start, end: payload  # type: ignore[method-assign]
     return client
 
 
@@ -100,7 +100,7 @@ def test_rest_client_parses_archiver_points_into_commands() -> None:
 
 def test_rest_client_drops_points_outside_the_requested_window() -> None:
     client = ArchiveRestClient(start=_WINDOW_START, end=_WINDOW_START)
-    client._fetch = lambda pv_name: _ARCHIVE_PAYLOAD  # type: ignore[method-assign]
+    client._fetch = lambda pv_name, start, end: _ARCHIVE_PAYLOAD  # type: ignore[method-assign]
 
     assert client.commands(MotorPvMap("A050", "POLYCAP:CRY:N:X")) == []
 
@@ -109,6 +109,25 @@ def test_rest_client_returns_nothing_for_a_pv_with_no_history() -> None:
     client = _rest_client_returning([])
 
     assert client.commands(MotorPvMap("A050", "POLYCAP:CRY:N:X")) == []
+
+
+def test_rest_client_seeds_playback_with_the_last_pre_window_setpoint() -> None:
+    payload = [
+        {
+            "data": [
+                {"secs": int((_WINDOW_START - timedelta(seconds=1)).timestamp()), "val": 4.0},
+                {"secs": int((_WINDOW_START + timedelta(seconds=1)).timestamp()), "val": 5.0},
+            ]
+        }
+    ]
+    client = _rest_client_returning(payload, initial_lookback=timedelta(days=1))
+
+    commands = client.commands(MotorPvMap("A050", "POLYCAP:CRY:N:X"))
+
+    assert [(item.timestamp, item.commanded) for item in commands] == [
+        (_WINDOW_START, 4.0),
+        (_WINDOW_START + timedelta(seconds=1), 5.0),
+    ]
 
 
 def test_rest_client_rejects_naive_and_backwards_windows() -> None:

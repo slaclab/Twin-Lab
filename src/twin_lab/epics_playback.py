@@ -400,7 +400,7 @@ def build_playback_from_archive(
     mappings, joint_types = load_command_map(command_map_path)
     homes = load_home_positions(inventory_path, list(mappings))
     max_speeds = load_max_speeds(inventory_path, list(mappings))
-    client = ArchiveRestClient(start=start, end=end)
+    client = ArchiveRestClient(start=start, end=end, initial_lookback=timedelta(days=1))
     tracks = build_tracks(client, mappings, joint_types, homes, max_speeds)
     clock = PlaybackClock(record_start=start, speed=speed)
     return PlaybackSource(tracks, clock)

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from math import pi
 from typing import Protocol
 from urllib.error import HTTPError, URLError
@@ -151,6 +151,7 @@ class ArchiveRestClient:
         end: datetime,
         url: str = ARCHIVE_RETRIEVAL_URL,
         timeout_s: float = 30.0,
+        initial_lookback: timedelta = timedelta(),
     ):
         if start.tzinfo is None or end.tzinfo is None:
             raise ValueError("Archiver query window must use timezone-aware datetimes")
@@ -160,28 +161,33 @@ class ArchiveRestClient:
         self._end = end
         self._url = url
         self._timeout_s = timeout_s
+        self._initial_lookback = initial_lookback
 
     def commands(self, mapping: MotorPvMap) -> list[MotorCommand]:
         """Fetch and window one PV's archived values into MotorCommands."""
 
-        payload = self._fetch(mapping.command_pv)
+        payload = self._fetch(mapping.command_pv, self._start - self._initial_lookback, self._end)
         if not payload:
             return []
-        result = []
+        points = []
         for point in payload[0].get("data", []):
             moment = datetime.fromtimestamp(
                 point["secs"] + point.get("nanos", 0) / 1e9, tz=timezone.utc
             )
-            if self._start <= moment <= self._end:
-                result.append(MotorCommand(mapping.joint_name, moment, float(point["val"])))
+            points.append(MotorCommand(mapping.joint_name, moment, float(point["val"])))
+        previous = [point for point in points if point.timestamp < self._start]
+        result = (
+            [MotorCommand(mapping.joint_name, self._start, previous[-1].commanded)] if previous else []
+        )
+        result.extend(point for point in points if self._start <= point.timestamp <= self._end)
         return result
 
-    def _fetch(self, pv_name: str) -> list:
+    def _fetch(self, pv_name: str, start: datetime, end: datetime) -> list:
         query = urlencode(
             {
                 "pv": pv_name,
-                "from": _archive_timestamp(self._start),
-                "to": _archive_timestamp(self._end),
+                "from": _archive_timestamp(start),
+                "to": _archive_timestamp(end),
             },
             quote_via=quote,
         )

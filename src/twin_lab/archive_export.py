@@ -150,7 +150,7 @@ def _default_client_factory(start: datetime, end: datetime) -> CommandHistoryCli
     # REST needs only PCDS network access, so it works without the archapp/conda setup.
     from .epics import ArchiveRestClient
 
-    return ArchiveRestClient(start=start, end=end)
+    return ArchiveRestClient(start=start, end=end, initial_lookback=timedelta(days=1))
 
 
 def _fetch_commands(
