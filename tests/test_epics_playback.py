@@ -285,6 +285,72 @@ def test_load_recorded_commands_rejects_naive_timestamp(tmp_path) -> None:
         load_recorded_commands(path)
 
 
+def test_scrubbing_seeks_within_the_window_and_reports_progress() -> None:
+    """The bottom scrubber is a percentage of the replay window, both ways."""
+
+    clock = PlaybackClock(record_start=T0)
+    source = PlaybackSource({}, clock, T0 + timedelta(seconds=100))
+    wall = clock._wall_anchor
+
+    source.seek_fraction(0.25, now=wall)
+    assert source.current_moment(now=wall) == T0 + timedelta(seconds=25)
+    assert source.progress_fraction(now=wall) == pytest.approx(0.25)
+
+    # Out-of-range requests clamp rather than running off the end of the window.
+    source.seek_fraction(1.5, now=wall)
+    assert source.current_moment(now=wall) == T0 + timedelta(seconds=100)
+    assert source.progress_fraction(now=wall) == pytest.approx(1.0)
+
+
+def test_playback_reports_complete_only_past_the_window_end() -> None:
+    clock = PlaybackClock(record_start=T0)
+    source = PlaybackSource({}, clock, T0 + timedelta(seconds=10))
+    wall = clock._wall_anchor
+
+    assert source.is_complete(now=wall) is False
+    assert source.is_complete(now=wall + 11) is True
+
+    source.restart(now=wall + 11)
+    assert source.is_complete(now=wall + 11) is False
+
+
+def test_playback_without_a_known_end_never_completes_or_scrubs() -> None:
+    source = PlaybackSource({}, PlaybackClock(record_start=T0))
+
+    assert source.record_end is None
+    assert source.progress_fraction() is None
+    assert source.is_complete() is False
+
+
+def test_travel_fraction_derates_ramp_speed_and_zero_holds_still() -> None:
+    """The GUI slider is a percentage of each stage's datasheet max speed."""
+
+    commands = [_command("j", 0, 0.0), _command("j", 10, 10.0)]
+    track = JointTrack("j", "prismatic", commands, max_speed=0.002)
+
+    track.speed_fraction = 0.5
+    assert track.effective_max_speed == pytest.approx(0.001)
+    # Half speed covers half the distance of the full-speed ramp in the same time.
+    assert track.position_at(T0 + timedelta(seconds=12)) == pytest.approx(0.002)
+
+    track.speed_fraction = 0.0
+    assert track.position_at(T0 + timedelta(seconds=12)) == pytest.approx(0.0)
+
+
+def test_playback_source_applies_travel_fraction_to_every_joint() -> None:
+    tracks = {
+        "a": JointTrack("a", "prismatic", [], max_speed=0.01),
+        "b": JointTrack("b", "revolute", [], max_speed=0.5),
+    }
+    source = PlaybackSource(tracks, PlaybackClock(record_start=T0))
+
+    source.set_travel_fraction(0.25)
+
+    assert source.travel_fraction == pytest.approx(0.25)
+    assert tracks["a"].effective_max_speed == pytest.approx(0.0025)
+    assert tracks["b"].effective_max_speed == pytest.approx(0.125)
+
+
 def test_empty_recording_still_builds_a_static_playback(tmp_path) -> None:
     """An empty window is a real answer ("nothing moved"), and the assembly is
     known from CAD regardless, so this must render statically rather than refuse

@@ -101,6 +101,74 @@ def test_open_in_browser_prefers_powershell_over_explorer(monkeypatch) -> None:
     assert "http://localhost:7000" in calls[0][-1]
 
 
+def test_set_viewer_status_reports_standby_and_completion() -> None:
+    """FPS_JS maps these codes to the readout text, so they must stay in step."""
+
+    calls: list[tuple[str, str, float]] = []
+
+    class _Meshcat:
+        def SetProperty(self, path: str, prop: str, value: float) -> None:  # noqa: N802
+            calls.append((path, prop, value))
+
+    meshcat = _Meshcat()
+    meshcat_ui.set_viewer_status(meshcat, meshcat_ui.STATUS_STANDBY)
+    meshcat_ui.set_viewer_status(meshcat, meshcat_ui.STATUS_COMPLETE)
+    meshcat_ui.set_viewer_status(meshcat, meshcat_ui.STATUS_NONE)
+
+    assert calls == [
+        (meshcat_ui.STATUS_PATH, "renderOrder", 1.0),
+        (meshcat_ui.STATUS_PATH, "renderOrder", 2.0),
+        (meshcat_ui.STATUS_PATH, "renderOrder", 0.0),
+    ]
+    assert '1: "standby"' in meshcat_ui.FPS_JS
+    assert '2: "playback complete"' in meshcat_ui.FPS_JS
+
+
+def test_scrub_js_targets_the_playback_position_slider() -> None:
+    """The scrubber is a relocated Drake slider, so the label must match exactly."""
+
+    from twin_lab.stage_cad_viewer import SCRUB_LABEL
+
+    assert f'var LABEL = "{SCRUB_LABEL}"' in meshcat_ui.SCRUB_JS
+    assert "twinlab-scrub" in meshcat_ui.SCRUB_JS
+    assert "#twinlab-scrub" in meshcat_ui.PANEL_CSS
+
+
+def test_set_viewer_mode_distinguishes_archive_playback_from_live() -> None:
+    """Both modes just move joints on screen, so the source has to be stated."""
+
+    calls: list[tuple[str, str, float]] = []
+
+    class _Meshcat:
+        def SetProperty(self, path: str, prop: str, value: float) -> None:  # noqa: N802
+            calls.append((path, prop, value))
+
+    meshcat = _Meshcat()
+    meshcat_ui.set_viewer_mode(meshcat, meshcat_ui.MODE_ARCHIVE)
+    meshcat_ui.set_viewer_mode(meshcat, meshcat_ui.MODE_LIVE)
+
+    assert calls == [
+        (meshcat_ui.MODE_PATH, "renderOrder", 1.0),
+        (meshcat_ui.MODE_PATH, "renderOrder", 2.0),
+    ]
+    assert '1: "archive playback"' in meshcat_ui.FPS_JS
+    assert '2: "live"' in meshcat_ui.FPS_JS
+
+
+def test_should_open_browser_respects_the_global_opt_out(monkeypatch) -> None:
+    """Repeated viewer restarts would otherwise keep stacking up new tabs."""
+
+    monkeypatch.delenv("TWIN_LAB_NO_BROWSER", raising=False)
+    assert meshcat_ui.should_open_browser() is True
+    assert meshcat_ui.should_open_browser(False) is False
+
+    monkeypatch.setenv("TWIN_LAB_NO_BROWSER", "1")
+    assert meshcat_ui.should_open_browser() is False
+
+    monkeypatch.setenv("TWIN_LAB_NO_BROWSER", "0")
+    assert meshcat_ui.should_open_browser() is True
+
+
 def _completed(cmd, returncode: int):
     return subprocess.CompletedProcess(cmd, returncode)
 
@@ -178,6 +246,12 @@ def test_viewer_params_bind_the_ipv4_wildcard() -> None:
     assert meshcat_ui.viewer_params().host == "0.0.0.0"
     assert meshcat_ui.viewer_params().show_stats_plot is False
     assert meshcat_ui.viewer_params(show_stats_plot=True).show_stats_plot is True
+
+
+def test_viewer_params_can_pin_an_isolated_port() -> None:
+    pytest.importorskip("pydrake")
+
+    assert meshcat_ui.viewer_params(port=7101).port == 7101
 
 
 def test_the_page_is_told_the_same_view_directions_python_frames_with() -> None:

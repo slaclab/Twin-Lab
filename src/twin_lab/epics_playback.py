@@ -42,6 +42,13 @@ class JointTrack:
     commands: list[MotorCommand]
     home_position: float = 0.0
     max_speed: float = float("inf")
+    speed_fraction: float = 1.0
+
+    @property
+    def effective_max_speed(self) -> float:
+        """Datasheet max speed derated by the current travel-speed fraction."""
+
+        return self.max_speed * self.speed_fraction
 
     def _target_at(self, index: int) -> float:
         return self.home_position + to_sdf_position(self.commands[index].commanded, self.joint_type)
@@ -62,11 +69,15 @@ class JointTrack:
         if index < 0:
             return self.home_position
         target = self._target_at(index)
-        if self.max_speed == float("inf") or self.max_speed <= 0.0:
+        speed = self.effective_max_speed
+        if speed == float("inf"):
             return target
         start = self._target_at(index - 1) if index > 0 else self.home_position
+        # A zero fraction means the stage is held still, not moved instantly.
+        if speed <= 0.0:
+            return start
         elapsed = max((moment - self.commands[index].timestamp).total_seconds(), 0.0)
-        max_delta = self.max_speed * elapsed
+        max_delta = speed * elapsed
         delta = target - start
         if abs(delta) <= max_delta:
             return target
@@ -162,13 +173,37 @@ class PlaybackClock:
         self._moment_anchor = self.record_start
         self._wall_anchor = now if now is not None else time.monotonic()
 
+    def seek(self, moment: datetime, now: float | None = None) -> None:
+        """Jump to `moment` in recorded time, keeping the current speed/pause state."""
+
+        if moment.tzinfo is None:
+            raise ValueError("PlaybackClock.seek requires a timezone-aware moment")
+        self._moment_anchor = moment
+        self._wall_anchor = now if now is not None else time.monotonic()
+
 
 class PlaybackSource:
     """Drives per-joint positions from a fixed set of tracks, keyed by a clock."""
 
-    def __init__(self, tracks: dict[str, JointTrack], clock: PlaybackClock):
+    def __init__(
+        self,
+        tracks: dict[str, JointTrack],
+        clock: PlaybackClock,
+        record_end: datetime | None = None,
+    ):
         self._tracks = tracks
         self._clock = clock
+        self._record_end = record_end
+
+    @property
+    def record_start(self) -> datetime:
+        return self._clock.record_start
+
+    @property
+    def record_end(self) -> datetime | None:
+        """End of the replay window, when one was given - needed to scrub or finish."""
+
+        return self._record_end
 
     @property
     def joint_names(self) -> frozenset[str]:
@@ -193,6 +228,18 @@ class PlaybackSource:
     def set_speed(self, speed: float, now: float | None = None) -> None:
         self._clock.set_speed(speed, now)
 
+    @property
+    def travel_fraction(self) -> float:
+        """Fraction of each stage's datasheet max speed currently allowed."""
+
+        return next(iter(self._tracks.values())).speed_fraction if self._tracks else 1.0
+
+    def set_travel_fraction(self, fraction: float) -> None:
+        """Derate every joint's travel speed to `fraction` of its datasheet max."""
+
+        for track in self._tracks.values():
+            track.speed_fraction = fraction
+
     def pause(self, now: float | None = None) -> None:
         self._clock.pause(now)
 
@@ -212,6 +259,37 @@ class PlaybackSource:
         """Where in the recorded session playback currently is."""
 
         return self._clock.current_moment(now)
+
+    def progress_fraction(self, now: float | None = None) -> float | None:
+        """How far through the window playback is, or None without a known end."""
+
+        span = self._span_s()
+        if span is None:
+            return None
+        elapsed = (self.current_moment(now) - self._clock.record_start).total_seconds()
+        return min(max(elapsed / span, 0.0), 1.0)
+
+    def seek_fraction(self, fraction: float, now: float | None = None) -> None:
+        """Jump to `fraction` of the way through the window (0.0 to 1.0)."""
+
+        span = self._span_s()
+        if span is None:
+            return
+        offset = min(max(fraction, 0.0), 1.0) * span
+        self._clock.seek(self._clock.record_start + timedelta(seconds=offset), now)
+
+    def is_complete(self, now: float | None = None) -> bool:
+        """True once the clock has run past the end of the replay window."""
+
+        if self._record_end is None:
+            return False
+        return self.current_moment(now) >= self._record_end
+
+    def _span_s(self) -> float | None:
+        if self._record_end is None:
+            return None
+        span = (self._record_end - self._clock.record_start).total_seconds()
+        return span if span > 0 else None
 
     def is_finished(self, now: float | None = None) -> bool:
         """True once every track's position has reached its last commanded target."""
@@ -379,7 +457,8 @@ def build_playback_from_recording(
     max_speeds = load_max_speeds(inventory_path, list(mappings))
     tracks = build_tracks(RecordedEpicsClient(commands), mappings, joint_types, homes, max_speeds)
     clock = PlaybackClock(record_start=session_start, speed=speed)
-    return PlaybackSource(tracks, clock)
+    record_end = max((item.timestamp for item in commands), default=None)
+    return PlaybackSource(tracks, clock, record_end)
 
 
 def build_playback_from_archive(
@@ -403,7 +482,7 @@ def build_playback_from_archive(
     client = ArchiveRestClient(start=start, end=end, initial_lookback=timedelta(days=1))
     tracks = build_tracks(client, mappings, joint_types, homes, max_speeds)
     clock = PlaybackClock(record_start=start, speed=speed)
-    return PlaybackSource(tracks, clock)
+    return PlaybackSource(tracks, clock, end)
 
 
 class LiveArchiveSource:
@@ -451,10 +530,22 @@ class LiveArchiveSource:
             for name in mappings
         }
         self._last_poll = float("-inf")
+        self._travel_fraction = 1.0
 
     @property
     def joint_names(self) -> frozenset[str]:
         return frozenset(self._tracks)
+
+    @property
+    def travel_fraction(self) -> float:
+        return self._travel_fraction
+
+    def set_travel_fraction(self, fraction: float) -> None:
+        """Derate every joint's travel speed to `fraction` of its datasheet max."""
+
+        self._travel_fraction = fraction
+        for track in self._tracks.values():
+            track.speed_fraction = fraction
 
     def _refresh(self, now: float) -> None:
         end = datetime.now(timezone.utc)
@@ -463,6 +554,7 @@ class LiveArchiveSource:
         self._tracks = build_tracks(
             client, self._mappings, self._joint_types, self._homes, self._max_speeds
         )
+        self.set_travel_fraction(self._travel_fraction)
         self._last_poll = now
 
     def positions(self, now: float | None = None) -> dict[str, float]:
@@ -551,10 +643,22 @@ class LiveFileSource:
         }
         self._last_mtime: float | None = None
         self._last_check = float("-inf")
+        self._travel_fraction = 1.0
 
     @property
     def joint_names(self) -> frozenset[str]:
         return frozenset(self._mappings)
+
+    @property
+    def travel_fraction(self) -> float:
+        return self._travel_fraction
+
+    def set_travel_fraction(self, fraction: float) -> None:
+        """Derate every joint's travel speed to `fraction` of its datasheet max."""
+
+        self._travel_fraction = fraction
+        for track in self._tracks.values():
+            track.speed_fraction = fraction
 
     def _maybe_reload(self, now: float) -> None:
         if now - self._last_check < self._poll_period_s:
@@ -575,6 +679,7 @@ class LiveFileSource:
             self._homes,
             self._max_speeds,
         )
+        self.set_travel_fraction(self._travel_fraction)
 
     def positions(self, now: float | None = None) -> dict[str, float]:
         """Latest known joint_name -> Drake position, reloading the file if it changed."""

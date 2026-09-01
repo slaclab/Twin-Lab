@@ -105,10 +105,38 @@ body { background: #1a1a1a; }
    so the cube never has to move out of anything's way. */
 #twinlab-view-cube { position: fixed; left: 12px; bottom: 12px; z-index: 8; }
 #twinlab-view-cube canvas { display: block; cursor: pointer; }
-/* Drake's own rtr% plot is switched off in every viewer here, so the top-left is free. */
-#twinlab-fps { position: fixed; left: 12px; top: 12px; z-index: 8; pointer-events: none;
-               font: 12px/1.4 monospace; color: #d8d8d8; background: rgba(26,26,26,0.6);
-               padding: 3px 7px; border-radius: 3px; white-space: pre; }
+/* Drake's own rtr% plot is switched off in every viewer here, so the top-left is free.
+   One badge per attribute, stacked: each stays put and only its own text changes, so a
+   reader watching one of them is not thrown by another one resizing. */
+#twinlab-readout { position: fixed; left: 12px; top: 12px; z-index: 8; pointer-events: none;
+                   display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+#twinlab-readout > div { font: 12px/1.4 monospace; color: #d8d8d8;
+                         background: rgba(26,26,26,0.6); padding: 3px 7px;
+                         border-radius: 3px; white-space: pre; }
+/* The scrubber spans the canvas rather than the panel: it starts clear of the view cube's
+   132px box in the bottom-left corner and stops short of the control panel's width.
+   dat.GUI lays a row out in fixed percentages, which leaves the slider short while the
+   label and the number keep room they never use, so the row is re-laid out as a flex
+   line: label and number take what they need and the slider takes the rest. */
+#twinlab-scrub { position: fixed; left: 168px; bottom: 12px; z-index: 8;
+                 right: calc(var(--twinlab-panel-width, 0px) + 12px);
+                 background: rgba(26,26,26,0.6); border-radius: 3px; padding: 2px 8px; }
+/* dat.GUI wraps a row's label and control in an unclassed div, so that wrapper is the
+   one that has to become the flex line. */
+#twinlab-scrub li { display: block !important; }
+#twinlab-scrub li > div { display: flex !important; align-items: center; width: 100%; }
+#twinlab-scrub .property-name { color: #d8d8d8; font: 12px/24px monospace; flex: none;
+                                width: auto !important; white-space: nowrap;
+                                padding-right: 12px; overflow: visible; }
+#twinlab-scrub .c { margin-left: 0 !important; flex: 1 1 0%; min-width: 0; display: flex;
+                    align-items: center; width: auto !important; }
+/* The slider track is an empty div, so it needs a zero basis to be given the free space
+   rather than collapsing to its content width. */
+#twinlab-scrub .c .slider { flex: 1 1 0%; min-width: 120px; width: auto !important;
+                            order: 1; }
+/* The number sits in its own unclassed wrapper, which is the flex item to move and size. */
+#twinlab-scrub .c > div:not(.slider) { order: 2; flex: none; margin-left: 10px; }
+#twinlab-scrub .c input { width: 52px !important; text-align: right; }
 """
 
 # Anything that has to measure the model needs the same idea of what the model is, and
@@ -329,9 +357,27 @@ FPS_JS = """
 window.addEventListener("load", function () {
   if (typeof viewer === "undefined" || typeof viewer.render !== "function") return;
   var readout = document.createElement("div");
-  readout.id = "twinlab-fps";
-  readout.textContent = "idle";
+  readout.id = "twinlab-readout";
   document.body.appendChild(readout);
+
+  function badge(id) {
+    var element = document.createElement("div");
+    element.id = id;
+    element.style.display = "none";
+    readout.appendChild(element);
+    return element;
+  }
+
+  // One badge per attribute, in the order they are worth glancing at.
+  var modeBadge = badge("twinlab-mode");
+  var statusBadge = badge("twinlab-status");
+  var fpsBadge = badge("twinlab-fps");
+  var motorsBadge = badge("twinlab-motors");
+
+  function show(element, text) {
+    element.style.display = text === null ? "none" : "";
+    if (text !== null) element.textContent = text;
+  }
 
   var frames = 0;
   var render = viewer.render.bind(viewer);
@@ -361,6 +407,20 @@ window.addEventListener("load", function () {
       " " + pad(when.getHours()) + ":" + pad(when.getMinutes()) + ":" + pad(when.getSeconds());
   }
 
+  // 1 standby, 2 playback complete; anything else means the viewer has nothing to say.
+  var STATUS = { 1: "standby", 2: "playback complete" };
+  function viewerStatus() {
+    var object = readNode("twinlab_status");
+    return object ? STATUS[object.renderOrder] || null : "standby";
+  }
+
+  // 1 replaying archived commands, 2 mirroring the live hardware.
+  var MODES = { 1: "archive playback", 2: "live" };
+  function viewerMode() {
+    var object = readNode("twinlab_mode");
+    return object ? MODES[object.renderOrder] || null : null;
+  }
+
   var since = performance.now();
   setInterval(function () {
     var now = performance.now();
@@ -368,12 +428,16 @@ window.addEventListener("load", function () {
     var fps = drawn * 1000 / Math.max(now - since, 1);
     frames = 0;
     since = now;
-    var parts = [drawn ? fps.toFixed(0).padStart(2, " ") + " fps" : "idle"];
-    var moving = motorsMoving();
-    if (moving !== null) parts.push(moving ? "motors moving" : "no motors moving");
+
+    show(modeBadge, viewerMode());
+    var status = viewerStatus();
+    show(statusBadge, status);
+
+    var rate = drawn ? fps.toFixed(0).padStart(2, " ") + " fps" : "idle";
     var clock = sessionClock();
-    if (clock !== null) parts.push(clock);
-    readout.textContent = parts.join("  |  ");
+    show(fpsBadge, clock === null ? rate : rate + "  |  " + clock);
+    var moving = motorsMoving();
+    show(motorsBadge, moving === null ? null : (moving ? "motors moving" : "no motors moving"));
   }, 500);
 });
 """
@@ -698,7 +762,7 @@ window.addEventListener("load", function () {
 RESOURCE_ROOT = CACHE_ROOT / "drake-resource-root"
 
 
-def viewer_params(*, show_stats_plot: bool = False):
+def viewer_params(*, show_stats_plot: bool = False, port: int | None = None):
     """Build the Meshcat settings every viewer shares.
 
     Drake's default host and ``host="*"`` both bind the IPv6 wildcard, so the socket only
@@ -708,15 +772,94 @@ def viewer_params(*, show_stats_plot: bool = False):
 
     Every viewer must build its params here: when the three of them each configured their
     own, a change to one silently left the others behind.
+
+    Pinning ``port`` keeps the URL stable between runs, so an already-open tab can be
+    refreshed instead of a new one being opened next to it.
     """
 
     from pydrake.geometry import MeshcatParams
 
-    return MeshcatParams(host="0.0.0.0", show_stats_plot=show_stats_plot)
+    if port is None:
+        return MeshcatParams(host="0.0.0.0", show_stats_plot=show_stats_plot)
+    return MeshcatParams(host="0.0.0.0", port=port, show_stats_plot=show_stats_plot)
 
+
+def should_open_browser(default: bool = True) -> bool:
+    """Whether to launch a tab, letting ``TWIN_LAB_NO_BROWSER=1`` turn it off globally.
+
+    Nothing here can see the user's existing tabs, so repeated runs would otherwise keep
+    stacking up new ones; this is the opt-out for anyone restarting the viewer in a loop.
+    """
+
+    if os.environ.get("TWIN_LAB_NO_BROWSER", "").strip().lower() in ("1", "true", "yes"):
+        return False
+    return default
+
+
+# Meshcat can only create controls inside dat.GUI's panel, so the scrubber is built there
+# like any other slider and then moved into a bar across the bottom of the canvas, which
+# keeps it wired to Drake while putting it where a transport control belongs.
+SCRUB_JS = """
+window.addEventListener("load", function () {
+  var LABEL = "Playback position (% of completion)";
+  var bar = null;
+
+  function relocate() {
+    if (bar) return true;
+    var rows = document.querySelectorAll(".dg.main li");
+    for (var i = 0; i < rows.length; i++) {
+      var name = rows[i].querySelector(".property-name");
+      if (!name || name.textContent.trim() !== LABEL) continue;
+      bar = document.createElement("div");
+      bar.id = "twinlab-scrub";
+      bar.className = "dg";
+      bar.appendChild(rows[i]);
+      document.body.appendChild(bar);
+      return true;
+    }
+    return false;
+  }
+
+  // Drake adds its sliders as the scene streams in, so the row may not exist yet.
+  if (!relocate()) {
+    var tries = 0;
+    var timer = setInterval(function () {
+      if (relocate() || ++tries > 100) clearInterval(timer);
+    }, 200);
+  }
+});
+"""
 
 MOTORS_PATH = "/twinlab_motors"
 TIME_PATH = "/twinlab_time"
+STATUS_PATH = "/twinlab_status"
+STATUS_NONE = 0
+STATUS_STANDBY = 1
+STATUS_COMPLETE = 2
+MODE_PATH = "/twinlab_mode"
+MODE_NONE = 0
+MODE_ARCHIVE = 1
+MODE_LIVE = 2
+
+
+def set_viewer_mode(meshcat, mode: int) -> None:
+    """Label the readout ``archive playback`` or ``live`` (see ``FPS_JS``).
+
+    The two look identical once running - both just move joints - so the source of the
+    motion has to be stated rather than inferred.
+    """
+
+    meshcat.SetProperty(MODE_PATH, "renderOrder", float(mode))
+
+
+def set_viewer_status(meshcat, status: int) -> None:
+    """Show ``standby``/``playback complete`` in the readout, or clear it (see ``FPS_JS``).
+
+    Shares ``renderOrder`` with the other readout channels for the same reason: Meshcat
+    only sets properties an object already has, and an empty group never draws.
+    """
+
+    meshcat.SetProperty(STATUS_PATH, "renderOrder", float(status))
 
 
 def set_motors_moving(meshcat, moving: bool) -> None:
@@ -882,6 +1025,7 @@ def _patched_html(source: Path) -> str:
         f"<script>{CONTROLS_JS}</script>\n"
         f"<script>{TOGGLE_JS}</script>\n"
         f"<script>{FPS_JS}</script>\n"
+        f"<script>{SCRUB_JS}</script>\n"
         f"<script>{VIEW_CUBE_JS}</script>\n"
     )
     html = html.replace("</body>", f"{patch}</body>")

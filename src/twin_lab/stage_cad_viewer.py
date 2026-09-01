@@ -30,6 +30,8 @@ AUTO_RANGE_LABEL = "Auto motion range (% of travel)"
 AUTO_PERIOD_LABEL = "Auto motion period (s)"
 PLAYBACK_SPEED_LABEL = "Playback speed (x)"
 PLAYBACK_PAUSED_LABEL = "Playback: paused"
+TRAVEL_SPEED_LABEL = "Travel speed (% of max)"
+SCRUB_LABEL = "Playback position (% of completion)"
 # While animating, the sliders report the pose rather than drive it, so they only have to
 # keep up with the eye. Pushing all of them every frame costs a dat.GUI redraw each, which
 # is far more work than the browser can absorb at the frame rate.
@@ -354,6 +356,8 @@ def view_stage_cad(
     fps: float = 30.0,
     playback: PlaybackSource | None = None,
     joint_labels: dict[str, str] | None = None,
+    port: int | None = None,
+    open_browser: bool = True,
 ) -> None:
     """Show reusable real-CAD meshes with one transform per occurrence.
 
@@ -369,11 +373,20 @@ def view_stage_cad(
     from pydrake.math import RigidTransform, RotationMatrix
 
     from .meshcat_ui import (
+        MODE_ARCHIVE,
+        MODE_LIVE,
+        MODE_NONE,
+        STATUS_COMPLETE,
+        STATUS_NONE,
+        STATUS_STANDBY,
         announce_viewer,
         patch_meshcat_page,
         print_view_help,
         set_motors_moving,
         set_playback_time,
+        set_viewer_mode,
+        set_viewer_status,
+        should_open_browser,
         viewer_params,
     )
 
@@ -381,7 +394,15 @@ def view_stage_cad(
     instances = scene["instances"]
     # Nothing here publishes a realtime rate, so the stats plot only ever covers the view.
     patch_meshcat_page()
-    meshcat = Meshcat(viewer_params())
+    try:
+        meshcat = Meshcat(viewer_params(port=port))
+    except RuntimeError:
+        # Another viewer already holds the fixed port; taking any free one beats refusing
+        # to start, but say so, because the URL to refresh is now a different one.
+        print(f"Port {port} is already in use, so this viewer took another one.")
+        meshcat = Meshcat(viewer_params())
+    # Streaming this much CAD takes a while, so the readout says so before it starts.
+    set_viewer_status(meshcat, STATUS_STANDBY)
     role_paths: dict[tuple[str, str], str] = {}
     joint_paths: dict[str, str] = {}
     last_joint_path_by_stage: dict[str, str] = {}
@@ -452,6 +473,7 @@ def view_stage_cad(
     # thing allowed to move a joint, so the manual sliders and cyclic-animation controls
     # that would otherwise fight it are left off entirely.
     has_playback_controls = playback is not None and hasattr(playback, "set_speed")
+    has_travel_control = playback is not None and hasattr(playback, "set_travel_fraction")
     if playback is None:
         for joint in joints:
             scale, unit = _slider_scale(joint)
@@ -468,9 +490,14 @@ def view_stage_cad(
         meshcat.AddSlider(AUTO_RANGE_LABEL, 0.0, 100.0, 1.0, 25.0)
         meshcat.AddSlider(AUTO_PERIOD_LABEL, 2.0, 60.0, 0.5, 12.0)
     if has_playback_controls:
-        meshcat.AddSlider(PLAYBACK_SPEED_LABEL, 0.1, 4.0, 0.05, playback.speed)
+        meshcat.AddSlider(PLAYBACK_SPEED_LABEL, 0.1, 8.0, 0.05, playback.speed)
         meshcat.AddSlider(PLAYBACK_PAUSED_LABEL, 0.0, 1.0, 1.0, 1.0 if playback.is_paused else 0.0)
         meshcat.AddButton("Restart playback")
+    if has_travel_control:
+        meshcat.AddSlider(TRAVEL_SPEED_LABEL, 0.0, 100.0, 1.0, playback.travel_fraction * 100.0)
+    can_scrub = playback is not None and getattr(playback, "record_end", None) is not None
+    if can_scrub:
+        meshcat.AddSlider(SCRUB_LABEL, 0.0, 100.0, 0.1, 0.0)
 
     center = [
         sum(item["translation_m"][axis] for item in instances) / len(instances) for axis in range(3)
@@ -481,7 +508,7 @@ def view_stage_cad(
     if playback is None:
         meshcat.AddButton("Reset to home")
     meshcat.AddButton("Stop viewer", "Escape")
-    announce_viewer("Reusable stage CAD", meshcat)
+    announce_viewer("Reusable stage CAD", meshcat, open_browser=should_open_browser(open_browser))
     print(
         f"Showing {len(instances)} real stages and {scene['attached_part_count']} attached "
         "non-fastener parts."
@@ -518,16 +545,29 @@ def view_stage_cad(
     published: list[float | None] = [None] * len(joints)
     last_speed_value = playback.speed if has_playback_controls else None
     last_paused_value = playback.is_paused if has_playback_controls else None
+    last_travel_value = playback.travel_fraction * 100.0 if has_travel_control else None
     last_readout = 0.0
     last_motion_tick = float("-inf")
     reported_moving: bool | None = None
     last_time_push = 0.0
+    last_scrub_value = 0.0
+    reported_status = STATUS_STANDBY
     set_motors_moving(meshcat, False)
+    set_viewer_status(meshcat, STATUS_NONE)
+    if playback is None:
+        set_viewer_mode(meshcat, MODE_NONE)
+    else:
+        set_viewer_mode(meshcat, MODE_ARCHIVE if has_playback_controls else MODE_LIVE)
     while meshcat.GetButtonClicks("Stop viewer") == 0:
         tick = time.monotonic()
         elapsed = tick - previous_tick
         previous_tick = tick
         if playback is not None:
+            if has_travel_control:
+                travel_value = meshcat.GetSliderValue(TRAVEL_SPEED_LABEL)
+                if travel_value != last_travel_value:
+                    playback.set_travel_fraction(travel_value / 100.0)
+                    last_travel_value = travel_value
             if has_playback_controls:
                 speed_value = meshcat.GetSliderValue(PLAYBACK_SPEED_LABEL)
                 if speed_value != last_speed_value:
@@ -541,11 +581,30 @@ def view_stage_cad(
                 if new_restart_clicks != restart_clicks:
                     restart_clicks = new_restart_clicks
                     playback.restart()
+            if can_scrub:
+                scrub_value = meshcat.GetSliderValue(SCRUB_LABEL)
+                # Only a viewer-side move counts as a seek; the loop writes this slider
+                # back every frame to track progress, which must not seek onto itself.
+                if abs(scrub_value - last_scrub_value) > 1e-9:
+                    playback.seek_fraction(scrub_value / 100.0)
+                    last_scrub_value = scrub_value
             positions = playback.positions()
             moment = playback.current_moment()
             if tick - last_time_push >= TIME_PUSH_S:
                 last_time_push = tick
                 set_playback_time(meshcat, moment.timestamp())
+                if can_scrub:
+                    progress = playback.progress_fraction() * 100.0
+                    last_scrub_value = round(progress, 1)
+                    meshcat.SetSliderValue(SCRUB_LABEL, last_scrub_value)
+                status = (
+                    STATUS_COMPLETE
+                    if getattr(playback, "is_complete", None) and playback.is_complete()
+                    else STATUS_NONE
+                )
+                if status != reported_status:
+                    reported_status = status
+                    set_viewer_status(meshcat, status)
             for index, joint in enumerate(joints):
                 if joint["key"] in playback_keys:
                     values[index] = positions[joint["key"]] * scales[index]
@@ -790,6 +849,22 @@ def _pv_name_labels(command_map_path: str | Path) -> dict[str, str]:
     return {key: mapping.command_pv for key, mapping in mappings.items()}
 
 
+def _add_viewer_args(parser) -> None:  # noqa: ANN001
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=7000,
+        help="Port to serve the viewer on. Keeping it fixed means an already-open tab can "
+        "just be refreshed instead of a second one being opened (default: 7000)",
+    )
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Print the URL instead of opening a tab, for when the viewer is restarted "
+        "repeatedly. TWIN_LAB_NO_BROWSER=1 does the same for every command",
+    )
+
+
 def main() -> None:
     import argparse
 
@@ -826,7 +901,7 @@ def main() -> None:
         "--playback-speed",
         type=float,
         default=1.0,
-        help="Playback rate relative to real time (e.g. 0.25 to 2.0)",
+        help="Playback rate relative to real time, up to the panel slider's 8x (e.g. 0.25 to 8)",
     )
     parser.add_argument(
         "--pv-names",
@@ -834,6 +909,7 @@ def main() -> None:
         help="Label joints by their EPICS PV in the playback readout instead of this repo's "
         "chain/axis naming (e.g. 'POLYCAP:CRY:N:X' instead of 'A050')",
     )
+    _add_viewer_args(parser)
     args = parser.parse_args()
 
     scene = prepare_stage_cad(
@@ -871,7 +947,14 @@ def main() -> None:
         if playback is not None and args.pv_names:
             joint_labels = _pv_name_labels(args.playback_command_map)
         try:
-            view_stage_cad(scene, fps=args.fps, playback=playback, joint_labels=joint_labels)
+            view_stage_cad(
+                scene,
+                fps=args.fps,
+                playback=playback,
+                joint_labels=joint_labels,
+                port=args.port,
+                open_browser=not args.no_browser,
+            )
         except KeyboardInterrupt:
             print("\nStage CAD viewer stopped.")
 
@@ -924,6 +1007,7 @@ def main_live() -> None:
         help="Label joints by their EPICS PV in the playback readout instead of this repo's "
         "chain/axis naming (e.g. 'POLYCAP:CRY:N:X' instead of 'A050')",
     )
+    _add_viewer_args(parser)
     args = parser.parse_args()
 
     scene = prepare_stage_cad(
@@ -948,7 +1032,14 @@ def main_live() -> None:
         )
     joint_labels = _pv_name_labels(args.command_map) if args.pv_names else None
     try:
-        view_stage_cad(scene, fps=args.fps, playback=live, joint_labels=joint_labels)
+        view_stage_cad(
+            scene,
+            fps=args.fps,
+            playback=live,
+            joint_labels=joint_labels,
+            port=args.port,
+            open_browser=not args.no_browser,
+        )
     except KeyboardInterrupt:
         print("\nLive feed viewer stopped.")
 

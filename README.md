@@ -918,9 +918,16 @@ This opens the same Meshcat viewer as normal, but view-only: no manual
 sliders, since the recording is what's driving the joints. Instead the panel
 has:
 
+The command opens the viewer in your normal browser at `http://localhost:7000`.
+Keep that tab open and refresh it after a restart rather than opening duplicate
+tabs. `--no-browser` only prints the URL when you are running repeated local
+checks; it is also available as `TWIN_LAB_NO_BROWSER=1` for scripts. The
+development assistant uses that opt-out with port 7101 and VS Code's integrated
+browser, so its testing does not open or disturb your Chrome tabs.
+
 | Control | Effect |
 | --- | --- |
-| `Playback speed (x)` | Slider, 0.1x-4x. Change it mid-playback without losing your place |
+| `Playback speed (x)` | Slider, 0.1x-8x. Change it mid-playback without losing your place |
 | `Playback: paused` | Checkbox. Freezes the current pose; uncheck to continue from there |
 | `Restart playback` | Button. Jumps back to the start of the recording |
 
