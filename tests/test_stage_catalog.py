@@ -1,5 +1,6 @@
 import json
 import math
+from datetime import datetime
 from pathlib import Path
 
 import yaml
@@ -10,12 +11,14 @@ from twin_lab.stage_cad_viewer import (
     _is_fastener_name,
     _joint_displacement,
     _joint_origin_m,
+    _load_ongoing_resume_start,
     _pv_name_labels,
     _reviewed_cad_position,
     _reviewed_home,
     _reviewed_limits,
     _rotate_vector,
     _transform_data,
+    _write_ongoing_resume,
 )
 
 
@@ -23,6 +26,16 @@ def test_ongoing_playback_end_sentinel_is_case_insensitive() -> None:
     assert _is_ongoing_playback_end("ongoing") is True
     assert _is_ongoing_playback_end("Continuous") is True
     assert _is_ongoing_playback_end("2026-08-26T15:36:40-07:00") is False
+
+
+def test_ongoing_playback_resume_round_trips_timestamp(tmp_path) -> None:
+    resume_path = tmp_path / "resume.json"
+    moment = _write_ongoing_resume(
+        resume_path, datetime.fromisoformat("2026-08-26T15:36:40-07:00")
+    )
+
+    assert moment == resume_path
+    assert _load_ongoing_resume_start(resume_path).isoformat() == "2026-08-26T15:36:40-07:00"
 
 
 def test_pv_name_labels_matches_real_crystal_stack_command_map() -> None:

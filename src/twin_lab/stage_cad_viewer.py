@@ -7,6 +7,7 @@ import math
 import os
 import re
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,8 @@ PLAYBACK_PAUSED_LABEL = "Playback: paused"
 TRAVEL_SPEED_LABEL = "Travel speed (% of max)"
 SCRUB_LABEL = "Playback position (% of completion)"
 ONGOING_PLAYBACK_ENDS = {"ongoing", "continuous"}
+ONGOING_PLAYBACK_RESUME_STARTS = {"resume", "previous", "last"}
+DEFAULT_ONGOING_RESUME_PATH = Path("recordings/ongoing-playback-resume.json")
 # While animating, the sliders report the pose rather than drive it, so they only have to
 # keep up with the eye. Pushing all of them every frame costs a dat.GUI redraw each, which
 # is far more work than the browser can absorb at the frame rate.
@@ -855,6 +858,31 @@ def _is_ongoing_playback_end(value: str) -> bool:
     return value.casefold() in ONGOING_PLAYBACK_ENDS
 
 
+def _is_ongoing_playback_resume_start(value: str) -> bool:
+    return value.casefold() in ONGOING_PLAYBACK_RESUME_STARTS
+
+
+def _load_ongoing_resume_start(path: str | Path) -> datetime:
+    resume_path = resolve_repo_path(path)
+    if not resume_path.exists():
+        raise SystemExit(
+            f"No ongoing playback resume file found at {resume_path}. Start with an ISO "
+            "--playback-start first."
+        )
+    timestamp = json.loads(resume_path.read_text(encoding="utf-8"))["timestamp"]
+    moment = datetime.fromisoformat(timestamp)
+    if moment.tzinfo is None:
+        raise SystemExit(f"Ongoing playback resume timestamp must include a timezone: {timestamp}")
+    return moment
+
+
+def _write_ongoing_resume(path: str | Path, moment: datetime) -> Path:
+    resume_path = Path(path)
+    resume_path.parent.mkdir(parents=True, exist_ok=True)
+    resume_path.write_text(json.dumps({"timestamp": moment.isoformat()}, indent=2) + "\n")
+    return resume_path
+
+
 def _add_viewer_args(parser) -> None:  # noqa: ANN001
     parser.add_argument(
         "--port",
@@ -917,6 +945,12 @@ def main() -> None:
         help="How often --playback-end ongoing/continuous extends its archive query",
     )
     parser.add_argument(
+        "--playback-resume-file",
+        default=str(DEFAULT_ONGOING_RESUME_PATH),
+        help="Where ongoing playback saves its last archive timestamp; use "
+        "--playback-start resume to restart from it",
+    )
+    parser.add_argument(
         "--pv-names",
         action="store_true",
         help="Label joints by their EPICS PV in the playback readout instead of this repo's "
@@ -934,6 +968,7 @@ def main() -> None:
     if not args.prepare_only:
         playback = None
         joint_labels = None
+        ongoing_playback = False
         if args.playback_recording:
             from .epics_playback import build_playback_from_recording
 
@@ -946,9 +981,6 @@ def main() -> None:
         elif args.playback_start or args.playback_end:
             if not (args.playback_start and args.playback_end):
                 raise SystemExit("--playback-start and --playback-end must be given together")
-            from datetime import datetime
-
-            start = datetime.fromisoformat(args.playback_start)
             if _is_ongoing_playback_end(args.playback_end):
                 if args.playback_speed != 1.0:
                     raise SystemExit(
@@ -957,6 +989,12 @@ def main() -> None:
                     )
                 from .epics_playback import build_ongoing_playback_from_archive
 
+                ongoing_playback = True
+                start = (
+                    _load_ongoing_resume_start(args.playback_resume_file)
+                    if _is_ongoing_playback_resume_start(args.playback_start)
+                    else datetime.fromisoformat(args.playback_start)
+                )
                 playback = build_ongoing_playback_from_archive(
                     start,
                     args.playback_command_map,
@@ -966,6 +1004,7 @@ def main() -> None:
             else:
                 from .epics_playback import build_playback_from_archive
 
+                start = datetime.fromisoformat(args.playback_start)
                 playback = build_playback_from_archive(
                     start,
                     datetime.fromisoformat(args.playback_end),
@@ -986,6 +1025,16 @@ def main() -> None:
             )
         except KeyboardInterrupt:
             print("\nStage CAD viewer stopped.")
+        finally:
+            if ongoing_playback and playback is not None:
+                resume_path = _write_ongoing_resume(
+                    args.playback_resume_file, playback.current_moment()
+                )
+                print(
+                    "Ongoing playback resume saved. Restart with "
+                    "--playback-start resume --playback-end ongoing "
+                    f"(state: {resume_path})."
+                )
 
 
 def main_live() -> None:
