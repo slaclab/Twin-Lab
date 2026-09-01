@@ -1053,8 +1053,11 @@ def main() -> None:
             print("\nStage CAD viewer stopped.")
         finally:
             if ongoing_playback and playback is not None:
+                current_moment = playback.current_moment()
+                if hasattr(playback, "close"):
+                    playback.close()
                 resume_path = _write_ongoing_resume(
-                    args.playback_resume_file, playback.current_moment()
+                    args.playback_resume_file, current_moment
                 )
                 print(
                     "Ongoing playback resume saved. To restart this viewer from that point, run:\n"

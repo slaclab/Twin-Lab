@@ -13,6 +13,7 @@ from EPICS is an ESTIMATE anchored to an unresolved per-power-cycle offset
 
 from __future__ import annotations
 
+from concurrent.futures import Future, ThreadPoolExecutor
 import json
 import time
 from bisect import bisect_right
@@ -521,6 +522,8 @@ class OngoingArchivePlaybackSource:
         self._client_factory = client_factory or _default_ongoing_archiver_factory
         self._tracks: dict[str, JointTrack] = self._empty_tracks()
         self._last_poll = float("-inf")
+        self._pending_refresh: Future[dict[str, JointTrack]] | None = None
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="twin-lab-ongoing")
         self._travel_fraction = 1.0
 
     @property
@@ -576,19 +579,31 @@ class OngoingArchivePlaybackSource:
 
     def positions(self, now: float | None = None) -> dict[str, float]:
         moment_wall = now if now is not None else time.monotonic()
-        if not self.is_stopped and moment_wall - self._last_poll >= self._poll_period_s:
-            self._refresh(moment_wall)
+        self._complete_refresh()
+        if not self.is_stopped and self._pending_refresh is None:
+            if moment_wall - self._last_poll >= self._poll_period_s:
+                self._start_refresh(moment_wall)
         moment = self.current_moment(moment_wall)
         return {name: track.position_at(moment) for name, track in self._tracks.items()}
 
-    def _refresh(self, now: float) -> None:
+    def close(self) -> None:
+        self._executor.shutdown(wait=False, cancel_futures=True)
+
+    def _start_refresh(self, now: float) -> None:
         end = self.current_moment(now)
-        client = self._client_factory(self.record_start, end)
-        self._tracks = build_tracks(
-            client, self._mappings, self._joint_types, self._homes, self._max_speeds
-        )
-        self.set_travel_fraction(self._travel_fraction)
+        self._pending_refresh = self._executor.submit(self._fetch_tracks, end)
         self._last_poll = now
+
+    def _fetch_tracks(self, end: datetime) -> dict[str, JointTrack]:
+        client = self._client_factory(self.record_start, end)
+        return build_tracks(client, self._mappings, self._joint_types, self._homes, self._max_speeds)
+
+    def _complete_refresh(self) -> None:
+        if self._pending_refresh is None or not self._pending_refresh.done():
+            return
+        self._tracks = self._pending_refresh.result()
+        self._pending_refresh = None
+        self.set_travel_fraction(self._travel_fraction)
 
     def _empty_tracks(self) -> dict[str, JointTrack]:
         return {
