@@ -1,4 +1,24 @@
-# Electronics and CAD clearance correction (2026-09-10)
+# Complete Controls Assembly (2026-09-10)
+
+- User identified `DSG-000108873` as the XCS Von Hamos Controls assembly,
+  correcting its earlier misclassification as a flexible cable carrier.
+  All 33 manifest leaves (`P1010` through `P1042`) are now retained, along with
+  mounting post `P1043` and rail `P1044`, on `parker_lift`.
+- Source-CAD distances: `P1043` touches lift plate `P920`; rail `P1012` touches
+  posts `P1043/P1218`; rail `P1044` touches posts `P1209/P1213`. These establish
+  the same lift ownership as the previously restored top hardware.
+- The recipe now retains 391 leaves and omits 868. A manifest-based regression
+  checks that every controls leaf has exactly one owner and is not omitted.
+- Both exports rebuilt and passed all 24 individual joint endpoint checks and
+  both combined endpoints. All 62 focused assembly/collision/refinement tests
+  pass. Drake confirms all 35 restored selections have illustration and proximity
+  geometry on the lift. The convex package has 7,954 collision geometries and
+  reports zero touching pairs and four pairs within 1 mm at CAD home.
+- The current STEP is the user-confirmed 10 degree mounting of `DSG-000095826`
+  on `DSG-000097481`. Exact 0 and 5 degree placements remain unverified;
+  alternative configuration STEP exports are recommended before enabling them.
+
+## Earlier Electronics and CAD Clearance Correction
 
 - Restored `P1221` and seven rigid support parts previously grouped with the
   omitted flexible cable carrier. Exact CAD distances put posts `P1209`, `P1213`,

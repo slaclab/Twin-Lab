@@ -23,7 +23,12 @@ notes:
 - Outer cage A047 is fixed collision geometry. Large spectrometer controls are the
   two 100 mm Parker slides.
 - Top electronics P1221 and its rigid supports ride the Parker lift plate P920;
-  retain them for visual and interference checking. The flexible cable chain is omitted.
+  retain them for visual and interference checking.
+- A079 DSG-000108873 XCS Von Hamos Controls is retained in full, together with
+  mounting post P1043 and rail P1044. Both rails contact the lift-mounted posts;
+  these are controls components, not a flexible cable carrier.
+- The supplied STEP is the 10 degree mounting configuration of DSG-000095826
+  on DSG-000097481. The 0 and 5 degree mounting placements are not yet verified.
 stage_splits:
   P1177: P1177
   P1047: P1047
@@ -698,6 +703,41 @@ bodies:
     - P908
     - P909
     - P919
+    - P1010
+    - P1011
+    - P1012
+    - P1013
+    - P1014
+    - P1015
+    - P1016
+    - P1017
+    - P1018
+    - P1019
+    - P1020
+    - P1021
+    - P1022
+    - P1023
+    - P1024
+    - P1025
+    - P1026
+    - P1027
+    - P1028
+    - P1029
+    - P1030
+    - P1031
+    - P1032
+    - P1033
+    - P1034
+    - P1035
+    - P1036
+    - P1037
+    - P1038
+    - P1039
+    - P1040
+    - P1041
+    - P1042
+    - P1043
+    - P1044
     - P1209
     - P1210
     - P1211
@@ -2001,42 +2041,6 @@ omitted_occurrences:
   - P928
   - P937
   - P946
-  Flexible cable carrier:
-  - P1010
-  - P1011
-  - P1012
-  - P1013
-  - P1014
-  - P1015
-  - P1016
-  - P1017
-  - P1018
-  - P1019
-  - P1020
-  - P1021
-  - P1022
-  - P1023
-  - P1024
-  - P1025
-  - P1026
-  - P1027
-  - P1028
-  - P1029
-  - P1030
-  - P1031
-  - P1032
-  - P1033
-  - P1034
-  - P1035
-  - P1036
-  - P1037
-  - P1038
-  - P1039
-  - P1040
-  - P1041
-  - P1042
-  - P1043
-  - P1044
   Diffractometer omitted by request:
   - P1222
 fixed_subsystems:

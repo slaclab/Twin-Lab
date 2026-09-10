@@ -1,5 +1,6 @@
 """Local VH assembly ownership and pose-dependent CAD clearance regressions."""
 
+import json
 from importlib import import_module
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,6 +26,27 @@ def test_top_electronics_ride_the_lift_and_are_not_omitted():
 
     assert all(owners[ref] == owners["P920"] == "parker_lift" for ref in ELECTRONICS)
     assert ELECTRONICS.isdisjoint(omitted)
+
+
+def test_complete_von_hamos_controls_assembly_is_retained_on_its_mounts():
+    review = yaml.safe_load((ASSEMBLY / "reviews" / "assembly.yaml").read_text())
+    entries = json.loads((ASSEMBLY / "manifest.json").read_text())["occurrences"]
+    assembly = next(entry for entry in entries if entry["name"] == "DSG-000108873")
+    controls = {
+        entry["ref"] for entry in entries
+        if entry["id"].startswith(assembly["id"] + "/") and not entry["is_assembly"]
+    }
+    assert len(controls) == 33
+    required = controls | {"P1043", "P1044"}
+    for ref in required:
+        owners = [
+            body for body, spec in review["bodies"].items()
+            for part in spec["parts"]
+            if (part if isinstance(part, str) else part["ref"]) == ref
+        ]
+        assert owners == ["parker_lift"], ref
+    omitted = {ref for refs in review["omitted_occurrences"].values() for ref in refs}
+    assert required.isdisjoint(omitted)
 
 
 @pytest.fixture

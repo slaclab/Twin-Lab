@@ -32,11 +32,14 @@ The model has 13 rigid bodies and 12 active joints:
 - LJ stages remain fixed. Their four former auxiliary controls are disabled.
 - The top electronics (`P1221`) and seven rigid support parts ride the Parker
   vertical lift plate (`P920`) and participate in interference checks.
+- The complete `DSG-000108873` XCS Von Hamos Controls assembly (`A079`, 33 parts)
+  and mounting parts `P1043/P1044` also ride the lift. These were previously
+  misidentified as a flexible cable carrier; all are retained as rigid geometry.
 
-The retained model uses 356 of the original 1,259 leaf occurrences, with fused
-stage geometry split into fixed and moving regions. The 903 omitted occurrences
+The retained model uses 391 of the original 1,259 leaf occurrences, with fused
+stage geometry split into fixed and moving regions. The 868 omitted occurrences
 are listed by reason in [assembly.yaml](reviews/assembly.yaml). This removes
-fasteners, detector internals, cable carriers, construction geometry, floor
+fasteners, detector internals, construction geometry, floor
 anchors, and the diffractometer. The structural cage is retained. Mounts, outer detector
 geometry, and analyzer payloads remain. The diffractometer's empty STEP leaves
 are counted with other empty source geometry.
@@ -45,6 +48,16 @@ The three jet stages (`P018`, `P019`, `P020`) contain **no geometry** in the
 supplied STEP. The available jet parts stay fixed; these missing stages are not
 represented as working axes. Manual rotary/tilt adjustments also remain fixed.
 There is no XCS connection, PV mapping, or beam configuration.
+
+## Mounting configurations
+
+The supplied STEP places `DSG-000095826` on `DSG-000097481` in the 10 degree
+mounting configuration. The physical mounting holes also permit 5 and 0 degrees.
+Those alternative placements have not been verified or exposed as viewer options.
+STEP exports of the 0 and 5 degree configurations, with the same assembly frame
+and unchanged motor-stage positions, can establish the exact rigid placements
+for a discrete selector. No hole constraint solver is required once those
+placements are known; both rotation and translation must be preserved.
 
 ## Evidence and edits
 
