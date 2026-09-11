@@ -30,10 +30,8 @@ AUTO_PERIOD_LABEL = "Auto motion period (s)"
 COLLISION_LABEL = "Collision detection"
 ANIMATION_LABEL = "Animation"
 ISOLATE_LABEL = "Isolate worst pair"
-# A hull encloses its part, so the CAD re-check can only ever open a reported gap. That is
-# what makes it safe to fold into the live reading rather than leave it as a review step.
 # No apostrophes; Drake evals control names.
-VERIFY_LABEL = "Verify against CAD"
+VERIFY_LABEL = "Collision accuracy check"
 ISOMETRIC_LABEL = "Isometric view"
 BEAM_LABEL = "X-ray beam path"
 # Four states, because "stopped" is not the same as "blocked": a ray ending on the crystal
@@ -260,8 +258,8 @@ def run_collision_viewer(
     # toggle in behind ANIMATION_LABEL.
     meshcat.AddSlider(COLLISION_LABEL, 0.0, 1.0, 1.0, 1.0)
     meshcat.AddSlider(ISOLATE_LABEL, 0.0, 1.0, 1.0, 0.0)
-    if model.refiner is not None:
-        meshcat.AddSlider(VERIFY_LABEL, 0.0, 1.0, 1.0, 1.0)
+    if model.supports_verification:
+        meshcat.AddSlider(VERIFY_LABEL, 0.0, 1.0, 1.0, 0.0)
     meshcat.AddSlider(WARN_LABEL, 0.0, 50.0, 0.5, warn_mm)
     beam_specs = _resolve_beams(model, beam_inventory, beam_cache_dir, beam_manifest)
     if beam_specs:
@@ -298,10 +296,10 @@ def run_collision_viewer(
             "The beam is a line-of-sight check on the collision hulls, which enclose the "
             "parts, so it stops early rather than late - it cannot miss an obstruction."
         )
-    if model.refiner is not None:
+    if model.supports_verification:
         print(
-            f"'{VERIFY_LABEL}' re-checks every reported pair against the CAD behind the hulls "
-            "and reports the corrected distance; it can only open a gap, never close one."
+            f"'{VERIFY_LABEL}' is off by default. Enable it to refine hull candidates "
+            "against CAD; these checks can take longer."
         )
     print_view_help()
     print("Press Escape in Meshcat or Ctrl-C here to stop.")
@@ -417,7 +415,7 @@ def run_collision_viewer(
             values = [meshcat.GetSliderValue(joint.label) for joint in joints]
 
         warn_m = max(meshcat.GetSliderValue(WARN_LABEL), 0.0) / 1000.0
-        verify_on = model.refiner is not None and meshcat.GetSliderValue(VERIFY_LABEL) >= 0.5
+        verify_on = model.supports_verification and meshcat.GetSliderValue(VERIFY_LABEL) >= 0.5
         new_log = meshcat.GetButtonClicks("Log clearance report")
         asked = new_log != log_clicks
         log_clicks = new_log

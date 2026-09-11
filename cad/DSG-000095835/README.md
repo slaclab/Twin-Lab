@@ -8,8 +8,10 @@ uv run python cad/DSG-000095835/build.py --view
 
 This builds the model and its convex collision meshes, then opens the interference
 viewer. Collision checking starts enabled with neutral CAD colors and a zero
-warning band: only contacts are highlighted red by default. Increase the clearance
-warning band to enable yellow near-clearance highlights. Stage sliders, animation,
+warning band: convex-hull contact candidates are highlighted red by default.
+**Collision accuracy check** starts off; enable it to refine candidates against
+the source CAD. Hull contacts can be false positives, including at home.
+Increase the clearance warning band to enable yellow near-clearance highlights. Stage sliders, animation,
 and reset to the CAD pose remain available. The first collision build is slow;
 subsequent builds reuse the cached decompositions.
 
@@ -107,13 +109,15 @@ Convex decomposition can take tens of minutes and is cached. A quicker plumbing
 check uses `--collision hull`; that approximation fills concavities and is not
 suitable for judging small clearances. Collision output is separate, under
 `exports/DSG-000095835.collision/`. No ignored contact pairs are added by this
-assembly. The local viewer rechecks candidate pairs against the selected source
-CAD solids at the current joint pose. Proven positive CAD gaps replace hull
+assembly. Normal viewer checks use the convex collision meshes only, without
+loading CAD selections or calculating CAD distances. When **Collision accuracy
+check** is enabled, the local viewer rechecks candidate pairs against the selected
+source CAD solids at the current joint pose. Proven positive CAD gaps replace hull
 overlaps; touching, penetrating, or unmeasurable pairs remain conservative hull
 warnings. Constituent solids are also checked: positive compound surface distance
 alone does not prove clearance when one solid is contained within another.
-This check is always active in the local collision viewer and validator,
-not in a generic SDF consumer. The first check loads the required CAD selections;
+The viewer's accuracy check is opt-in; the collision validator always requests it
+explicitly. Generic SDF consumers do not perform it. The first accuracy check loads the required CAD selections;
 measurements are cached by relative part pose, including when both parts move
 together. Relative motion invalidates the measurement; default-pose pairs are
 not exempt from checking after motion.
@@ -124,16 +128,64 @@ sliders and camera movement. Moving replaces the previous readout with
 the current pose is displayed, together with its measured check duration.
 The worker keeps one query in flight and then checks the latest requested pose,
 without accumulating a queue or imposing a delay proportional to the last check.
-Cold CAD checks can still take several seconds; continuous animation may remain
+With accuracy checking enabled, cold CAD checks can take several seconds; continuous animation may remain
 pending until paused. These are discrete pose checks, not swept-motion collision
 detection, so fast motion between checked poses can cross an obstacle.
 
-The collision validator exercises a known cage contact at vertical lift -50 mm
+The collision validator uses CAD verification to exercise a known cage contact at vertical lift -50 mm
 (`P750` against `P1035/P1040`), and checks that returning home clears it:
 
 ```bash
 uv run python cad/DSG-000095835/validate.py exports/DSG-000095835.collision --collision
 ```
+
+### Targeted hull refinement
+
+After building the convex package, run the resumable offline comparison:
+
+```bash
+.venv/bin/python cad/DSG-000095835/refine_hulls.py --dry-run
+.venv/bin/python -u cad/DSG-000095835/refine_hulls.py
+```
+
+The runner selects hulls with over 2 mm measured bulge, over 0.2 mm uncovered
+vertex gap, or membership in the five known home-pose candidate pairs. It tries
+CoACD preprocessing resolutions 200, 400, and 800, keeping automatic mesh repair
+enabled. Resolution 50 remains the normal build default. Each trial grows hulls
+to cover sampled CAD mesh vertices before auditing the result again.
+
+Candidates and checkpoints live in `.cache/twin_lab/95835-redecomposition/`.
+`comparison.csv` lists the best measured candidate per selection; `results.json`
+records attempts, failures, and completion status. Repeating the command resumes
+completed work. Changed inputs or settings require a new `--output` directory.
+The runner uses one worker with two native threads, a 10 GB address-space limit,
+and a 30-minute timeout per attempt. A failed selection does not stop the batch.
+
+Recommendations require at least a 10% bulge reduction, no uncovered sampled
+vertices, no more than 2% hull-volume increase, and at most 32 hulls per selection.
+Escalation stops once an eligible candidate reaches 0.5 mm measured bulge.
+These are tessellated-mesh checks, not a proof of continuous CAD coverage or
+collision-free travel. The source remains tessellated at 0.5 mm deflection.
+The runner does not modify the active hull cache, recipe, exports, or viewers;
+candidate promotion still needs collision regression checks.
+
+Build and validate the recommendations as a separate package:
+
+```bash
+.venv/bin/python cad/DSG-000095835/build.py --collision convex \
+  --refinement-run .cache/twin_lab/95835-redecomposition
+.venv/bin/python cad/DSG-000095835/validate.py exports/DSG-000095835.candidate --collision
+```
+
+The candidate builder checks the completed run's recipe and source hashes,
+re-audits each recommended selection, and copies its conservative inflated hulls.
+All other selections use the existing active hulls. It does not run CoACD or
+replace the active export. The output directory must not already exist; use
+`--output-dir` with a new directory for another candidate build. Candidate
+`refinement.json` records source and hull hashes and the selected resolutions.
+The September 11 assembly comparison passed and reduced home-pose false-positive
+pairs from five to one; see [validation.md](reviews/validation.md). The candidate
+has not been promoted to the active model.
 
 For a fast motion-only preview without interference checking:
 

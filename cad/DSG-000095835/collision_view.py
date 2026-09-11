@@ -1,4 +1,4 @@
-"""Use the shared clearance UI with explicit bearings and source-CAD gap checks."""
+"""Use the shared clearance UI with explicit bearings and opt-in source-CAD checks."""
 
 import json
 from dataclasses import replace
@@ -57,6 +57,10 @@ class AssemblyCollisionModel(CollisionModel):
         self._cad_review = None
         self._cad_stats = None
 
+    @property
+    def supports_verification(self):
+        return True
+
     def _cad_shape(self, name):
         from build import CACHE, read_shape
 
@@ -85,8 +89,8 @@ class AssemblyCollisionModel(CollisionModel):
             self._cad_shapes[name] = shape
         return self._cad_shapes[name]
 
-    def report(self, *, warn_m=0.005, max_distance_m=None):
-        report = super().report(warn_m=warn_m, max_distance_m=max_distance_m)
+    def verify(self, report, *, limit=12, with_mesh=True):
+        """Refine hull candidates against source CAD only when explicitly requested."""
         corrected = []
         for item in report.clearances:
             if item.pose_a is None or item.pose_b is None:
@@ -113,10 +117,10 @@ class AssemblyCollisionModel(CollisionModel):
                 gap = cached[1]
             if gap > 1e-7:
                 item = replace(item, distance_m=max(item.distance_m, gap))
-            if item.distance_m <= (warn_m if max_distance_m is None else max_distance_m):
+            if item.distance_m <= report.warn_m:
                 corrected.append(item)
         corrected.sort(key=lambda item: (item.distance_m, item.a, item.b))
-        return replace(report, clearances=tuple(corrected))
+        return replace(report, clearances=tuple(corrected)), ()
 
     def _reopen_joint_adjacent_pairs(self) -> int:
         plant = self.scene.plant

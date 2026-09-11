@@ -128,6 +128,8 @@ def test_the_patched_page_carries_the_view_cube(tmp_path) -> None:
     html = meshcat_ui._patched_html(source)
 
     assert "twinlab-view-cube" in html
+    assert ".dg.main .cr.boolean .property-name { width: calc(100% - 28px)" in html
+    assert ".dg.main .cr.boolean .c { width: 28px" in html
     # Both later scripts read these, so they have to be in the page ahead of them.
     assert html.index("TWINLAB_VIEWS =") < html.index("window.twinlab.modelBox =")
     assert html.index("window.twinlab.modelBox =") < html.index("window.twinlab.modelBox()")

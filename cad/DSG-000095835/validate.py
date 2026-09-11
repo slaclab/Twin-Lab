@@ -267,20 +267,20 @@ def validate(sdf: Path, recipe_path: Path, *, collision: bool = False) -> None:
             "Cage-to-large-slide collision checking is filtered out",
         )
         print(f"All {len(cage_refs)} cage members participate in large-slide collision checking.")
-        report = model.report(warn_m=0.001)
+        report, _ = model.verify(model.report(warn_m=0.001))
         require(
             all(np.isfinite(item.distance_m) for item in report.clearances),
             "Collision query returned a non-finite distance",
         )
         print(
-            f"Collision query at CAD home: {count} geometries, {report.status}, "
+            f"CAD-verified collision query at home: {count} geometries, {report.status}, "
             f"{len(report.touching_pairs)} touching pairs, "
             f"{len(report.warning_pairs)} pairs within 1 mm."
         )
         for case in recipe.get("collision_regressions", []):
             model.set_positions({name: 0.0 for name in model.joint_names()})
             model.set_positions(case["positions"])
-            result = model.report(warn_m=0.0)
+            result, _ = model.verify(model.report(warn_m=0.0))
             if case.get("expect_clear", False):
                 require(not result.interference, f"{case['name']}: unexpected contact")
             detected = {frozenset(pair) for pair in result.touching_pairs}
@@ -298,7 +298,7 @@ def main() -> None:
     )
     parser.add_argument("--recipe", type=Path, default=DEFAULT_RECIPE, help="Assembly recipe YAML")
     parser.add_argument(
-        "--collision", action="store_true", help="Also run a CAD-home collision query"
+        "--collision", action="store_true", help="Also run CAD-verified collision regression poses"
     )
     args = parser.parse_args()
     try:

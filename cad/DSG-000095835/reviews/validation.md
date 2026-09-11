@@ -1,3 +1,40 @@
+# Refined Candidate Validation (2026-09-11)
+
+The separate package at `exports/DSG-000095835.candidate/` passed the existing
+assembly validator alongside the active baseline. No candidates were promoted.
+
+- Integrated 51 freshly re-audited improved selections; 353 selections retain
+  their original hulls. Collision geometry increased from 7,954 to 8,018 hulls.
+- All exported hull files match their selected cache hashes. Visual meshes,
+  non-collision SDF content, joint metadata, and MATLAB output match the baseline.
+  The active export still matches its original cache; a package hash snapshot
+  was also checked after both validation runs.
+- Both packages pass 13-body/12-joint validation, all 24 individual joint
+  endpoints, both combined endpoints, and return home. Maximum pose-matrix
+  error is 6.66e-16. Every retained reference remains on its reviewed body,
+  and all 68 cage members participate in lift collision checking.
+- At home, hull-only false positives fell from five pairs to one:
+  `P1177/P1180`. The fixed `parker_cross_P1177_fixed` selection retained its
+  original hulls after its resolution-200 trial exhausted the memory limit.
+- At vertical lift -50 mm, both packages still detect `P750/P1035` and
+  `P750/P1040`. CAD verification retains both contacts and clears home and
+  return-home poses. Both packages retain the same four CAD-verified part pairs
+  within the 1 mm home warning band.
+- Sampled zero-band hull queries took 30-32 ms for the candidate and 29-33 ms
+  for the baseline. Cold CAD checks at the 1 mm band took 14.9 and 15.6 seconds,
+  respectively. These are individual validation samples, not a benchmark.
+
+The candidate package contains `refinement.json` with source/hull provenance,
+`integrity.json` with the package comparison and active-export hash snapshot,
+and one `*.validation.json` per package with raw and CAD-verified reports.
+The builder integration has 37 passing focused assembly/compiler tests.
+
+Coverage and bulge audits sample the 0.5 mm-deflection CAD tessellation; they do
+not prove continuous CAD coverage. Endpoint checks establish kinematics, not
+collision-free travel. Contact depths remain hull overlap estimates, not exact
+CAD penetration depths. The candidate is validated for these regression poses,
+not certified for physical motion.
+
 # Collision Latency (2026-09-10)
 
 - A profiled lift sweep took 9-17 seconds per synchronous check. The viewer then

@@ -467,11 +467,15 @@ ones, which is a good reason to let a nearly-finished build finish.
 
 Results are cached under `.cache/twin_lab/convex-collision/`, keyed on the
 source mesh mtime and size plus the decomposition settings (`threshold`,
-`max_hulls`, `seed`). Later runs start immediately, and the cache is worth
+`max_hulls`, `seed`, and nondefault `preprocess_resolution`). Later runs start immediately, and the cache is worth
 keeping across branches.
 
 It is invalidated only when the STEP is updated and the meshes are
-re-tessellated, or when `--threshold` or `--max-hulls` changes. A re-tessellation
+re-tessellated, or when a decomposition setting changes. `slac-decompose` accepts
+`--preprocess-resolution` (default 50); higher values cost more time and memory
+but can reduce voxel-related hull overshoot. Per-part overrides use the same
+`preprocess_resolution` YAML key. Default settings preserve existing caches.
+A re-tessellation
 that produces byte-identical output is recognised by hash, so rebuilding the
 viewer cache alone does not force a re-decomposition.
 
@@ -595,14 +599,15 @@ the decomposition settings. A re-run costs about a second, and only
 re-decomposed parts are re-measured. Reach for `--refresh` only after the
 metrics themselves change.
 
-### Correcting for the hull error (`Verify contact against CAD`)
+### Correcting for the hull error (`Collision accuracy check`)
 
 Knowing the hulls are proud is one thing; taking that error back off a specific
-reported contact is another. The collision viewer can do it on demand. Press
-**`Verify contact against CAD`** and every touching pair in the current pose is
-re-checked against geometry closer to the CAD than the hulls Drake collided,
-and the result is printed to the terminal you launched from. This is the real
-output at the reviewed home pose:
+reported contact is another. The collision viewer uses convex hulls by default.
+Enable **`Collision accuracy check`** to refine reported candidates at the current
+pose against geometry closer to the CAD. This toggle starts off, and appears when
+the model supports refinement. Corrected results drive the highlights and readout;
+**`Log clearance report`** prints the report and available refinement evidence.
+This is example output from an earlier check at the reviewed home pose:
 
 ```
 --- CAD re-check of touching pairs ---
@@ -624,13 +629,12 @@ genuine touching in the assembled CAD rather than decomposition artefacts. Home
 is an assembled state, so by-design contact there is expected — but it has to be
 confirmed part by part and recorded, not assumed to be noise.
 
-The button is a button rather than a live readout on purpose. The check costs
-about 13 ms per pair once the meshes are cached, and roughly 95 ms on the first
-press while they are parsed. That is fine for a review step and not fine for
-every frame of the 20 Hz detector. It is only ever run on pairs already flagged
-as touching. Pairs merely inside the warning band are left alone: the correction
-exists to tell a decomposition artefact from an interference, and a pair with
-clearance is neither.
+Accuracy checking is opt-in because its cost depends on the geometry and can
+reach seconds for exact CAD queries. The shared mesh verifier delays detailed
+mesh checks until motion settles and refines up to 12 reported part pairs,
+including candidates inside the warning band. The DSG-000095835 local viewer
+checks its reported candidates against source CAD solids. With the toggle off,
+neither refinement runs; hull contacts remain potential physical collisions.
 
 Two corrections sit behind it, and the stronger one wins:
 

@@ -32,7 +32,7 @@ from OCP.XCAFDoc import XCAFDoc_DocumentTool
 
 from twin_lab.cad_geometry import OccurrenceShape, write_group_obj
 from twin_lab.convex_collision import part_settings_from_config
-from twin_lab.paths import CACHE_ROOT, EXPORT_ROOT, REPOSITORY_ROOT
+from twin_lab.paths import CACHE_ROOT, EXPORT_ROOT
 from twin_lab.sdf_compiler import (
     JointSpec,
     LinkSpec,
@@ -197,9 +197,23 @@ def validate_review(review: dict, stats: dict) -> None:
         raise ValueError(f"Disconnected bodies: {set(bodies) - reached}")
 
 
-def build(*, collision: str = "none", workers: int | None = None, rebuild: bool = False) -> Path:
+def build(
+    *, collision: str = "none", workers: int | None = None, rebuild: bool = False,
+    refinement_run: Path | None = None, output_dir: Path | None = None,
+) -> Path:
     from cache_geometry import prepare_geometry
 
+    default_name = "DSG-000095835" if collision == "none" else "DSG-000095835.collision"
+    output = (output_dir or EXPORT_ROOT / (
+        "DSG-000095835.candidate" if refinement_run is not None else default_name
+    )).resolve()
+    if refinement_run is not None:
+        if collision != "convex" or rebuild:
+            raise ValueError("Refinement candidates require convex mode without --rebuild")
+        if output in {(EXPORT_ROOT / name).resolve() for name in (
+            "DSG-000095835", "DSG-000095835.collision",
+        )} or output.exists():
+            raise ValueError("Refinement candidates require a new, separate output directory")
     prepare_geometry()
     recipe_bytes = RECIPE.read_bytes()
     review = yaml.safe_load(recipe_bytes)
@@ -211,7 +225,6 @@ def build(*, collision: str = "none", workers: int | None = None, rebuild: bool 
         raise ValueError("STEP revision differs from this review; re-review CAD references first")
     validate_review(review, stats)
     MESHES.mkdir(parents=True, exist_ok=True)
-    output = EXPORT_ROOT / ("DSG-000095835" if collision == "none" else "DSG-000095835.collision")
     output.mkdir(parents=True, exist_ok=True)
     (output / "meshes").mkdir(exist_ok=True)
     # Every body mesh is keyed to its exact solid selection and source revision.
@@ -276,6 +289,19 @@ def build(*, collision: str = "none", workers: int | None = None, rebuild: bool 
         )
         for j in review["joints"]
     ]
+    supplied_parts = None
+    if refinement_run is not None:
+        from refine_hulls import candidate_parts, write_json
+
+        supplied_parts, evidence = candidate_parts(
+            refinement_run,
+            {source for link in links for _, source, _ in link.meshes},
+            recipe_bytes,
+        )
+        write_json(output / "refinement.json", {
+            "run": str(refinement_run.resolve()), "selections": evidence,
+            "improved_selections": sum(item["improved"] for item in evidence),
+        })
     visual, stl, collision_meshes = _convert_meshes(
         links,
         output / "meshes",
@@ -284,6 +310,7 @@ def build(*, collision: str = "none", workers: int | None = None, rebuild: bool 
         collision_mode=collision if collision != "none" else "hull",
         decomposition_workers=workers,
         decomposition_settings=part_settings_from_config(review.get("decomposition")),
+        decomposed_parts=supplied_parts,
     )
     if collision != "none":
         missing = [str(source) for source in visual if not collision_meshes.get(source)]
@@ -336,7 +363,7 @@ def build(*, collision: str = "none", workers: int | None = None, rebuild: bool 
         )
         + "\n"
     )
-    print(f"SDF: {sdf.relative_to(REPOSITORY_ROOT)}", flush=True)
+    print(f"SDF: {sdf}", flush=True)
     return output
 
 
@@ -351,8 +378,13 @@ def main() -> None:
     )
     parser.add_argument("--workers", type=int)
     parser.add_argument("--rebuild", action="store_true")
+    parser.add_argument("--refinement-run", type=Path, help="Build an isolated refined candidate")
+    parser.add_argument("--output-dir", type=Path, help="Override the generated package directory")
     args = parser.parse_args()
-    package = build(collision=args.collision, workers=args.workers, rebuild=args.rebuild)
+    package = build(
+        collision=args.collision, workers=args.workers, rebuild=args.rebuild,
+        refinement_run=args.refinement_run, output_dir=args.output_dir,
+    )
     if args.view:
         if args.collision == "none":
             from view import view
