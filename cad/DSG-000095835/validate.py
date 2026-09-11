@@ -235,6 +235,16 @@ def validate(sdf: Path, recipe_path: Path, *, collision: bool = False) -> None:
             for part in body["parts"]
         }
         require(expected_refs <= collision_refs, "Some retained parts have no collision geometry")
+        for body, spec in recipe["bodies"].items():
+            frame = plant.GetBodyFrameIdOrThrow(plant.GetBodyByName(body).index())
+            expected = {part if isinstance(part, str) else part["ref"] for part in spec["parts"]}
+            for role in (Role.kIllustration, Role.kProximity):
+                actual = {
+                    part_of(inspector.GetName(gid))
+                    for gid in inspector.GetGeometries(frame, role)
+                }
+                require(expected <= actual, f"{body} is missing {role} parts: {expected - actual}")
+        print("Every retained selection has visual and collision geometry on its reviewed body.")
         # The root joint must check its carriage against the outer cage, even
         # though both sides of that joint are normally filtered by Drake.
         query = scene.scene_graph.get_query_output_port().Eval(
@@ -267,6 +277,17 @@ def validate(sdf: Path, recipe_path: Path, *, collision: bool = False) -> None:
             f"{len(report.touching_pairs)} touching pairs, "
             f"{len(report.warning_pairs)} pairs within 1 mm."
         )
+        for case in recipe.get("collision_regressions", []):
+            model.set_positions({name: 0.0 for name in model.joint_names()})
+            model.set_positions(case["positions"])
+            result = model.report(warn_m=0.0)
+            if case.get("expect_clear", False):
+                require(not result.interference, f"{case['name']}: unexpected contact")
+            detected = {frozenset(pair) for pair in result.touching_pairs}
+            for pair in case.get("touching_pairs", []):
+                require(frozenset(pair) in detected, f"{case['name']}: missed contact {pair}")
+            print(f"{case['name']}: {result.summary()}")
+        model.set_positions({name: 0.0 for name in model.joint_names()})
         print("Contact counts are diagnostic; this check does not certify physical clearance.")
 
 

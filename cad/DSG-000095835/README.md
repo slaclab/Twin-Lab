@@ -7,8 +7,10 @@ uv run python cad/DSG-000095835/build.py --view
 ```
 
 This builds the model and its convex collision meshes, then opens the interference
-viewer. Collision checking starts enabled, with clearance highlighting, stage
-sliders, animation, and reset to the CAD pose. The first collision build is slow;
+viewer. Collision checking starts enabled with neutral CAD colors and a zero
+warning band: only contacts are highlighted red by default. Increase the clearance
+warning band to enable yellow near-clearance highlights. Stage sliders, animation,
+and reset to the CAD pose remain available. The first collision build is slow;
 subsequent builds reuse the cached decompositions.
 
 The source STEP remains at `cad/DSG-000095835.stp` and is ignored for now. The
@@ -27,6 +29,9 @@ The model has 13 rigid bodies and 12 active joints:
 - Each crystal stack has a 70 mm Kohzu XA07A-L201 translation, RA04A-W rotation
   (±177°), and SA04B-RM01 tilt (±10°). Each tilt rotates about its remote center
   74 mm above its local mounting plane.
+- The supplied STEP contains three `mo39154771` crystal stacks (`A081/A082/A083`).
+  All three stage chains and crystal payloads are retained at their CAD placements;
+  an additional stack would require an updated source assembly.
 - The outer structural cage (`A047`, 68 non-fastener members) is fixed geometry
   included in interference checks. The inner analyzer cage rotates with the Huber.
 - LJ stages remain fixed. Their four former auxiliary controls are disabled.
@@ -105,10 +110,30 @@ suitable for judging small clearances. Collision output is separate, under
 assembly. The local viewer rechecks candidate pairs against the selected source
 CAD solids at the current joint pose. Proven positive CAD gaps replace hull
 overlaps; touching, penetrating, or unmeasurable pairs remain conservative hull
-warnings. This check is always active in the local collision viewer and validator,
+warnings. Constituent solids are also checked: positive compound surface distance
+alone does not prove clearance when one solid is contained within another.
+This check is always active in the local collision viewer and validator,
 not in a generic SDF consumer. The first check loads the required CAD selections;
-unchanged-pose measurements are cached. It does not exempt default-pose pairs
-from checking after motion.
+measurements are cached by relative part pose, including when both parts move
+together. Relative motion invalidates the measurement; default-pose pairs are
+not exempt from checking after motion.
+
+Collision queries run on a separate Drake context while the viewer handles
+sliders and camera movement. Moving replaces the previous readout with
+`Checking current pose...` and removes stale highlights. Only a result matching
+the current pose is displayed, together with its measured check duration.
+The worker keeps one query in flight and then checks the latest requested pose,
+without accumulating a queue or imposing a delay proportional to the last check.
+Cold CAD checks can still take several seconds; continuous animation may remain
+pending until paused. These are discrete pose checks, not swept-motion collision
+detection, so fast motion between checked poses can cross an obstacle.
+
+The collision validator exercises a known cage contact at vertical lift -50 mm
+(`P750` against `P1035/P1040`), and checks that returning home clears it:
+
+```bash
+uv run python cad/DSG-000095835/validate.py exports/DSG-000095835.collision --collision
+```
 
 For a fast motion-only preview without interference checking:
 

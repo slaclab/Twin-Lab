@@ -252,7 +252,10 @@ def build(*, collision: str = "none", workers: int | None = None, rebuild: bool 
                     linear_deflection_mm=float(review.get("linear_deflection_mm", 0.5)),
                 )
                 stamp.write_text(key)
-            color = spec.get("part_colors", {}).get(ref, spec.get("rgba", [0.62, 0.66, 0.72, 1.0]))
+            color = review.get(
+                "visual_rgba",
+                spec.get("part_colors", {}).get(ref, spec.get("rgba", [0.62, 0.66, 0.72, 1.0])),
+            )
             link.meshes.append((label, mesh, color))
         links.append(link)
         print(f"  {name}: {len(link.meshes)} CAD selections", flush=True)

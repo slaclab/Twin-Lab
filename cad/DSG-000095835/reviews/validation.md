@@ -1,4 +1,54 @@
-# Complete Controls Assembly (2026-09-10)
+# Collision Latency (2026-09-10)
+
+- A profiled lift sweep took 9-17 seconds per synchronous check. The viewer then
+  waited three times each check's duration before checking another pose, while
+  leaving the previous result visible.
+- Recipe/statistics data now load once per model. CAD gaps are evaluated and
+  cached by relative part pose, so common rigid motion reuses the measurement.
+  Relative motion still invalidates it. Containment safeguards are unchanged.
+- The shared viewer uses one background worker with a cloned Drake context.
+  It discards results for superseded poses, does not queue intermediate poses,
+  and no longer delays queries by a multiple of their previous cost. Moving
+  clears old highlights and displays `Checking current pose...`; completed
+  results include query duration.
+- Live browser check: pending feedback appeared in 0.31 s; reset during a
+  native CAD operation was accepted in 2.22 s; the obsolete result was discarded
+  and the home recheck took 0.03 s. Cage contacts at lift -50 mm appeared in
+  0.50 s with a 0.11 s query. Cold home checking still took 14.35 s, so this is
+  not a hard real-time detector. Intermediate moving poses can remain unchecked.
+- 71 focused tests pass and Ruff is clean. Tests cover private worker context,
+  preserved collision filters, stale results, one in-flight query, pending
+  readout, common versus relative motion, containment, and the actual assembly's
+  clear/contact/clear cage regression.
+
+## Crystal Stacks, Cage Contact, and Display (Earlier)
+
+- The imported manifest contains three `mo39154771` stacks (`A081/A082/A083`).
+  All three retained stage chains have distinct cached mesh placements matching
+  their CAD bounds. Payloads `P1089/P1133/P1176` are assigned to their respective
+  tilt bodies. No fourth stack was present to restore.
+- Corrected a missed-collision case in the CAD refinement: OCP measures a 2 mm
+  surface gap for a 2 mm box fully inside a 10 mm box when both are compounds,
+  but reports zero distance and containment for their constituent solids. The
+  refinement now checks those solids before clearing any positive compound gap.
+  Regressions cover containment in both directions and a genuinely empty cavity.
+- Added recipe-driven contact regressions: CAD home is clear; vertical lift
+  -50 mm reports cage member `P750` against controls `P1035/P1040`; returning
+  home clears the contacts. These pass with the corrected CAD refinement.
+- The validator now verifies each retained reference has illustration and
+  proximity geometry on its reviewed body, not just somewhere in the model.
+- All 404 illustration meshes use neutral gray. The local viewer starts with
+  collision detection enabled and a zero warning band, so clear parts are not
+  tinted. Red contacts remain enabled; yellow proximity tint requires increasing
+  the warning band.
+- Both packages rebuilt; 67 focused tests pass, and Ruff passes for the changed
+  Python files. The collision validator passes all body-role ownership checks,
+  24 individual joint endpoints, both combined endpoints, and the three
+  clear/contact/clear recipe regressions. The two measured cage hull depths at
+  -50 mm are 8.48 mm (`P1035`) and 6.28 mm (`P1040`); source-CAD checks retain
+  both as contacts. These are diagnostic overlap depths, not exact CAD depths.
+
+## Complete Controls Assembly (Earlier)
 
 - User identified `DSG-000108873` as the XCS Von Hamos Controls assembly,
   correcting its earlier misclassification as a flexible cable carrier.

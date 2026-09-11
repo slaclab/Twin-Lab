@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import math
 import os
+from concurrent.futures import Future
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -21,7 +23,10 @@ from twin_lab.collision import (
 from twin_lab.collision_viewer import (
     OFFENDER_LIMIT,
     SliderJoint,
+    _CollisionWorker,
     _offender_labels,
+    _set_offender_readout,
+    _set_readout,
     read_joint_metadata,
 )
 from twin_lab.convex_collision import (
@@ -330,6 +335,59 @@ def test_empty_clearance_report_reads_as_clear():
     assert report.summary() == "clear: nothing within 5 mm"
 
 
+def test_collision_worker_discards_old_pose_results_and_keeps_only_one_query(monkeypatch):
+    from twin_lab import collision_viewer
+
+    context = SimpleNamespace(Clone=lambda: object())
+    model = SimpleNamespace(context=context)
+    submitted = []
+
+    class Executor:
+        def __init__(self, **kwargs):
+            pass
+
+        def submit(self, *args):
+            future = Future()
+            submitted.append((future, args))
+            return future
+
+        def shutdown(self, **kwargs):
+            pass
+
+    monkeypatch.setattr(collision_viewer, "ThreadPoolExecutor", Executor)
+    worker = _CollisionWorker(model)
+    assert worker._model.context is not model.context
+    positions = {"lift": 0.0}
+    worker.submit("old", positions, warn_m=0.0)
+    positions["lift"] = 0.1
+    assert submitted[0][1][1] == {"lift": 0.0}
+    assert worker.poll("new") is None
+    with pytest.raises(RuntimeError, match="already running"):
+        worker.submit("new", positions, warn_m=0.0)
+    submitted[0][0].set_result(("old report", (), 2.0))
+    assert worker.poll("new") is None
+    assert not worker.busy
+    worker.submit("new", positions, warn_m=0.0)
+    submitted[1][0].set_result(("current report", (), 0.1))
+    assert worker.poll("new") == ("current report", (), 0.1)
+    worker.submit("new", positions, warn_m=0.0)
+    worker.invalidate()
+    submitted[2][0].set_result(("disabled report", (), 0.2))
+    assert worker.poll("new") is None
+    worker.close()
+
+
+def test_checking_readout_replaces_clear_and_reports_completed_duration():
+    labels = []
+    meshcat = SimpleNamespace(AddButton=labels.append, DeleteButton=labels.remove)
+    report = ClearanceReport(clearances=(), warn_m=0.0)
+    previous = _set_offender_readout(meshcat, report, [], show_all=True, check_seconds=0.25)
+    assert labels == ["clear: nothing within 0 mm", "Collision check: 0.25 s"]
+    pending = _set_readout(meshcat, ["Checking current pose..."], previous)
+    assert labels == ["Checking current pose..."]
+    assert _set_readout(meshcat, pending, pending) is pending
+
+
 def test_geometry_states_paint_contact_red_and_near_misses_yellow():
     shared = "a::l::a::a003_collision"
     report = ClearanceReport(
@@ -416,6 +474,41 @@ def test_the_environment_stays_checked_against_a_stages_first_moving_link(tmp_pa
     assert not live.CollisionFiltered(moving, ids["environment_wall_p002_collision"])
     # The stage's own rail is genuinely adjacent across the joint, so it stays filtered.
     assert live.CollisionFiltered(moving, ids["a010_fixed_0_p001_collision"])
+
+
+def test_background_collision_query_uses_private_context_with_reviewed_filters(tmp_path):
+    from pydrake.geometry import Role
+
+    from twin_lab.collision import CollisionModel
+    from twin_lab.scene import load_scene
+
+    path = tmp_path / "rig.sdf"
+    path.write_text(ANCHORED_ENVIRONMENT_SDF, encoding="utf-8")
+    model = CollisionModel(load_scene(path))
+    worker = _CollisionWorker(model)
+    try:
+        worker.submit("moved", {"stack_a010_motion": 0.25}, warn_m=1.0)
+        worker._future.result(timeout=10)
+        report, _, elapsed = worker.poll("moved")
+        assert report.clearances
+        assert elapsed >= 0.0
+        plant = model.scene.plant
+        assert plant.GetPositions(plant.GetMyContextFromRoot(model.context))[0] == 0.0
+        assert plant.GetPositions(plant.GetMyContextFromRoot(worker._model.context))[0] == 0.25
+        graph = model.scene.scene_graph
+        query = graph.get_query_output_port().Eval(
+            graph.GetMyContextFromRoot(worker._model.context)
+        )
+        inspector = query.inspector()
+        ids = {
+            inspector.GetName(geometry).rsplit("::", 1)[-1]: geometry
+            for geometry in inspector.GetAllGeometryIds(Role.kProximity)
+        }
+        moving = ids["a010_moving_1_p003_collision"]
+        assert not inspector.CollisionFiltered(moving, ids["environment_wall_p002_collision"])
+        assert inspector.CollisionFiltered(moving, ids["a010_fixed_0_p001_collision"])
+    finally:
+        worker.close()
 
 
 def test_read_ignored_pairs_is_order_independent(tmp_path):

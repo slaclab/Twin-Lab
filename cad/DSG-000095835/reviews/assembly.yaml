@@ -4,7 +4,20 @@ source_step: cad/DSG-000095835.stp
 source_sha256: c5b3819764247d666a3d5de9fb308ba6bdc76a5c988c6fe92b3c59c3a37c92db
 cad_manifest: cad/DSG-000095835/manifest.json
 linear_deflection_mm: 0.5
+visual_rgba: [0.7, 0.7, 0.7, 1.0]
 split_templates: stage-splits.yaml
+collision_regressions:
+- name: CAD home is clear
+  positions: {}
+  expect_clear: true
+- name: Vertical lift contacts the outer cage
+  positions: {parker_lift_joint: -0.05}
+  touching_pairs:
+  - [P750, P1035]
+  - [P750, P1040]
+- name: Return from cage contact to home
+  positions: {}
+  expect_clear: true
 notes:
 - Offline provisional kinematic model; CAD pose is q=0 for every joint.
 - Axes and attachment order inferred from bearing geometry and coincident mounting
