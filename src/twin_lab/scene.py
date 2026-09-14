@@ -18,6 +18,7 @@ from pydrake.all import (
     SceneGraph,
 )
 
+from .meshcat_ui import announce_viewer
 from .paths import REPOSITORY_ROOT
 
 PACKAGE_XML = REPOSITORY_ROOT / "package.xml"
@@ -155,10 +156,10 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    visualizer = ModelVisualizer(visualize_frames=True)
+    visualizer = ModelVisualizer(visualize_frames=False)
     visualizer.package_map().AddPackageXml(PACKAGE_XML)
     visualizer.AddModels(Path(args.model_file).resolve())
-    print(f"Meshcat: {visualizer.meshcat().web_url()}")
+    announce_viewer("Meshcat", visualizer.meshcat())
     visualizer.Run(loop_once=args.once)
 
 
