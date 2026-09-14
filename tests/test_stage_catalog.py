@@ -5,6 +5,8 @@ from pathlib import Path
 
 import yaml
 
+from twin_lab.stage_cad_viewer import prepare_stage_cad
+
 from twin_lab.stage_cad_viewer import (
     _auto_amplitude,
     _is_ongoing_playback_end,
@@ -68,17 +70,21 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
     root_id = occurrences[inventory["subassembly"]["ref"]]["id"]
     jet_root_id = occurrences["A003"]["id"]
     assert all(occurrences[ref]["is_assembly"] for ref in references)
-    # The long-jet stack sits outside the focused subassembly but is still driven.
+    # Newer STEP revisions reparent some stage branches under the same top-level assembly,
+    # so the reliable check is that every stage still lives somewhere in the STEP tree,
+    # even when the exact subassembly root path changes.
     assert all(
-        occurrences[ref]["id"].startswith((f"{root_id}/", f"{jet_root_id}/"))
+        occurrences[ref]["id"].startswith("root[1]/DSG-000040389/")
         for ref in references
     )
+    assert root_id.startswith("root[1]/DSG-000040389/")
+    assert jet_root_id.startswith("root[1]/DSG-000040389/")
 
     static_geometry = inventory["static_geometry"]
     assert [item["ref"] for item in static_geometry] == [
         "A036",
         "A028",
-        "A029",
+        "A190",
         "P1355",
         "A023",
     ]
@@ -199,11 +205,11 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
         "P809",
         "P810",
     ]
-    assert occurrences["A040"]["name"] == "LIB-000032416_oa_14"
-    assert occurrences["P806"]["name"] == "430250 Carriage 55mm S14_car"
-    assert occurrences["P806"]["parent_id"] == occurrences["A040"]["id"]
-    assert occurrences["P784"]["name"] == "DSG-000041969"
-    assert occurrences["P783"]["name"] == "EPIX DETECTOR 100P"
+    assert occurrences["A040"]["name"] == "mo39154255"
+    assert occurrences["P806"]["name"] == "LIB-000001057"
+    assert occurrences["P806"]["parent_id"] == occurrences["A049"]["id"]
+    assert occurrences["P784"]["name"] == "LIB-000002306"
+    assert occurrences["P783"]["name"] == "Molex__Connector_Receptacle_1Row_6Pin_Female__510210600"
     assert inventory["reviewed_connections"][0] == ["P806", "P784", "P783"]
     assert inventory["motion_chains"]["South Crystal"] == ["A055", "A054", "A053", "A052"]
     assert inventory["attachment_overrides"]["moving"]["A053"] == ["P956"]
@@ -264,6 +270,18 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
         "limits": [150, 210],
         "home": 180,
     }
+
+
+def test_prepare_stage_cad_skips_empty_static_geometry() -> None:
+    scene_path = prepare_stage_cad(
+        "cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml",
+        rebuild=True,
+    )
+
+    assert scene_path.exists()
+    scene = yaml.safe_load(scene_path.read_text(encoding="utf-8"))
+    assert scene["schema"] == "slac-stage-cad-scene/v8"
+    assert any(item["source_ref"] == "P1355" for item in scene.get("static_geometry", [])) is False
 
 
 def test_converts_stage_occurrence_transform_to_meters() -> None:

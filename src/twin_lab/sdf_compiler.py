@@ -187,7 +187,7 @@ def _build_tree(scene: dict[str, Any], scene_file: Path) -> tuple[list[LinkSpec]
         for index, item in enumerate(chain["joints"], start=1):
             reference = str(item["ref"])
             fixed_role = item.get("fixed_role")
-            if fixed_role:
+            if fixed_role and fixed_role in motion_meshes.get(reference, {}):
                 parent.meshes.append(
                     (
                         f"{reference}_{fixed_role}",

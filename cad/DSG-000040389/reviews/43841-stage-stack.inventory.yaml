@@ -5,9 +5,9 @@ stage_catalog: config/stage-catalog.yaml
 subassembly:
   ref: A037
   name: DSG-000043841_oa_11
-  occurrence_count: 398
-  assembly_count: 31
-  leaf_part_count: 367
+  occurrence_count: 10
+  assembly_count: 3
+  leaf_part_count: 7
 
 # World-fixed geometry outside the focused stage-stack subtree. Keep these as
 # separate named groups so they can become independently reviewed collision
@@ -18,7 +18,7 @@ subassembly:
 static_geometry:
   - {ref: A036, name: Enclosure assembly, cad_id: DSG-000043161, rgba: [0.95, 0.78, 0.12, 0.28]}
   - {ref: A028, name: Camera assembly 1, cad_id: DSG-000042902}
-  - {ref: A029, name: Camera assembly 2, cad_id: DSG-000042902}
+  - {ref: A190, name: Camera assembly 2, cad_id: DSG-000042902}
   - {ref: P1355, name: Shield cone, cad_id: REF-000226146, rgba: [0.20, 0.65, 0.95, 0.35]}
   - {ref: A023, name: Chamber, cad_id: DSG-000044253}
 

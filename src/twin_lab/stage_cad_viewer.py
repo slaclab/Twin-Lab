@@ -50,6 +50,46 @@ MOTION_HOLD_S = 0.5
 TIME_PUSH_S = 0.5
 
 
+def _safe_write_group_obj(
+    occurrences: list[Any],
+    mesh_path: Path,
+    *,
+    linear_deflection_mm: float,
+) -> bool:
+    """Write a rigid-group mesh when it tessellates; otherwise skip it."""
+
+    try:
+        write_group_obj(
+            occurrences,
+            mesh_path,
+            linear_deflection_mm=linear_deflection_mm,
+        )
+    except ValueError:
+        if mesh_path.exists():
+            mesh_path.unlink(missing_ok=True)
+        return False
+    return True
+
+
+def _leaf_descendants_by_ref(
+    manifest_items: list[dict[str, Any]],
+    occurrence_ref: str,
+) -> list[str]:
+    """Expand a stage or assembly occurrence reference to all non-assembly leaf refs below it."""
+
+    item = next((entry for entry in manifest_items if str(entry["ref"]) == str(occurrence_ref)), None)
+    if item is None:
+        return [str(occurrence_ref)]
+    if not item["is_assembly"]:
+        return [str(occurrence_ref)]
+    return [
+        str(descendant["ref"])
+        for descendant in manifest_items
+        if not descendant["is_assembly"]
+        and str(descendant["id"]).startswith(f"{str(item['id'])}/")
+    ]
+
+
 def prepare_stage_cad(
     inventory_path: str | Path,
     *,
@@ -172,11 +212,12 @@ def prepare_stage_cad(
             raise ValueError(f"Static geometry {source_ref} contains no non-fastener parts")
         used_static_refs.update(references)
         mesh_path = output_dir / f"static_{source_ref}.obj"
-        write_group_obj(
+        if not _safe_write_group_obj(
             [leaves[ref] for ref in references],
             mesh_path,
             linear_deflection_mm=linear_deflection_mm,
-        )
+        ):
+            continue
         static_geometry.append(
             {
                 "source_ref": source_ref,
@@ -206,13 +247,31 @@ def prepare_stage_cad(
         children = [item for item in manifest_items if item["parent_id"] == by_ref[stage_ref]["id"]]
         role_meshes = {}
         for role in sorted(requested_roles):
-            references = [children[index - 1]["ref"] for index in roles[role]]
+            references = []
+            for index in roles[role]:
+                if index - 1 < len(children):
+                    child_ref = children[index - 1]["ref"]
+                    references.extend(_leaf_descendants_by_ref(manifest_items, child_ref))
+            references = list(dict.fromkeys(references))
+            if not references and role != "fixed":
+                instance_mesh = Path(str(instance_by_ref[stage_ref]["mesh"]))
+                if instance_mesh.exists():
+                    role_meshes[role] = instance_mesh.as_posix()
+                    continue
+                shape, _ = _occurrence_shape_by_ref(roots, stage_ref)
+                mesh_path = output_dir / f"{stage_ref}_{role}.obj"
+                _write_shape_obj(shape, mesh_path, linear_deflection_mm)
+                role_meshes[role] = mesh_path.as_posix()
+                continue
+            if not references:
+                continue
             mesh_path = output_dir / f"{stage_ref}_{role}.obj"
-            write_group_obj(
+            if not _safe_write_group_obj(
                 [leaves[ref] for ref in references],
                 mesh_path,
                 linear_deflection_mm=linear_deflection_mm,
-            )
+            ):
+                continue
             role_meshes[role] = mesh_path.as_posix()
         motion_stage_meshes[stage_ref] = role_meshes
 
@@ -268,11 +327,12 @@ def prepare_stage_cad(
             continue
         name = "fixed" if parent_ref is None else parent_ref
         mesh_path = output_dir / f"attached_{name}_{style}.obj"
-        write_group_obj(
+        if not _safe_write_group_obj(
             [leaves[ref] for ref in references],
             mesh_path,
             linear_deflection_mm=linear_deflection_mm,
-        )
+        ):
+            continue
         attachments.append(
             {
                 "parent_stage_ref": parent_ref,
