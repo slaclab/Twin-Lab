@@ -126,11 +126,10 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
         "P1090",
     ]
     assert visual_styles["attachment_groups"]["detector_adapter"]["refs"] == [
-        "P784",
-        "P809",
-        "P810",
+        "P2391",
+        "P2393",
     ]
-    assert visual_styles["attachment_groups"]["detector"]["refs"] == ["P783"]
+    assert visual_styles["attachment_groups"]["detector"]["refs"] == ["P2385"]
 
     detector_stage = stages["micronix_vt_50l_c0014"]
     assert detector_stage["manufacturer"] == "MICRONIX USA"
@@ -151,20 +150,20 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
     assert stages["kohzu_za05a_w101_bm"]["limits"] == [-0.004, 0.004]
     assert stages["kohzu_za05a_w101_bm"]["axis_local"] == [0.0, 0.0, 1.0]
 
-    assert inventory["hidden_occurrences"] == ["P754", "P755", "P756"]
+    assert inventory["hidden_occurrences"] == ["P2361", "P2362", "P2363"]
     assert inventory["attachment_overrides"]["fixed"] == [
-        "P826",
-        "P890",
-        "P892",
-        "P998",
-        "P999",
-        "P1016",
-        "P1050",
-        "P1058",
-        "P1059",
-        "P1060",
-        "P1061",
-        "P1095",
+        "P2439",
+        "P2507",
+        "P2509",
+        "P2623",
+        "P2624",
+        "P2641",
+        "P2698",
+        "P2709",
+        "P2710",
+        "P2711",
+        "P2712",
+        "P2769",
         "P027",
         "P003",
         "P020",
@@ -200,10 +199,9 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
     assert inventory["motion_chains"]["Long Jet"] == ["A006", "A005", "A004"]
     assert inventory["motion_chains"]["Detector"] == ["A040"]
     assert inventory["attachment_overrides"]["moving"]["A040"] == [
-        "P784",
-        "P783",
-        "P809",
-        "P810",
+        "P2385",
+        "P2391",
+        "P2393",
     ]
     assert occurrences["A040"]["name"] == "mo39154255"
     assert occurrences["P806"]["name"] == "LIB-000001057"

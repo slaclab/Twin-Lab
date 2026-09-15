@@ -41,10 +41,10 @@ visual_styles:
   attachment_groups:
     adapter:
       rgba: [0.92, 0.42, 0.10, 1.0]
-      refs: [P826, P890, P892, P998, P999,
+      refs: [P2439, P2507, P2509, P2623, P2624,
              P847, P821, P820, P887, P884, P881, P983, P966, P956,
-             P1012, P1016, P1017, P1048, P1049, P1050,
-             P1058, P1059, P1060, P1061, P1091, P1095, P1096]
+             P1012, P2641, P1017, P1048, P1049, P2698,
+             P2709, P2710, P2711, P2712, P1091, P2769, P1096]
     crystal_and_holder:
       rgba: [0.78, 0.22, 0.82, 1.0]
       refs: [P868, P871, P872, P873,
@@ -54,11 +54,14 @@ visual_styles:
       rgba: [0.05, 0.78, 0.76, 1.0]
       refs: [P1010, P1011, P1054, P1055, P1089, P1090]
     detector_adapter:
+      # RE-REVIEW: the true 41969 adapter ref is unresolved after the Sep 2026 CAD
+      # refresh (see attachment_overrides.moving.A040 comment); this now colors the
+      # two Newport locating pegs that used to share this group instead.
       rgba: [0.92, 0.42, 0.10, 1.0]
-      refs: [P784, P809, P810]
+      refs: [P2391, P2393]
     detector:
       rgba: [0.18, 0.72, 0.62, 1.0]
-      refs: [P783]
+      refs: [P2385]
     jet_stage_mount:
       rgba: [0.58, 0.60, 0.64, 1.0]
       refs: [P027, P003, P020, P022, P024, P026, P041, P043, P045]
@@ -146,9 +149,9 @@ joint_limit_overrides:
 
 # Human-reviewed exceptions always override automatic proximity grouping.
 hidden_occurrences:
-  - P754  # REF-000168820 beam path
-  - P755  # REF-000168820 beam path
-  - P756  # REF-000168820 beam path
+  - P2361  # REF-000168820 beam path
+  - P2362  # REF-000168820 beam path
+  - P2363  # REF-000168820 beam path
 
 # Per-part convex-decomposition overrides. Drake replaces each collision mesh with its
 # convex hulls, so a hollow shell split into too few hulls fills its own cavity and
@@ -191,18 +194,18 @@ ignored_pairs:
 
 attachment_overrides:
   fixed:
-    - P826   # DSG-000041331; Middle Crystal base mount
-    - P890   # DSG-000043036; North Crystal base mount
-    - P892   # DSG-000041169; North Crystal base support
-    - P998  # DSG-000043037; South Crystal base mount
-    - P999  # DSG-000041293; South Crystal base support
-    - P1016  # DSG-000046522; South Polycap angled Z-stage bracket fixed to breadboard
-    - P1050  # DSG-000046528; Middle Polycap angled Z-stage bracket fixed to breadboard
-    - P1058  # LIB-000004373; Middle Polycap base fastener
-    - P1059  # LIB-000004373; Middle Polycap base fastener
-    - P1060  # LIB-000004373; Middle Polycap base fastener
-    - P1061  # LIB-000004373; Middle Polycap base fastener
-    - P1095  # DSG-000046530; North Polycap angled Z-stage bracket fixed to breadboard
+    - P2439   # DSG-000041331; Middle Crystal base mount
+    - P2507   # DSG-000043036; North Crystal base mount
+    - P2509   # DSG-000041169; North Crystal base support
+    - P2623  # DSG-000043037; South Crystal base mount
+    - P2624  # DSG-000041293; South Crystal base support
+    - P2641  # DSG-000046522; South Polycap angled Z-stage bracket fixed to breadboard
+    - P2698  # DSG-000046528; Middle Polycap angled Z-stage bracket fixed to breadboard
+    - P2709  # LIB-000004373; Middle Polycap base fastener
+    - P2710  # LIB-000004373; Middle Polycap base fastener
+    - P2711  # LIB-000004373; Middle Polycap base fastener
+    - P2712  # LIB-000004373; Middle Polycap base fastener
+    - P2769  # DSG-000046530; North Polycap angled Z-stage bracket fixed to breadboard
     - P027   # DSG-000024758-EXT; jet stage mounting plate, bolted to the breadboard
     - P003   # Thorlabs RS1P; jet stage mounting-plate pedestal
     - P020   # Thorlabs RS1P; jet stage mounting-plate pedestal
@@ -213,7 +216,13 @@ attachment_overrides:
     - P043   # Thorlabs RS1P; jet stage mounting-plate pedestal
     - P045   # Thorlabs RS1P; jet stage mounting-plate pedestal
   moving:
-    A040: [P784, P783, P809, P810]  # 41969 adapter, REF-000226045 EPIX 100P detector, and two Newport locating pegs
+    # RE-REVIEW: refs stale after the Sep 2026 CAD refresh (see git history of this file).
+    # EPIX 100P detector (P2385) and both Newport locating pegs (P2391, P2393) are
+    # confirmed by name against the current manifest. The old "41969 adapter" (DSG-000041969)
+    # no longer exists under A040 in this revision - candidates DSG-000112058/59/61 sit in
+    # the same subtree but none is confirmed, so it is deliberately left out rather than
+    # guessed; it currently falls through to the default attached_refs walk instead.
+    A040: [P2385, P2391, P2393]  # EPIX 100P detector and two Newport locating pegs
     A043: [P847]        # 34586: first linear carriage to second linear base
     A042: [P821]        # 41329: second linear carriage to rotation base
     A045: [P820]        # 28455: rotation carriage to tilt base

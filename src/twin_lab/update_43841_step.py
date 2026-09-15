@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 from pathlib import Path
 
@@ -22,7 +23,7 @@ def refresh_reviewed_assembly(
     *,
     replacement_step: str | Path | None = None,
     rebuild_viewer_cache: bool = False,
-) -> dict[str, Path]:
+) -> dict[str, Path | list[str]]:
     """Refresh manifest and review data for the reviewed 43841 assembly."""
 
     if replacement_step is not None:
@@ -35,12 +36,21 @@ def refresh_reviewed_assembly(
     if MANIFEST.exists():
         shutil.copy2(MANIFEST, PREVIOUS_MANIFEST)
     write_cad_manifest(SOURCE_STEP, MANIFEST)
-    remap_stage_inventory(
+    _, remap_info = remap_stage_inventory(
         INVENTORY,
         previous_manifest_path=PREVIOUS_MANIFEST,
         new_manifest_path=MANIFEST,
         alias_map_path=ALIASES if ALIASES.exists() else None,
     )
+    # An old ref that could not be matched to a new occurrence is left as literal text,
+    # so it silently keeps whatever ref number the new revision happens to reassign -
+    # stale_refs_still_present is that: which of those old tokens are STILL in the
+    # rewritten file, still spelled the same, now meaning something else entirely.
+    unresolved_refs = sorted(remap_info["unresolved_refs"])
+    rewritten_text = INVENTORY.read_text(encoding="utf-8")
+    stale_refs_still_present = [
+        ref for ref in unresolved_refs if re.search(rf"\b{re.escape(ref)}\b", rewritten_text)
+    ]
     if rebuild_viewer_cache:
         prepare_stage_cad(INVENTORY, rebuild=True)
     return {
@@ -49,6 +59,8 @@ def refresh_reviewed_assembly(
         "previous_manifest": PREVIOUS_MANIFEST,
         "inventory": INVENTORY,
         "aliases": ALIASES,
+        "unresolved_refs": unresolved_refs,
+        "stale_refs_still_present": stale_refs_still_present,
     }
 
 
@@ -78,6 +90,14 @@ def main() -> None:
     print(f"Remapped inventory: {results['inventory']}")
     if results["aliases"].exists():
         print(f"Alias map used: {results['aliases']}")
+    stale_refs = results["stale_refs_still_present"]
+    if stale_refs:
+        print(
+            f"WARNING: {len(stale_refs)} ref(s) in the inventory could not be matched "
+            "to the new manifest and were left unchanged - they now point at whatever "
+            "the new revision happens to number that same token, NOT the original "
+            "occurrence. Review every mention of: " + ", ".join(stale_refs)
+        )
     if args.rebuild_viewer_cache:
         print("Viewer cache rebuilt.")
 

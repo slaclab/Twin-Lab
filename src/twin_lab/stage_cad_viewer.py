@@ -253,26 +253,30 @@ def prepare_stage_cad(
                     child_ref = children[index - 1]["ref"]
                     references.extend(_leaf_descendants_by_ref(manifest_items, child_ref))
             references = list(dict.fromkeys(references))
-            if not references and role != "fixed":
+            resolved = False
+            if references:
+                mesh_path = output_dir / f"{stage_ref}_{role}.obj"
+                if _safe_write_group_obj(
+                    [leaves[ref] for ref in references],
+                    mesh_path,
+                    linear_deflection_mm=linear_deflection_mm,
+                ):
+                    role_meshes[role] = mesh_path.as_posix()
+                    resolved = True
+            # The catalog's component_roles indices assume a stable child order per
+            # occurrence; a CAD revision that inserts/reorders children (or leaves a
+            # datum/mate placeholder with no solid) can point a role at empty geometry.
+            # Fall back to the whole instance so a moving role - required downstream by
+            # _build_tree - is never left unresolved; fixed stays optional either way.
+            if not resolved and role != "fixed":
                 instance_mesh = Path(str(instance_by_ref[stage_ref]["mesh"]))
                 if instance_mesh.exists():
                     role_meshes[role] = instance_mesh.as_posix()
-                    continue
-                shape, _ = _occurrence_shape_by_ref(roots, stage_ref)
-                mesh_path = output_dir / f"{stage_ref}_{role}.obj"
-                _write_shape_obj(shape, mesh_path, linear_deflection_mm)
-                role_meshes[role] = mesh_path.as_posix()
-                continue
-            if not references:
-                continue
-            mesh_path = output_dir / f"{stage_ref}_{role}.obj"
-            if not _safe_write_group_obj(
-                [leaves[ref] for ref in references],
-                mesh_path,
-                linear_deflection_mm=linear_deflection_mm,
-            ):
-                continue
-            role_meshes[role] = mesh_path.as_posix()
+                else:
+                    shape, _ = _occurrence_shape_by_ref(roots, stage_ref)
+                    mesh_path = output_dir / f"{stage_ref}_{role}.obj"
+                    _write_shape_obj(shape, mesh_path, linear_deflection_mm)
+                    role_meshes[role] = mesh_path.as_posix()
         motion_stage_meshes[stage_ref] = role_meshes
 
     attachment_styles = visual_styles.get("attachment_groups", {})
