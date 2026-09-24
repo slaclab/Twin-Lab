@@ -4,22 +4,27 @@ Kinematic modeling and interference-analysis tooling for STEP-based X-ray
 spectrometer stage stacks. Open Cascade reads the CAD hierarchy and Drake handles
 motion, visualization, and collision queries.
 
-The current reviewed model is subassembly `*43841` from drawing
-`DSG-000040389`. It contains an EPIX detector stage, three crystal stacks, and
-three polycapillary stacks with 22 controllable joints.
+Two models are currently runnable:
+
+| Key | Model | Joints |
+| --- | --- | --- |
+| `43841` | Subassembly `*43841` from drawing `DSG-000040389`: an EPIX detector stage, three crystal stacks, and three polycapillary stacks | 22 |
+| `95835` | Offline assembly `DSG-000095835`: Parker lift and slide, Huber rotation, and three Kohzu crystal stacks. See [its README](cad/DSG-000095835/README.md) | 12 |
 
 ## For returning users
 
 Set up already? Open the repository in VS Code, open a terminal with
-`` Ctrl+Shift+` ``, and start the collision viewer:
+`` Ctrl+Shift+` ``, and run:
 
 ```bash
-uv run slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
+uv run slac-run
 ```
 
-It opens a Meshcat page at `http://localhost:7000` in your browser. Everything
-it can do is in [Collision detection](#collision-detection). First time here?
-Start at [Setup](#setup) instead.
+It lists the models, asks which one to open, and starts its collision viewer on a
+Meshcat page at `http://localhost:7000` in your browser. See
+[Choosing a model](#choosing-a-model-slac-run) for the shortcuts, and
+[Collision detection](#collision-detection) for what the viewer can do. First
+time here? Start at [Setup](#setup) instead.
 
 ## Setup
 
@@ -306,9 +311,46 @@ plain terminal, on a machine without the Python extension, or in a script — an
 so there is never a question of whether the right Python is selected. Run them
 in the VS Code terminal, which already opens at the repository root.
 
+### Choosing a model (`slac-run`)
+
+`slac-run` is the one command to remember. Without arguments it prompts:
+
+```text
+Twin Lab models:
+  1) 43841  DSG-000040389 *43841 polycapillary stage stack (22 joints)
+  2) 95835  DSG-000095835 offline assembly (12 joints)
+Select a model [1-2, default 1]:
+```
+
+Answer with the number or the key. To skip the prompt, name the model:
+
+```bash
+uv run slac-run 43841                  # collision viewer
+uv run slac-run 95835 --motion-only    # lighter viewer, no collision checking
+uv run slac-run --list                 # list the models and exit
+```
+
+It prints the underlying command before starting it, so this is also a quick
+way to learn the model-specific commands below. Any option `slac-run` does not
+recognise is forwarded to that command, for example
+`uv run slac-run 43841 --warn-mm 2` or `uv run slac-run 95835 --rebuild`.
+
+| Key | Default | `--motion-only` |
+| --- | --- | --- |
+| `43841` | `slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml` | `slac-stage-cad cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml` |
+| `95835` | `python cad/DSG-000095835/build.py --view` | `python cad/DSG-000095835/build.py --collision none --view` |
+
 ## Collision detection
 
-This is the point of the model. Quick start, from the repository root:
+This is the point of the model. This section uses the 43841 model; the
+95835 viewer shares the same controls, and its differences are in
+[its README](cad/DSG-000095835/README.md). Quick start, from the repository root:
+
+```bash
+uv run slac-run 43841
+```
+
+which runs
 
 ```bash
 uv run slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
@@ -722,6 +764,12 @@ after it. Reach for it when you want kinematics without the collision plant,
 since it is lighter and starts faster:
 
 ```bash
+uv run slac-run 43841 --motion-only
+```
+
+which runs
+
+```bash
 uv run slac-stage-cad \
   cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
 ```
@@ -903,12 +951,18 @@ cad/
     reviews/
       43841-stage-stack.inventory.yaml
   DSG-000046520/               earlier single-polycap review fixture
+  DSG-000095835/
+    build.py                   build and view the offline 95835 assembly
+    validate.py                joint and collision validation
+    refine_hulls.py            targeted CoACD re-decomposition trial
+    reviews/assembly.yaml      bodies, joints, limits, and omissions
 config/
   stage-catalog.yaml           reusable stage definitions
 docs/
   cad-review.md                STEP hierarchy and constraint-review workflow
   sdf-sharing.md               portable SDF and MATLAB handoff
 src/twin_lab/
+  launcher.py                  `slac-run` model picker
   constraints_wizard.py        STEP import, manifest, tree, and preview
   cad_geometry.py              shared Open Cascade traversal/mesh helpers
   stage_cad_viewer.py          current full-stack cached motion viewer
@@ -932,14 +986,30 @@ entry points, all installed with the package. Prefix each with `uv run`:
 
 | Command | Module | Purpose |
 | --- | --- | --- |
+| `slac-run` | `launcher` | Pick a model and open its viewer; see [Choosing a model](#choosing-a-model-slac-run) |
 | `slac-stage-cad` | `stage_cad_viewer` | Cached CAD viewer with manual sliders and animation |
 | `slac-collision` | `collision_viewer` | Drake viewer with live clearance reporting |
 | `slac-compile-sdf` | `sdf_compiler` | Portable SDF share package |
 | `slac-decompose` | `convex_collision` | Convex-decompose cached meshes ahead of time |
 | `slac-hull-audit` | `hull_audit` | Measure how far the collision hulls overshoot the CAD |
+| `slac-inflate-hulls` | `hull_inflation` | Grow cached hulls until they cover their part's mesh vertices |
+| `slac-accuracy` | `accuracy` | Check the clearance report against an exact mesh oracle |
 | `slac-cad-manifest` | `constraints_wizard` | STEP tree, manifest, remap, preview |
 | `slac-refresh-43841` | `update_43841_step` | Update the reviewed STEP revision |
 | `slac-view` | `scene` | Plain Drake model visualizer for any SDF/URDF |
+
+Every console script takes `--help`.
+
+The 95835 assembly uses scripts in its own directory rather than console
+scripts, because its review format is not the shared stage inventory. Run them
+with `uv run python`; [its README](cad/DSG-000095835/README.md) has the details:
+
+| Script | Purpose |
+| --- | --- |
+| `cad/DSG-000095835/build.py` | Build the SDF and collision packages; `--view` opens the viewer, `--collision none\|hull\|convex` picks the collision geometry |
+| `cad/DSG-000095835/validate.py` | Check every joint against independent transforms; add `exports/DSG-000095835.collision --collision` for the collision checks |
+| `cad/DSG-000095835/view.py` | Motion-only viewer for an already built package |
+| `cad/DSG-000095835/refine_hulls.py` | Resumable targeted re-decomposition of the worst hulls |
 
 Inspect a STEP tree or generate a focused preview:
 

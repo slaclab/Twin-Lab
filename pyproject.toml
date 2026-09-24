@@ -44,6 +44,7 @@ collision = [
 ]
 
 [project.scripts]
+slac-run = "twin_lab.launcher:main"
 slac-cad-manifest = "twin_lab.constraints_wizard:main"
 slac-stage-cad = "twin_lab.stage_cad_viewer:main"
 slac-compile-sdf = "twin_lab.sdf_compiler:main"
