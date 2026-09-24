@@ -226,3 +226,4 @@ __marimo__/
 *.stage-cad/
 exports/
 cad/*/manifest.previous.json
+/cad/DSG-000095835.stp

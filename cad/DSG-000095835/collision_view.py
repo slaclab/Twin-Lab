@@ -1,0 +1,168 @@
+"""Use the shared clearance UI with explicit bearings and opt-in source-CAD checks."""
+
+import json
+from dataclasses import replace
+from pathlib import Path
+
+import numpy as np
+import yaml
+from controls import read_controls
+from OCP.BRep import BRep_Builder
+from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
+from OCP.BRepExtrema import BRepExtrema_DistShapeShape
+from OCP.gp import gp_Trsf
+from OCP.TopAbs import TopAbs_SOLID
+from OCP.TopExp import TopExp_Explorer
+from OCP.TopoDS import TopoDS_Compound
+from pydrake.geometry import CollisionFilterDeclaration, GeometrySet, Role
+
+from twin_lab import collision_viewer
+from twin_lab.collision import CollisionModel, part_of
+
+RECIPE = Path(__file__).resolve().parent / "reviews" / "assembly.yaml"
+
+
+def cad_gap_m(shapes):
+    """Prove separation without mistaking compound containment for a surface gap."""
+    distance = BRepExtrema_DistShapeShape(*shapes)
+    if not distance.IsDone():
+        return 0.0
+    gap = distance.Value() / 1000.0
+    if gap <= 1e-7:
+        return 0.0
+    solids = []
+    for shape in shapes:
+        components = []
+        explorer = TopExp_Explorer(shape, TopAbs_SOLID)
+        while explorer.More():
+            components.append(explorer.Current())
+            explorer.Next()
+        solids.append(components)
+    for first in solids[0]:
+        for second in solids[1]:
+            distance = BRepExtrema_DistShapeShape(first, second)
+            if not distance.IsDone() or distance.InnerSolution() or distance.Value() <= 1e-4:
+                return 0.0
+            gap = min(gap, distance.Value() / 1000.0)
+    return gap
+
+
+class AssemblyCollisionModel(CollisionModel):
+    """Restore adjacent-link checks without relying on legacy A-ref name patterns."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._cad_shapes = {}
+        self._cad_gaps = {}
+        self._cad_review = None
+        self._cad_stats = None
+
+    @property
+    def supports_verification(self):
+        return True
+
+    def _cad_shape(self, name):
+        from build import CACHE, read_shape
+
+        if name not in self._cad_shapes:
+            if self._cad_review is None:
+                review = yaml.safe_load(RECIPE.read_text())
+                templates = yaml.safe_load((RECIPE.parent / review["split_templates"]).read_text())
+                review["stage_splits"] = {
+                    ref: templates[key] for ref, key in review["stage_splits"].items()
+                }
+                self._cad_review = review
+                self._cad_stats = json.loads((CACHE / "stats.json").read_text())
+            review = self._cad_review
+            body, ref = name.split("/")
+            selections = [
+                part for part in review["bodies"][body]["parts"]
+                if (part if isinstance(part, str) else part["ref"]) == ref
+            ]
+            if not selections:
+                raise ValueError(f"No reviewed CAD selection for {name}")
+            shape = TopoDS_Compound()
+            builder = BRep_Builder()
+            builder.MakeCompound(shape)
+            for part in selections:
+                builder.Add(shape, read_shape(part, review, self._cad_stats))
+            self._cad_shapes[name] = shape
+        return self._cad_shapes[name]
+
+    def verify(self, report, *, limit=12, with_mesh=True):
+        """Refine hull candidates against source CAD only when explicitly requested."""
+        corrected = []
+        for item in report.clearances:
+            if item.pose_a is None or item.pose_b is None:
+                corrected.append(item)
+                continue
+            relative = np.eye(4)
+            relative[:3, :3] = item.pose_a[:3, :3].T @ item.pose_b[:3, :3]
+            relative[:3, 3] = item.pose_a[:3, :3].T @ (
+                item.pose_b[:3, 3] - item.pose_a[:3, 3]
+            )
+            cached = self._cad_gaps.get(item.names)
+            if cached is None or not np.allclose(cached[0], relative, rtol=0.0, atol=1e-12):
+                matrix = relative[:3, :].copy()
+                matrix[:, 3] *= 1000.0
+                transform = gp_Trsf()
+                transform.SetValues(*matrix.flatten().tolist())
+                first = self._cad_shape(item.names[0])
+                second = BRepBuilderAPI_Transform(
+                    self._cad_shape(item.names[1]), transform, True
+                ).Shape()
+                gap = cad_gap_m((first, second))
+                self._cad_gaps[item.names] = (relative, gap)
+            else:
+                gap = cached[1]
+            if gap > 1e-7:
+                item = replace(item, distance_m=max(item.distance_m, gap))
+            if item.distance_m <= report.warn_m:
+                corrected.append(item)
+        corrected.sort(key=lambda item: (item.distance_m, item.a, item.b))
+        return replace(report, clearances=tuple(corrected)), ()
+
+    def _reopen_joint_adjacent_pairs(self) -> int:
+        plant = self.scene.plant
+        graph = self.scene.scene_graph
+        inspector = graph.model_inspector()
+        declaration = CollisionFilterDeclaration()
+        reopened = 0
+        for spec in yaml.safe_load(RECIPE.read_text())["joints"]:
+            joint = plant.GetJointByName(spec["name"])
+            fixed_refs, moving_refs = spec["bearing_parts"]
+
+            def partition(body, bearing_refs):
+                frame = plant.GetBodyFrameIdOrThrow(body.index())
+                own, rest = [], []
+                for gid in inspector.GetGeometries(frame, Role.kProximity):
+                    target = own if part_of(inspector.GetName(gid)) in bearing_refs else rest
+                    target.append(gid)
+                return own, rest
+
+            rail, support = partition(joint.parent_body(), fixed_refs)
+            carriage, payload = partition(joint.child_body(), moving_refs)
+            allowed = False
+            for first, second in ((rail + support, payload), (support, carriage)):
+                if first and second:
+                    declaration.AllowBetween(GeometrySet(first), GeometrySet(second))
+                    allowed = True
+            reopened += int(allowed)
+        if reopened:
+            context = graph.GetMyContextFromRoot(self.context)
+            graph.collision_filter_manager(context).Apply(declaration)
+        return reopened
+
+
+def view(package: Path) -> None:
+    # The shared UI has no model-factory argument. This temporary binding affects
+    # only this local process; repository source and other assemblies are unchanged.
+    original = collision_viewer.CollisionModel
+    original_controls = collision_viewer.read_joint_metadata
+    collision_viewer.CollisionModel = AssemblyCollisionModel
+    collision_viewer.read_joint_metadata = read_controls
+    try:
+        collision_viewer.run_collision_viewer(package, label_source=RECIPE, warn_mm=0.0)
+    finally:
+        collision_viewer.CollisionModel = original
+        collision_viewer.read_joint_metadata = original_controls

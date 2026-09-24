@@ -198,6 +198,10 @@ class CollisionModel:
             ClearanceRefiner(decomposition_dir) if decomposition_dir is not None else None
         )
 
+    @property
+    def supports_verification(self) -> bool:
+        return self.refiner is not None
+
     def _reopen_joint_adjacent_pairs(self) -> int:
         """Restore clearance checking across every joint except the bearing it represents.
 

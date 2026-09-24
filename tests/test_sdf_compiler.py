@@ -5,11 +5,15 @@ import struct
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+import pytest
 import yaml
 
+from twin_lab.convex_collision import ConvexPart
 from twin_lab.sdf_compiler import (
     NEUTRAL_VISUAL_RGB,
     PACKAGE_MARKER_NAME,
+    LinkSpec,
+    _convert_meshes,
     compile_sdf_package,
     package_is_current,
 )
@@ -20,6 +24,48 @@ def _write_triangle_obj(path: Path, x_offset: float = 0.0) -> None:
         f"v {x_offset} 0 0\nv {x_offset + 0.01} 0 0\nv {x_offset} 0.01 0\nf 1 2 3\n",
         encoding="utf-8",
     )
+
+
+def test_supplied_candidate_hulls_are_copied_without_redecomposing(monkeypatch, tmp_path):
+    from twin_lab import sdf_compiler
+
+    source = tmp_path / "body_P750.obj"
+    hull = tmp_path / "improved.obj"
+    _write_triangle_obj(source)
+    _write_triangle_obj(hull, 0.02)
+    meshes = tmp_path / "meshes"
+    meshes.mkdir()
+    monkeypatch.setattr(
+        sdf_compiler, "decompose_sources",
+        lambda *args, **kwargs: pytest.fail("Candidate builds must not run CoACD"),
+    )
+    parts = {source: [ConvexPart(source, "P750", (hull,))]}
+
+    visual, _, collision = _convert_meshes(
+        [LinkSpec("body", [("P750", source, None)])], meshes, tmp_path / "scene.yaml",
+        include_collision_obj=True, collision_mode="convex", decomposed_parts=parts,
+    )
+
+    assert (tmp_path / visual[source]).read_bytes() == source.read_bytes()
+    assert collision[source] == [("p750_000", "meshes/body_p750_p750_000.obj")]
+    assert (tmp_path / collision[source][0][1]).read_bytes() == hull.read_bytes()
+
+
+@pytest.mark.parametrize("missing", ["source", "hulls", "file"])
+def test_supplied_candidate_hulls_must_be_complete(tmp_path, missing):
+    source = tmp_path / "part.obj"
+    parts = {source: [ConvexPart(source, "P750", (tmp_path / "missing.obj",))]}
+    if missing == "source":
+        parts = {}
+    elif missing == "hulls":
+        parts = {source: [ConvexPart(source, "P750", ())]}
+
+    with pytest.raises(ValueError, match="[Ss]upplied"):
+        _convert_meshes(
+            [LinkSpec("body", [("P750", source, None)])], tmp_path / "meshes",
+            tmp_path / "scene.yaml", include_collision_obj=True, collision_mode="convex",
+            decomposed_parts=parts,
+        )
 
 
 def test_compiles_portable_sdf_with_cad_relative_joint_limits(tmp_path: Path) -> None:

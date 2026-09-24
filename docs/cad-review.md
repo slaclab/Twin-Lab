@@ -344,8 +344,9 @@ Clearance numbers inherit the tessellation deflection (2 mm) and the convex
 decomposition error, so treat small positive clearances as "needs a closer look"
 rather than as a measurement.
 
-`Verify against CAD` in the collision viewer removes the second of those two
-terms from every pair inside the warning band. It prefers an exact triangle-to-triangle
+`Collision accuracy check` in the collision viewer is off by default. Enable it to
+refine reported candidates inside the warning band (up to 12 part pairs per check
+in the shared mesh verifier). It prefers an exact triangle-to-triangle
 distance between the two parts' own tessellations, taken over the triangles within 20 mm
 of the witness points Drake reported and capped at 400 triangles a side; where the
 tessellation cannot be loaded it falls back to subtracting the audited proudness of the

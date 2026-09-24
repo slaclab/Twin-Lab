@@ -15,7 +15,7 @@ from typing import Any
 
 import yaml
 
-from .convex_collision import PartSettings, decompose_sources, part_settings_from_config
+from .convex_collision import ConvexPart, PartSettings, decompose_sources, part_settings_from_config
 from .paths import CACHE_ROOT, EXPORT_ROOT, resolve_repo_path, review_artifact_stem
 
 COLLISION_MODES = ("hull", "convex")
@@ -345,6 +345,7 @@ def _convert_meshes(
     collision_mode: str = "hull",
     decomposition_workers: int | None = None,
     decomposition_settings: PartSettings | None = None,
+    decomposed_parts: dict[Path, list[ConvexPart]] | None = None,
 ) -> tuple[dict[Path, str], dict[Path, str], dict[Path, list[tuple[str, str]]]]:
     sources = {source for link in links for _, source, _ in link.meshes}
     visual_result: dict[Path, str] = {}
@@ -352,7 +353,19 @@ def _convert_meshes(
     collision_result: dict[Path, list[tuple[str, str]]] = {}
     used_names: set[str] = set()
     decomposed = {}
-    if include_collision_obj and collision_mode == "convex":
+    if decomposed_parts is not None:
+        if not include_collision_obj or collision_mode != "convex":
+            raise ValueError("Supplied decompositions require convex collision output")
+        if set(decomposed_parts) != sources:
+            raise ValueError("Supplied decompositions must match all assembly sources")
+        for source, parts in decomposed_parts.items():
+            if not parts or any(
+                part.source != source or not part.hulls
+                or not all(hull.is_file() for hull in part.hulls) for part in parts
+            ):
+                raise ValueError(f"Missing or mismatched supplied hulls for {source}")
+        decomposed = decomposed_parts
+    elif include_collision_obj and collision_mode == "convex":
         decomposed = decompose_sources(
             sources,
             CACHE_ROOT / "convex-collision" / scene_file.parent.name,

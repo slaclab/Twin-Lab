@@ -10,6 +10,8 @@ from __future__ import annotations
 import csv
 import math
 import time
+from concurrent.futures import ThreadPoolExecutor
+from copy import copy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -28,10 +30,8 @@ AUTO_PERIOD_LABEL = "Auto motion period (s)"
 COLLISION_LABEL = "Collision detection"
 ANIMATION_LABEL = "Animation"
 ISOLATE_LABEL = "Isolate worst pair"
-# A hull encloses its part, so the CAD re-check can only ever open a reported gap. That is
-# what makes it safe to fold into the live reading rather than leave it as a review step.
 # No apostrophes; Drake evals control names.
-VERIFY_LABEL = "Verify against CAD"
+VERIFY_LABEL = "Collision accuracy check"
 ISOMETRIC_LABEL = "Isometric view"
 BEAM_LABEL = "X-ray beam path"
 # Four states, because "stopped" is not the same as "blocked": a ray ending on the crystal
@@ -81,11 +81,6 @@ OFFENDER_LIMIT = 12
 # engaged and every frame paid for it. Held well under the achievable rate so the render
 # keeps a budget of its own.
 DETECTOR_HZ = 10.0
-# A fixed ceiling cannot keep the query out of the render's way on its own, because the
-# query grows with the assembly: the same pass now measures ~75 ms over 5382 geometries,
-# which at 10 Hz would eat three quarters of every second and leave the motion at half
-# frame rate. Each pass must instead be followed by this multiple of its own measured cost
-# before the next one, which holds it to 1/(1+DETECT_DUTY) of the loop whatever it costs.
 DETECT_DUTY = 3.0
 # Republishing the offender buttons is by far the most expensive thing this viewer sends:
 # Drake destroys and recreates a dat.GUI row per label, and the panel hooks reflow on each
@@ -154,6 +149,53 @@ def read_joint_metadata(package_dir: Path) -> list[SliderJoint]:
         ]
 
 
+class _CollisionWorker:
+    """One in-flight query on a private Drake context, never a queue of old poses."""
+
+    def __init__(self, model):
+        self._model = copy(model)
+        self._model.context = model.context.Clone()
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="collision")
+        self._future = None
+        self._key = None
+
+    @property
+    def busy(self):
+        return self._future is not None
+
+    def submit(self, key, positions, *, warn_m, verify=False, with_mesh=False):
+        if self.busy:
+            raise RuntimeError("A collision query is already running")
+        self._key = key
+        self._future = self._executor.submit(
+            self._check, dict(positions), warn_m, verify, with_mesh
+        )
+
+    def _check(self, positions, warn_m, verify, with_mesh):
+        started = time.monotonic()
+        self._model.set_positions(positions)
+        report = self._model.report(warn_m=warn_m)
+        refinements = ()
+        if verify:
+            report, refinements = self._model.verify(
+                report, limit=OFFENDER_LIMIT, with_mesh=with_mesh
+            )
+        return report, refinements, time.monotonic() - started
+
+    def poll(self, key):
+        if self._future is None or not self._future.done():
+            return None
+        future, self._future = self._future, None
+        result = future.result()
+        return result if self._key == key else None
+
+    def invalidate(self):
+        self._key = None
+
+    def close(self):
+        self._executor.shutdown(wait=True, cancel_futures=True)
+
+
 def run_collision_viewer(
     package_dir: str | Path,
     *,
@@ -216,8 +258,8 @@ def run_collision_viewer(
     # toggle in behind ANIMATION_LABEL.
     meshcat.AddSlider(COLLISION_LABEL, 0.0, 1.0, 1.0, 1.0)
     meshcat.AddSlider(ISOLATE_LABEL, 0.0, 1.0, 1.0, 0.0)
-    if model.refiner is not None:
-        meshcat.AddSlider(VERIFY_LABEL, 0.0, 1.0, 1.0, 1.0)
+    if model.supports_verification:
+        meshcat.AddSlider(VERIFY_LABEL, 0.0, 1.0, 1.0, 0.0)
     meshcat.AddSlider(WARN_LABEL, 0.0, 50.0, 0.5, warn_mm)
     beam_specs = _resolve_beams(model, beam_inventory, beam_cache_dir, beam_manifest)
     if beam_specs:
@@ -230,6 +272,7 @@ def run_collision_viewer(
     meshcat.AddButton("Log clearance report")
     meshcat.AddButton("Stop viewer", "Escape")
     highlighter = _Highlighter(meshcat, model)
+    checker = _CollisionWorker(model)
     beam_drawer = _BeamDrawer(meshcat) if beam_specs else None
 
     print(f"{len(joints)} joints")
@@ -253,10 +296,10 @@ def run_collision_viewer(
             "The beam is a line-of-sight check on the collision hulls, which enclose the "
             "parts, so it stops early rather than late - it cannot miss an obstruction."
         )
-    if model.refiner is not None:
+    if model.supports_verification:
         print(
-            f"'{VERIFY_LABEL}' re-checks every reported pair against the CAD behind the hulls "
-            "and reports the corrected distance; it can only open a gap, never close one."
+            f"'{VERIFY_LABEL}' is off by default. Enable it to refine hull candidates "
+            "against CAD; these checks can take longer."
         )
     print_view_help()
     print("Press Escape in Meshcat or Ctrl-C here to stop.")
@@ -277,8 +320,9 @@ def run_collision_viewer(
     previous_status: str | None = None
     readout: list[str] = []
     previous_summary = ""
-    last_detect = 0.0
     next_detect = 0.0
+    check_seconds = None
+    log_requested = False
     last_readout = 0.0
     last_slider_push = 0.0
     settled_at = 0.0
@@ -337,6 +381,7 @@ def run_collision_viewer(
                 # them the pose that is actually on screen before they become the input.
                 _push_sliders(meshcat, joints, values)
             if not wanted_collision:
+                checker.invalidate()
                 _reset_status(meshcat)
                 highlighter.clear()
                 readout = _clear_readout(meshcat, readout)
@@ -370,10 +415,13 @@ def run_collision_viewer(
             values = [meshcat.GetSliderValue(joint.label) for joint in joints]
 
         warn_m = max(meshcat.GetSliderValue(WARN_LABEL), 0.0) / 1000.0
-        verify_on = model.refiner is not None and meshcat.GetSliderValue(VERIFY_LABEL) >= 0.5
+        verify_on = model.supports_verification and meshcat.GetSliderValue(VERIFY_LABEL) >= 0.5
         new_log = meshcat.GetButtonClicks("Log clearance report")
         asked = new_log != log_clicks
+        log_clicks = new_log
+        log_requested = collision_on and (log_requested or asked)
         pose = (values, warn_m, verify_on)
+        request_key = (tuple(values), warn_m, verify_on)
         moved = pose != previous_pose
         if moved:
             previous_pose = pose
@@ -388,23 +436,15 @@ def run_collision_viewer(
                 }
             )
             scene.diagram.ForcedPublish(model.context)
+            if collision_on:
+                highlighter.clear()
+                highlighter.isolate(False)
+                pending_report = None
+                readout = _set_readout(meshcat, ["Checking current pose..."], readout)
         mesh_due = mesh_pending and not animating and tick >= settled_at
-        # The render above runs every frame; the query is throttled so its cost stutters the
-        # detector rather than the motion. Dragging a slider by hand moves the pose every
-        # frame just as the animation does, so the throttle has to cover both; the pending
-        # flag carries the last pose forward so the reading still catches up once it stops.
-        detect_due = asked or mesh_due or (detect_pending and tick >= next_detect)
-        if collision_on and detect_due:
-            detect_pending = False
-            last_detect = tick
-            report = model.report(warn_m=warn_m)
-            refinements = ()
-            if verify_on:
-                with_mesh = mesh_due or asked
-                mesh_pending = not with_mesh
-                report, refinements = model.verify(
-                    report, limit=OFFENDER_LIMIT, with_mesh=with_mesh
-                )
+        result = checker.poll(request_key if collision_on else None)
+        if collision_on and result is not None:
+            report, refinements, check_seconds = result
             if report.status != previous_status:
                 previous_status = report.status
                 _set_status(meshcat, report.status)
@@ -412,17 +452,31 @@ def run_collision_viewer(
             highlighter.isolate(selected is not None)
             highlighter.update(report, selected)
             pending_report = report
-            if new_log != log_clicks:
-                log_clicks = new_log
+            last_readout = 0.0
+            if log_requested:
+                log_requested = False
                 _print_report(report)
                 _print_refinements(refinements)
+                print(f"Collision check: {check_seconds:.3f} s")
             elif report.summary() != previous_summary:
                 previous_summary = report.summary()
                 print(report.summary())
-            detect_cost = time.monotonic() - last_detect
-            next_detect = time.monotonic() + max(detector_period, DETECT_DUTY * detect_cost)
-        elif not collision_on:
-            log_clicks = new_log
+        detect_due = log_requested or mesh_due or (detect_pending and tick >= next_detect)
+        if collision_on and detect_due and not checker.busy:
+            detect_pending = False
+            with_mesh = mesh_due or log_requested
+            mesh_pending = verify_on and not with_mesh
+            checker.submit(
+                request_key,
+                {joint.joint_name: joint.to_sdf(value)
+                 for joint, value in zip(joints, values, strict=True)},
+                warn_m=warn_m,
+                verify=verify_on,
+                with_mesh=with_mesh,
+            )
+            next_detect = tick + detector_period
+            pending_report = None
+            readout = _set_readout(meshcat, ["Checking current pose..."], readout)
         # Same duty-cycle bargain as the detector: the trace is charged against its own
         # measured cost, so it takes a fixed share of the loop however long it runs.
         if beam_on and beam_drawer is not None and beam_pending and tick >= next_beam:
@@ -443,7 +497,9 @@ def run_collision_viewer(
         # showing the readout of the pose before it.
         if pending_report is not None and (asked or tick - last_readout >= readout_period):
             last_readout = tick
-            readout = _set_offender_readout(meshcat, pending_report, readout, show_all=show_all)
+            readout = _set_offender_readout(
+                meshcat, pending_report, readout, show_all=show_all, check_seconds=check_seconds
+            )
             pending_report = None
         # Backpressure. Meshcat buffers without limit, so a loop that publishes faster than
         # the browser can draw builds a queue that never drains - and a stop request cannot
@@ -459,6 +515,7 @@ def run_collision_viewer(
     # Releasing thousands of collision geometries takes seconds and says nothing while it
     # runs, which reads as the stop request having been missed.
     print("Stopping; releasing the collision geometry takes a few seconds.")
+    checker.close()
 
 def _push_sliders(meshcat, joints: list[SliderJoint], values: list[float]) -> None:
     for joint, value in zip(joints, values, strict=True):
@@ -686,10 +743,18 @@ def _offender_labels(report, limit: int) -> list[str]:
     return labels
 
 
-def _set_offender_readout(meshcat, report, previous: list[str], *, show_all: bool) -> list[str]:
+def _set_offender_readout(
+    meshcat, report, previous: list[str], *, show_all: bool, check_seconds: float | None = None
+) -> list[str]:
     """Republish the offending part IDs as buttons, the only text Meshcat can show."""
 
     labels = _offender_labels(report, OFFENDER_LIMIT if show_all else 1)
+    if check_seconds is not None:
+        labels.append(f"Collision check: {check_seconds:.2f} s")
+    return _set_readout(meshcat, labels, previous)
+
+
+def _set_readout(meshcat, labels: list[str], previous: list[str]) -> list[str]:
     if labels == previous:
         return previous
     _clear_readout(meshcat, previous)

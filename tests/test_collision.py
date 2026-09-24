@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import math
 import os
+from concurrent.futures import Future
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -13,6 +15,7 @@ from twin_lab.clearance_refine import Refinement
 from twin_lab.collision import (
     Clearance,
     ClearanceReport,
+    CollisionModel,
     _pair_key,
     _short,
     part_of,
@@ -21,7 +24,10 @@ from twin_lab.collision import (
 from twin_lab.collision_viewer import (
     OFFENDER_LIMIT,
     SliderJoint,
+    _CollisionWorker,
     _offender_labels,
+    _set_offender_readout,
+    _set_readout,
     read_joint_metadata,
 )
 from twin_lab.convex_collision import (
@@ -120,8 +126,8 @@ def test_override_snippet_parses_back_into_the_same_settings():
     resolver = PartSettings(
         DecompositionSettings(),
         {
-            "P650": DecompositionSettings(threshold=0.01, max_hulls=64),
-            "P651": DecompositionSettings(threshold=0.01, max_hulls=64),
+            "P650": DecompositionSettings(threshold=0.01, max_hulls=64, preprocess_resolution=400),
+            "P651": DecompositionSettings(threshold=0.01, max_hulls=64, preprocess_resolution=400),
             "P900": DecompositionSettings(threshold=0.02, max_hulls=8),
         },
     )
@@ -141,6 +147,52 @@ def test_decomposition_settings_round_trip_through_the_cache_key():
     # The manifest must be JSON-serialisable so cache validation can compare it verbatim.
     assert json.loads(json.dumps(settings.as_dict())) == settings.as_dict()
     assert CACHE_SCHEMA.startswith("slac-convex-decomposition/")
+
+
+def test_preprocessing_resolution_is_inherited_and_changes_the_cache_key():
+    resolver = part_settings_from_config({
+        "preprocess_resolution": 200,
+        "overrides": [{"refs": ["P750"], "preprocess_resolution": 800}],
+    })
+
+    assert resolver.default.preprocess_resolution == 200
+    assert resolver.for_part("P750").preprocess_resolution == 800
+    assert resolver.for_part("P750").as_dict()["preprocess_resolution"] == 800
+    assert resolver.default.as_dict() != resolver.for_part("P750").as_dict()
+    assert "preprocess_resolution" not in DecompositionSettings().as_dict()
+
+
+def test_preprocessing_resolution_must_be_positive():
+    with pytest.raises(ValueError, match="preprocess_resolution"):
+        DecompositionSettings(preprocess_resolution=0)
+
+
+def test_decomposition_passes_preprocessing_resolution_to_coacd(monkeypatch, tmp_path):
+    import coacd
+
+    from twin_lab import convex_collision
+
+    source = tmp_path / "part.obj"
+    source.write_text("o P750\nv 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\nf 1 2 3\nf 1 3 4\n")
+    calls = []
+
+    def decompose(mesh, **settings):
+        calls.append(settings)
+        return []
+
+    monkeypatch.setattr(coacd, "run_coacd", decompose)
+    part_dir = tmp_path / "cache"
+    part_dir.mkdir()
+    settings = DecompositionSettings(preprocess_resolution=200)
+
+    convex_collision._decompose_part(source, part_dir, settings, 0)
+
+    assert calls == [{
+        "threshold": 0.05, "max_convex_hull": 32, "seed": 0,
+        "preprocess_resolution": 200,
+    }]
+    marker = json.loads((part_dir / "part0000.json").read_text())
+    assert marker["settings"]["preprocess_resolution"] == 200
 
 
 @pytest.mark.parametrize(
@@ -330,6 +382,134 @@ def test_empty_clearance_report_reads_as_clear():
     assert report.summary() == "clear: nothing within 5 mm"
 
 
+def test_collision_worker_discards_old_pose_results_and_keeps_only_one_query(monkeypatch):
+    from twin_lab import collision_viewer
+
+    context = SimpleNamespace(Clone=lambda: object())
+    model = SimpleNamespace(context=context)
+    submitted = []
+
+    class Executor:
+        def __init__(self, **kwargs):
+            pass
+
+        def submit(self, *args):
+            future = Future()
+            submitted.append((future, args))
+            return future
+
+        def shutdown(self, **kwargs):
+            pass
+
+    monkeypatch.setattr(collision_viewer, "ThreadPoolExecutor", Executor)
+    worker = _CollisionWorker(model)
+    assert worker._model.context is not model.context
+    positions = {"lift": 0.0}
+    worker.submit("old", positions, warn_m=0.0)
+    positions["lift"] = 0.1
+    assert submitted[0][1][1] == {"lift": 0.0}
+    assert worker.poll("new") is None
+    with pytest.raises(RuntimeError, match="already running"):
+        worker.submit("new", positions, warn_m=0.0)
+    submitted[0][0].set_result(("old report", (), 2.0))
+    assert worker.poll("new") is None
+    assert not worker.busy
+    worker.submit("new", positions, warn_m=0.0)
+    submitted[1][0].set_result(("current report", (), 0.1))
+    assert worker.poll("new") == ("current report", (), 0.1)
+    worker.submit("new", positions, warn_m=0.0)
+    worker.invalidate()
+    submitted[2][0].set_result(("disabled report", (), 0.2))
+    assert worker.poll("new") is None
+    worker.close()
+
+
+@pytest.mark.parametrize("refiner", [None, object()])
+def test_collision_model_exposes_verification_capability(refiner):
+    model = object.__new__(CollisionModel)
+    model.refiner = refiner
+
+    assert model.supports_verification == (refiner is not None)
+
+
+@pytest.mark.parametrize("supports_verification", [False, True])
+def test_collision_accuracy_toggle_is_available_when_supported_and_defaults_off(
+    monkeypatch, tmp_path, supports_verification
+):
+    import pydrake.geometry
+
+    from twin_lab import collision_viewer, meshcat_ui, scene
+
+    (tmp_path / "rig.sdf").touch()
+    sliders = {}
+    meshcat = SimpleNamespace(
+        AddSlider=lambda name, *settings: sliders.update({name: settings}),
+        AddButton=lambda *args: None,
+        GetButtonClicks=lambda name: 1,
+    )
+    model = SimpleNamespace(
+        supports_verification=supports_verification,
+        refiner=None,
+        reopened_joints=0,
+        context=SimpleNamespace(Clone=lambda: object()),
+    )
+    monkeypatch.setattr(pydrake.geometry, "Meshcat", lambda params: meshcat)
+    monkeypatch.setattr(meshcat_ui, "patch_meshcat_page", lambda: None)
+    monkeypatch.setattr(meshcat_ui, "announce_viewer", lambda *args: None)
+    monkeypatch.setattr(scene, "load_scene", lambda *args, **kwargs: None)
+    monkeypatch.setattr(collision_viewer, "CollisionModel", lambda *args: model)
+    monkeypatch.setattr(collision_viewer, "read_joint_metadata", lambda package: [])
+    monkeypatch.setattr(collision_viewer, "_Highlighter", lambda *args: None)
+    monkeypatch.setattr(collision_viewer, "_proximity_geometry_count", lambda model: 0)
+
+    collision_viewer.run_collision_viewer(tmp_path)
+
+    assert collision_viewer.VERIFY_LABEL == "Collision accuracy check"
+    if supports_verification:
+        assert sliders[collision_viewer.VERIFY_LABEL] == (0.0, 1.0, 1.0, 0.0)
+    else:
+        assert collision_viewer.VERIFY_LABEL not in sliders
+
+
+def test_collision_worker_only_refines_when_accuracy_is_enabled():
+    raw = ClearanceReport((Clearance("P001", "P002", -0.002),), warn_m=0.0)
+    checked = ClearanceReport((), warn_m=0.0)
+    calls = []
+
+    def verify(report, **options):
+        calls.append((report, options))
+        return checked, ()
+
+    model = SimpleNamespace(
+        context=SimpleNamespace(Clone=lambda: object()),
+        set_positions=lambda positions: None,
+        report=lambda **options: raw,
+        verify=verify,
+    )
+    worker = _CollisionWorker(model)
+    try:
+        for enabled in (False, True, False):
+            key = ((), 0.0, enabled)
+            worker.submit(key, {}, warn_m=0.0, verify=enabled, with_mesh=True)
+            worker._future.result(timeout=5)
+            report, _, _ = worker.poll(key)
+            assert report is (checked if enabled else raw)
+        assert calls == [(raw, {"limit": OFFENDER_LIMIT, "with_mesh": True})]
+    finally:
+        worker.close()
+
+
+def test_checking_readout_replaces_clear_and_reports_completed_duration():
+    labels = []
+    meshcat = SimpleNamespace(AddButton=labels.append, DeleteButton=labels.remove)
+    report = ClearanceReport(clearances=(), warn_m=0.0)
+    previous = _set_offender_readout(meshcat, report, [], show_all=True, check_seconds=0.25)
+    assert labels == ["clear: nothing within 0 mm", "Collision check: 0.25 s"]
+    pending = _set_readout(meshcat, ["Checking current pose..."], previous)
+    assert labels == ["Checking current pose..."]
+    assert _set_readout(meshcat, pending, pending) is pending
+
+
 def test_geometry_states_paint_contact_red_and_near_misses_yellow():
     shared = "a::l::a::a003_collision"
     report = ClearanceReport(
@@ -416,6 +596,41 @@ def test_the_environment_stays_checked_against_a_stages_first_moving_link(tmp_pa
     assert not live.CollisionFiltered(moving, ids["environment_wall_p002_collision"])
     # The stage's own rail is genuinely adjacent across the joint, so it stays filtered.
     assert live.CollisionFiltered(moving, ids["a010_fixed_0_p001_collision"])
+
+
+def test_background_collision_query_uses_private_context_with_reviewed_filters(tmp_path):
+    from pydrake.geometry import Role
+
+    from twin_lab.collision import CollisionModel
+    from twin_lab.scene import load_scene
+
+    path = tmp_path / "rig.sdf"
+    path.write_text(ANCHORED_ENVIRONMENT_SDF, encoding="utf-8")
+    model = CollisionModel(load_scene(path))
+    worker = _CollisionWorker(model)
+    try:
+        worker.submit("moved", {"stack_a010_motion": 0.25}, warn_m=1.0)
+        worker._future.result(timeout=10)
+        report, _, elapsed = worker.poll("moved")
+        assert report.clearances
+        assert elapsed >= 0.0
+        plant = model.scene.plant
+        assert plant.GetPositions(plant.GetMyContextFromRoot(model.context))[0] == 0.0
+        assert plant.GetPositions(plant.GetMyContextFromRoot(worker._model.context))[0] == 0.25
+        graph = model.scene.scene_graph
+        query = graph.get_query_output_port().Eval(
+            graph.GetMyContextFromRoot(worker._model.context)
+        )
+        inspector = query.inspector()
+        ids = {
+            inspector.GetName(geometry).rsplit("::", 1)[-1]: geometry
+            for geometry in inspector.GetAllGeometryIds(Role.kProximity)
+        }
+        moving = ids["a010_moving_1_p003_collision"]
+        assert not inspector.CollisionFiltered(moving, ids["environment_wall_p002_collision"])
+        assert inspector.CollisionFiltered(moving, ids["a010_fixed_0_p001_collision"])
+    finally:
+        worker.close()
 
 
 def test_read_ignored_pairs_is_order_independent(tmp_path):
