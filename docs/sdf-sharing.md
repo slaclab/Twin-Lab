@@ -55,7 +55,7 @@ Load the exported SDF directly:
 
 ```bash
 uv run slac-view \
-  exports/DSG-000040389.43841-stage-stack.sdf-package/*.sdf
+  exports/DSG-000040389.43841-stage-stack.sdf-package/dsg_000040389_43841_stage_stack.sdf
 ```
 
 The package has a welded assembly base and 22 scalar joint positions, 16 prismatic
