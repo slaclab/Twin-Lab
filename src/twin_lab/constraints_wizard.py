@@ -255,12 +255,15 @@ def _resolve_occurrence_match(
     aliases: dict[str, dict[str, str]],
 ) -> dict[str, Any] | None:
     old_id = str(item["id"])
-    if old_id in new_by_id:
-        return new_by_id[old_id]
-
     occurrence_aliases = aliases["occurrence_id_aliases"]
+    # A reviewed alias must win over the identity fast path: SolidEdge occurrence ids
+    # are not stable identity, only usually-stable identity, and can coincidentally
+    # collide with a different physical instance across a resave (see A190/A191).
     if old_id in occurrence_aliases and occurrence_aliases[old_id] in new_by_id:
         return new_by_id[occurrence_aliases[old_id]]
+
+    if old_id in new_by_id:
+        return new_by_id[old_id]
 
     parent_id = item["parent_id"]
     mapped_parent_id = mapped_ids.get(str(parent_id)) if parent_id is not None else None

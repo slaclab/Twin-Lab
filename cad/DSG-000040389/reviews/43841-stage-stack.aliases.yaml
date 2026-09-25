@@ -28,11 +28,19 @@ occurrence_id_aliases:
   root[1]/DSG-000040389/6:DSG-000043842_oa_4/2:DSG-000043841_oa_11/20:DSG-000046526/6:LIB-000014334: root[1]/DSG-000040389/6:DSG-000043842_oa_4/2:DSG-000043841_oa_11/20:DSG-000046526/5:REF-000221283
   root[1]/DSG-000040389/6:DSG-000043842_oa_4/2:DSG-000043841_oa_11/26:DSG-000046529/1:LIB-000014334: root[1]/DSG-000040389/6:DSG-000043842_oa_4/2:DSG-000043841_oa_11/26:DSG-000046529/2:REF-000221283
   root[1]/DSG-000040389/6:DSG-000043842_oa_4/2:DSG-000043841_oa_11/26:DSG-000046529/4:LIB-000009109: root[1]/DSG-000040389/6:DSG-000043842_oa_4/2:DSG-000043841_oa_11/26:DSG-000046529/4:LIB-000032455
+  # 2026-09-24 refresh: the two root "Camera assembly" duplicates kept their identical
+  # base name but swapped occurrence indices; verified by transform_to_parent match
+  # (old A190 pose == new id 6, old A191 pose == new id 7), not by the coincidental
+  # id string collision the identity fast path would otherwise take.
+  root[1]/DSG-000040389/5:DSG-000042902: root[1]/DSG-000040389/6:DSG-000042902
+  root[1]/DSG-000040389/6:DSG-000042902: root[1]/DSG-000040389/7:DSG-000042902
+  # 2026-09-24 refresh: disambiguated among several identical beam-path posts by
+  # exact transform_to_parent match (all other candidates differ by >100 mm).
+  root[1]/DSG-000040389/7:DSG-000043842_oa_11/2:DSG-000043841_oa_16/1:DSG-000040990_oa_17/6:Thorlabs__PedestalPillarPost_1.00Diax6.00Lg_.25-20Taps__RS6P: root[1]/DSG-000040389/8:DSG-000043842_oa_11/2:DSG-000043841_oa_16/1:DSG-000040990_oa_17/5:Thorlabs__PedestalPillarPost_1.00Diax6.00Lg_.25-20Taps__RS6P
+  root[1]/DSG-000040389/7:DSG-000043842_oa_11/2:DSG-000043841_oa_16/1:DSG-000040990_oa_17/7:Thorlabs__PillarPostExtension_1.00Dx4.00L__RS4: root[1]/DSG-000040389/8:DSG-000043842_oa_11/2:DSG-000043841_oa_16/1:DSG-000040990_oa_17/6:Thorlabs__PillarPostExtension_1.00Dx4.00L__RS4
 
 name_aliases:
   VT-50L-C0014 (upload to teamcenter)_oa_15: LIB-000032416_oa_15
   LIB-000007911: LIB-000032445
   LIB-000011082: LIB-000032448
   LIB-000009109: LIB-000032455
-  # SolidEdge renumbered this subassembly occurrence on save; same part, new suffix.
-  DSG-000043842_oa_4: DSG-000043842_oa_11
