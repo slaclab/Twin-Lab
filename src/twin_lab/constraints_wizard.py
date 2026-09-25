@@ -282,6 +282,19 @@ def _resolve_occurrence_match(
     if len(named) == 1:
         return named[0]
 
+    # SolidEdge renumbers its internal "_oa_<n>" instance suffix on every resave,
+    # even for occurrences that are otherwise unchanged. Fall back to matching on
+    # the name with that suffix stripped, but only when it disambiguates to one
+    # candidate; sibling instances of the same part still need the alias map.
+    expected_base_names = {_strip_instance_suffix(name) for name in expected_names}
+    base_named = [
+        candidate
+        for candidate in candidates
+        if _strip_instance_suffix(str(candidate["name"])) in expected_base_names
+    ]
+    if len(base_named) == 1:
+        return base_named[0]
+
     transformed_id = _transform_occurrence_id(old_id, aliases["name_aliases"])
     terminal = transformed_id.rsplit("/", 1)[-1]
     id_like = [
@@ -322,6 +335,14 @@ def _transform_occurrence_name(name: str, name_aliases: dict[str, str]) -> str:
     if not separator:
         return name_aliases.get(name, name)
     return f"{prefix}:{name_aliases.get(suffix, suffix)}"
+
+
+_INSTANCE_SUFFIX_RE = re.compile(r"_oa_\d+$")
+
+
+def _strip_instance_suffix(name: str) -> str:
+    """Drop SolidEdge's volatile per-save "_oa_<n>" occurrence instance suffix."""
+    return _INSTANCE_SUFFIX_RE.sub("", name)
 
 
 def _rewrite_inventory_text(

@@ -34,3 +34,5 @@ name_aliases:
   LIB-000007911: LIB-000032445
   LIB-000011082: LIB-000032448
   LIB-000009109: LIB-000032455
+  # SolidEdge renumbered this subassembly occurrence on save; same part, new suffix.
+  DSG-000043842_oa_4: DSG-000043842_oa_11
