@@ -187,6 +187,40 @@ def test_static_review_tints_only_named_chamber_panels() -> None:
     assert (omitted, translucent, total) == (set(), {"P001"}, 2)
 
 
+def test_static_review_scopes_duplicate_parts_by_parent_and_pose() -> None:
+    manifest = {"occurrences": [
+        {"id": "root", "name": "root", "ref": "A001", "is_assembly": True},
+        {"id": "root/left", "name": "left", "ref": "A002", "is_assembly": True},
+        {"id": "root/right", "name": "right", "ref": "A003", "is_assembly": True},
+        *[
+            {
+                "id": f"root/left/{index}", "parent_id": "root/left", "name": "post",
+                "ref": f"P{index:03}", "is_assembly": False,
+                "transform_to_parent": [
+                    [1, 0, 0, distance], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]
+                ],
+            }
+            for index, distance in ((1, 10.0), (2, 40.0))
+        ],
+        {
+            "id": "root/right/post", "parent_id": "root/right", "name": "post",
+            "ref": "P003", "is_assembly": False,
+            "transform_to_parent": [[1, 0, 0, 10], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
+        },
+    ]}
+    recipe = {
+        "omitted_names": {},
+        "omitted_placed_components": [
+            {"parent": "left", "name": "post", "translation_mm": [10, 0, 0], "tolerance_mm": 2}
+        ],
+    }
+    omitted, _, _ = review_selection(manifest, recipe)
+    assert omitted == {"P001"}
+    manifest["occurrences"][3]["transform_to_parent"][0][3] = 20
+    with pytest.raises(ValueError, match="Expected one placed post under left, found 0"):
+        review_selection(manifest, recipe)
+
+
 def test_collision_only_cover_is_not_visible_but_still_collides() -> None:
     manifest = {"occurrences": [
         {"id": "root", "name": "root", "ref": "A001", "is_assembly": True},

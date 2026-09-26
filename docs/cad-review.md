@@ -127,6 +127,11 @@ still point to a different part, so never start CoACD from the old motion scene.
 The current beamline selection is in
 `cad/DSG-000040389/reviews/43841-static-review.yaml`. It remembers omitted,
 translucent, and collision-only parts by CAD name rather than volatile `P###` refs.
+For repeated part numbers, `omitted_under_assemblies` limits a name to a specific
+assembly, while `omitted_placed_components` also checks a parent-local pose; if
+that pose changes, the selector stops for review instead of hiding another copy.
+The north polycap's optic-side KMs and adapters are scoped this way so its
+stage-side mounts and the other polycap stacks stay selected.
 The clamped cover is collision-only: absent from the normal illustration, but its
 six parts remain in proximity queries and appear as translucent yellow/red hulls
 when within the warning band or contacting another part. The review is pinned to

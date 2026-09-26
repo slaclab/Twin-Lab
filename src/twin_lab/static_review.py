@@ -6,6 +6,7 @@ import argparse
 import copy
 import hashlib
 import json
+import math
 import re
 import subprocess
 from collections import Counter, defaultdict
@@ -116,6 +117,15 @@ def carry_review(
         carried[key] = [
             name for name in carried.get(key, []) if normalized_name(name) in present
         ]
+    carried["omitted_under_assemblies"] = {
+        parent: [name for name in child_names if normalized_name(name) in present]
+        for parent, child_names in carried.get("omitted_under_assemblies", {}).items()
+        if normalized_name(parent) in present
+    }
+    carried["omitted_placed_components"] = [
+        item for item in carried.get("omitted_placed_components", [])
+        if normalized_name(item["parent"]) in present and normalized_name(item["name"]) in present
+    ]
     review_selection(new_manifest, carried)
     added = current_names - previous_names
     return carried, sorted(name for name, count in added.items() for _ in range(count))
@@ -168,6 +178,12 @@ def review_selection(manifest: dict, recipe: dict) -> tuple[set[str], set[str], 
         )
         for name in recipe.get(key, [])
     }
+    scoped = recipe.get("omitted_under_assemblies", {})
+    for parent_name, child_names in scoped.items():
+        requested.add(normalized_name(parent_name))
+        requested.update(normalized_name(name) for name in child_names)
+    for spec in recipe.get("omitted_placed_components", []):
+        requested.update((normalized_name(spec["parent"]), normalized_name(spec["name"])))
     missing = requested - actual_names
     if missing:
         raise ValueError(f"Reviewed component names absent from STEP: {sorted(missing)}")
@@ -175,6 +191,42 @@ def review_selection(manifest: dict, recipe: dict) -> tuple[set[str], set[str], 
     omitted = _descendant_refs(
         manifest, {normalized_name(name) for name in recipe.get("omitted_assemblies", [])}
     ) | collision_only_refs(manifest, recipe)
+    for parent_name, child_names in scoped.items():
+        parent_ids = {
+            str(item["id"])
+            for item in occurrences
+            if item["is_assembly"]
+            and normalized_name(str(item["name"])) == normalized_name(parent_name)
+        }
+        scoped_names = {normalized_name(name) for name in child_names}
+        omitted.update(
+            str(item["ref"])
+            for item in leaves
+            if str(item["parent_id"]) in parent_ids
+            and normalized_name(str(item["name"])) in scoped_names
+        )
+    for spec in recipe.get("omitted_placed_components", []):
+        parents = {
+            str(item["id"])
+            for item in occurrences
+            if item["is_assembly"]
+            and normalized_name(str(item["name"])) == normalized_name(spec["parent"])
+        }
+        candidates = [
+            item for item in leaves
+            if str(item["parent_id"]) in parents
+            and normalized_name(str(item["name"])) == normalized_name(spec["name"])
+            and math.dist(
+                [float(item["transform_to_parent"][i][3]) for i in range(3)],
+                [float(value) for value in spec["translation_mm"]],
+            ) <= float(spec["tolerance_mm"])
+        ]
+        if len(candidates) != 1:
+            raise ValueError(
+                f"Expected one placed {spec['name']} under {spec['parent']}, "
+                f"found {len(candidates)}"
+            )
+        omitted.add(str(candidates[0]["ref"]))
     omitted.update(
         str(item["ref"])
         for item in leaves

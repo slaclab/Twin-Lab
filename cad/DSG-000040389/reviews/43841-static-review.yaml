@@ -13,12 +13,32 @@ omitted_assemblies:
 - DSG-000081358 # front pillar and attached mounting hardware
 - DSG-000023730 # outdated left-side motor stack
 - DSG-000042618 # second obsolete LJ-adjacent motor stack and mount
+- LCL5007-010087 # right-side LJ camera and local stage
+omitted_under_assemblies:
+  DSG-000110737:
+  - LIB-000027467 # optic-side KMs; stage-side mount is retained
+  - DSG-000111515 # optic-side square KM adapter
+  - DSG-000111522 # optic-side long KM adapter
+omitted_placed_components:
+- parent: DSG-000102548
+  name: ThorLabs__PostHolderUniv_.50Diax2.0L__UPH2
+  translation_mm: [-183.511, 152.934, -102.513]
+  tolerance_mm: 5
+- parent: DSG-000102548
+  name: L-000001884
+  translation_mm: [-184.467, 154.786, -4.986]
+  tolerance_mm: 5
+- parent: DSG-000102548
+  name: Thorlabs__PostHolderBase__BA2
+  translation_mm: [-194.079, 185.339, -17.287]
+  tolerance_mm: 5
 collision_only_assemblies:
 - DSG-000042408 # clamped-on cover: invisible normally, still checked for collision
 omitted_components:
 - 5091A15_NO THREADS_Low-Profile Hold-Down Toggle Clamp
 - Jergens__HoistRing_550lbs_.250-20__23404
 - REF-000423786 # unlabelled 8020 base rail fasteners
+- DSG-000110575 # remaining 8020 frame-mount slot hardware
 - 210-HD26-K40 # chamber side connector/feedthrough
 - REF-000220280X # chamber side connector/feedthrough
 - L-000001944 # three chamber-mounted port flanges
