@@ -43,7 +43,10 @@ def review_selection(manifest: dict, recipe: dict) -> tuple[set[str], set[str], 
     actual_names = {normalized_name(str(item["name"])) for item in occurrences}
     requested = {
         normalized_name(name)
-        for key in ("omitted_assemblies", "omitted_components", "translucent_assemblies")
+        for key in (
+            "omitted_assemblies", "omitted_components", "translucent_assemblies",
+            "translucent_components",
+        )
         for name in recipe.get(key, [])
     }
     missing = requested - actual_names
@@ -73,7 +76,14 @@ def review_selection(manifest: dict, recipe: dict) -> tuple[set[str], set[str], 
     )
     translucent = descendants(
         {normalized_name(name) for name in recipe.get("translucent_assemblies", [])}
-    ) - omitted
+    )
+    translucent.update(
+        str(item["ref"])
+        for item in leaves
+        if normalized_name(str(item["name"]))
+        in {normalized_name(name) for name in recipe.get("translucent_components", [])}
+    )
+    translucent -= omitted
     return omitted, translucent, len(leaves)
 
 

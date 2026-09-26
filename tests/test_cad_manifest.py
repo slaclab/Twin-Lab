@@ -167,6 +167,17 @@ def test_static_review_omits_unlabelled_studs_and_thumb_nuts() -> None:
     assert (omitted, translucent, total) == ({"P001", "P002"}, set(), 2)
 
 
+def test_static_review_tints_only_named_chamber_panels() -> None:
+    manifest = {"occurrences": [
+        {"id": "chamber/panel", "name": "chamber wall", "ref": "P001", "is_assembly": False},
+        {"id": "chamber/optic", "name": "optic", "ref": "P002", "is_assembly": False},
+    ]}
+    omitted, translucent, total = review_selection(
+        manifest, {"omitted_names": {}, "translucent_components": ["chamber wall"]}
+    )
+    assert (omitted, translucent, total) == (set(), {"P001"}, 2)
+
+
 def test_prepares_provisional_real_cad_motion_groups() -> None:
     setup = prepare_motion_setup(
         "cad/DSG-000046520/reviews/polycap-stack.kinematics.yaml",

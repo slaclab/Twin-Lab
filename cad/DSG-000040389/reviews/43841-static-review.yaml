@@ -7,11 +7,34 @@ omitted_assemblies:
 - mo39152640 # both LJ detector configurations
 - DSG-000043457 # enclosure frame
 - DSG-000042408 # three-layer front cover on enclosure opening
+- DSG-000112246 # laser above the enclosure
+- DSG-000042534 # helium valve and its attached fittings
+- DSG-000081358 # front pillar and attached mounting hardware
+- DSG-000044829 # overlapping LJ chamber cover/configuration
 omitted_components:
 - 5091A15_NO THREADS_Low-Profile Hold-Down Toggle Clamp
 - Jergens__HoistRing_550lbs_.250-20__23404
+- REF-000423786 # unlabelled 8020 base rail fasteners
+- 210-HD26-K40 # chamber side connector/feedthrough
+- REF-000220280X # chamber side connector/feedthrough
+- L-000001944 # three chamber-mounted port flanges
+- 4406T779_NO THREADS_Stainless Steel High-Pressure Barbed Tube Fitting # helium fittings
+- MDC__BulkHeadClamp_NW16__716000 # electronics feedthrough flanges
+- MDC__CtrgRng_NW16_Al_Viton__710013 # electronics feedthrough rings
+- REF-00021979922 # electronics feedthrough bodies
+- DSG-000099332 # large-detector frame beside LJ chamber
+- DSG-000005121 # frame-mount bracket
 translucent_assemblies:
 - DSG-000043161 # enclosure box, without its omitted front cover
+translucent_components:
+- LCL5005-009564 # LJ chamber wall
+- LCL5005-009567 # LJ chamber wall
+- LCL5005-009565 # LJ chamber floor
+- LCL5010-010063 # LJ chamber shell
+- DSG-000053596 # LJ chamber shell
+- LCL5005-009569 # LJ chamber plate
+- DSG-000001328 # LJ chamber base panel
+- DSG-000052395 # LJ chamber wall
 omitted_names:
   0-80x.12 set scr, cup pt:
   - Fasteners and small retention hardware
