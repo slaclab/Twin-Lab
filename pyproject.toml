@@ -60,6 +60,7 @@ slac-accuracy = "twin_lab.accuracy:main"
 slac-inflate-hulls = "twin_lab.hull_inflation:main"
 slac-view = "twin_lab.scene:main"
 slac-refresh-43841 = "twin_lab.update_43841_step:main"
+slac-static-review = "twin_lab.static_review:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

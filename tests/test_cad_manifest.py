@@ -20,6 +20,7 @@ from twin_lab.constraints_wizard import (  # noqa: E402
     write_kinematics_template,
     write_step_preview,
 )
+from twin_lab.static_review import normalized_name, review_selection, select_leaves
 
 
 def test_cad_project_defaults_keep_generated_files_out_of_source_directories() -> None:
@@ -104,6 +105,66 @@ def test_writes_browser_preview(tmp_path: Path) -> None:
     assert output.exists()
     assert output.with_suffix(".bin").exists()
     assert output.stat().st_size > 0
+
+
+def test_writes_preview_without_omitted_leaves(tmp_path: Path) -> None:
+    output = write_step_preview(
+        "cad/DSG-000046520/source.stp", tmp_path / "selected.gltf", omit_refs={"P001"}
+    )
+    assert output.exists()
+    assert output.with_suffix(".bin").stat().st_size > 0
+    with pytest.raises(ValueError, match="Unknown omitted"):
+        write_step_preview(
+            "cad/DSG-000046520/source.stp", tmp_path / "bad.gltf", omit_refs={"P999"}
+        )
+
+
+def test_static_review_omits_named_parts(tmp_path: Path) -> None:
+    manifest = extract_cad_manifest("cad/DSG-000046520/source.stp")
+    omitted, total = select_leaves(manifest, {normalized_name("REF-000221282"): ["old omit"]})
+    assert total == 10
+    assert omitted == {"P001"}
+    output = write_step_preview(
+        "cad/DSG-000046520/source.stp", tmp_path / "selected.gltf", omit_refs=omitted
+    )
+    assert output.with_suffix(".bin").stat().st_size > 0
+
+
+def test_static_review_filters_assembly_descendants_and_separates_enclosure() -> None:
+    manifest = {
+        "occurrences": [
+            {"id": "root", "name": "root", "ref": "A001", "is_assembly": True},
+            {"id": "root/box", "name": "enclosure", "ref": "A002", "is_assembly": True},
+            {"id": "root/box/shell", "name": "shell", "ref": "P001", "is_assembly": False},
+            {"id": "root/box/cover", "name": "front cover", "ref": "P002", "is_assembly": False},
+            {"id": "root/camera", "name": "camera", "ref": "A003", "is_assembly": True},
+            {"id": "root/camera/lens", "name": "lens", "ref": "P003", "is_assembly": False},
+            {"id": "root/bolt", "name": "M4 bolt", "ref": "P004", "is_assembly": False},
+            {"id": "root/target", "name": "target", "ref": "P005", "is_assembly": False},
+        ]
+    }
+    omitted, translucent, total = review_selection(manifest, {
+        "omitted_names": {}, "omit_fasteners": True, "omitted_assemblies": ["camera"],
+        "omitted_components": ["front cover"], "translucent_assemblies": ["enclosure"],
+    })
+    assert (omitted, translucent, total) == ({"P002", "P003", "P004"}, {"P001"}, 5)
+
+
+def test_static_review_omits_unlabelled_studs_and_thumb_nuts() -> None:
+    names = [
+        "PEM__SelfClinchingStud_FlushHd_.250-20x.50L_SST__FHS-0420-8",
+        "McMasterCarr__NutThumbBrassFlangedKnurledHd4-40__92741A100",
+    ]
+    manifest = {
+        "occurrences": [
+            {"id": f"root/{index}", "name": name, "ref": f"P{index:03}", "is_assembly": False}
+            for index, name in enumerate(names, 1)
+        ]
+    }
+    omitted, translucent, total = review_selection(
+        manifest, {"omitted_names": {}, "omit_fasteners": True}
+    )
+    assert (omitted, translucent, total) == ({"P001", "P002"}, set(), 2)
 
 
 def test_prepares_provisional_real_cad_motion_groups() -> None:

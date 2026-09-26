@@ -8,11 +8,13 @@ facts separate from the small, human-reviewed kinematics overlay.
 from __future__ import annotations
 
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any
 
 import yaml
+from OCP.BRep import BRep_Builder
 from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
 from OCP.BRepMesh import BRepMesh_IncrementalMesh
 from OCP.Message import Message_ProgressRange
@@ -24,6 +26,7 @@ from OCP.TDataStd import TDataStd_Name
 from OCP.TDF import TDF_Label, TDF_LabelSequence
 from OCP.TDocStd import TDocStd_Document
 from OCP.TopLoc import TopLoc_Location
+from OCP.TopoDS import TopoDS_Compound
 from OCP.XCAFDoc import XCAFDoc_DocumentTool, XCAFDoc_ShapeTool
 
 from .paths import CACHE_ROOT, REPOSITORY_ROOT, resolve_repo_path
@@ -420,8 +423,10 @@ def write_step_preview(
     output_path: str | Path | None = None,
     *,
     linear_deflection_mm: float = 0.5,
+    angular_deflection_rad: float = 0.5,
     focus_ref: str | None = None,
     focus_refs: list[str] | None = None,
+    omit_refs: set[str] | None = None,
 ) -> Path:
     """Tessellate a STEP assembly to glTF for lightweight visual inspection."""
 
@@ -429,14 +434,39 @@ def write_step_preview(
     document, _, roots = _read_step_document(step)
     if focus_ref is not None and focus_refs is not None:
         raise ValueError("Use either focus_ref or focus_refs, not both")
+    if omit_refs is not None and (focus_ref is not None or focus_refs is not None):
+        raise ValueError("Use either focus refs or omit refs, not both")
     selected_refs = focus_refs if focus_refs is not None else ([focus_ref] if focus_ref else [])
-    if selected_refs:
+    if selected_refs or omit_refs is not None:
         focused_document = TDocStd_Document(TCollection_ExtendedString("slac-focused-preview"))
         focused_shape_tool = XCAFDoc_DocumentTool.ShapeTool_s(focused_document.Main())
+        if omit_refs is not None:
+            from .cad_geometry import leaf_occurrences
+
+            leaves = leaf_occurrences(roots)
+            unknown = omit_refs - leaves.keys()
+            if unknown:
+                raise ValueError(f"Unknown omitted STEP refs: {sorted(unknown)}")
+            selected_refs = [ref for ref in leaves if ref not in omit_refs]
+            if not selected_refs:
+                raise ValueError("No STEP leaves remain after omissions")
+            compound = TopoDS_Compound()
+            builder = BRep_Builder()
+            builder.MakeCompound(compound)
         for selected_ref in selected_refs:
-            shape, location = _occurrence_shape_by_ref(roots, selected_ref)
+            if omit_refs is not None:
+                leaf = leaves[selected_ref]
+                shape = XCAFDoc_ShapeTool.GetShape_s(leaf.label)
+                location = leaf.global_location
+            else:
+                shape, location = _occurrence_shape_by_ref(roots, selected_ref)
             placed = BRepBuilderAPI_Transform(shape, location.Transformation(), True).Shape()
-            focused_shape_tool.AddShape(placed, True, True)
+            if omit_refs is not None:
+                builder.Add(compound, placed)
+            else:
+                focused_shape_tool.AddShape(placed, True, True)
+        if omit_refs is not None:
+            focused_shape_tool.AddShape(compound, False, False)
         document = focused_document
         roots = TDF_LabelSequence()
         focused_shape_tool.GetFreeShapes(roots)
@@ -447,7 +477,7 @@ def write_step_preview(
             shape,
             linear_deflection_mm,
             False,
-            0.5,
+            angular_deflection_rad,
             True,
         ).Perform()
 
@@ -460,6 +490,7 @@ def write_step_preview(
     )
     writer = RWGltf_CafWriter(TCollection_AsciiString(str(output)), False)
     writer.SetParallel(True)
+    writer.SetMergeFaces(True)
     succeeded = writer.Perform(
         document,
         TColStd_IndexedDataMapOfStringString(),
@@ -565,10 +596,13 @@ def status_lines(status: dict[str, Any]) -> list[str]:
     return lines
 
 
-def view_step_preview(preview_path: str | Path) -> None:
+def view_step_preview(
+    preview_path: str | Path, *, enclosure_path: str | Path | None = None
+) -> None:
     """Display the STEP-derived glTF in Meshcat until Enter is pressed."""
 
     from pydrake.geometry import Mesh, Meshcat, MeshcatParams
+    from pydrake.math import RigidTransform, RotationMatrix
 
     from .meshcat_ui import patch_meshcat_page
 
@@ -576,11 +610,20 @@ def view_step_preview(preview_path: str | Path) -> None:
     patch_meshcat_page()
     # Nothing here publishes a realtime rate, so the stats plot only ever covers the view.
     meshcat = Meshcat(MeshcatParams(show_stats_plot=False))
-    # OCCT's glTF writer converts its millimetre working units to glTF metres.
-    meshcat.SetObject("/STEP assembly", Mesh(preview, 1.0))
-    # Start close enough for compact positioning hardware to be unmistakable.
+    # OCCT's glTF writer leaves STEP millimetres in the vertex buffers.
+    meshcat.SetObject("/STEP assembly", Mesh(preview, 0.001 if preview.suffix == ".gltf" else 1.0))
+    if enclosure_path is not None:
+        meshcat.SetObject("/Enclosure", Mesh(Path(enclosure_path).resolve(), 0.001))
+    meshcat.SetTransform(
+        "/STEP assembly", RigidTransform(RotationMatrix.MakeXRotation(-math.pi / 2))
+    )
+    if enclosure_path is not None:
+        meshcat.SetTransform(
+            "/Enclosure", RigidTransform(RotationMatrix.MakeXRotation(-math.pi / 2))
+        )
+    # Leave enough room to inspect the complete assembly on initial load.
     # pydrake's stub gives SetCameraPose a malformed Eigen shape; lists convert at runtime.
-    meshcat.SetCameraPose([0.4, 0.4, 0.4], [0.0, 0.0, 0.0])  # pyright: ignore[reportArgumentType]
+    meshcat.SetCameraPose([2.0, 2.0, 2.0], [0.0, 0.0, 0.35])  # pyright: ignore[reportArgumentType]
     print(f"STEP preview: {meshcat.web_url()}")
     input("Press Enter to close the preview... ")
 
