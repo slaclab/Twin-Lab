@@ -20,7 +20,16 @@ from twin_lab.constraints_wizard import (  # noqa: E402
     write_kinematics_template,
     write_step_preview,
 )
-from twin_lab.static_review import normalized_name, review_selection, select_leaves
+from twin_lab.static_review import (
+    carry_review,
+    collision_only_refs,
+    collision_refs,
+    normalized_name,
+    prepare_collision_meshes,
+    review_cache_name,
+    review_selection,
+    select_leaves,
+)
 
 
 def test_cad_project_defaults_keep_generated_files_out_of_source_directories() -> None:
@@ -176,6 +185,77 @@ def test_static_review_tints_only_named_chamber_panels() -> None:
         manifest, {"omitted_names": {}, "translucent_components": ["chamber wall"]}
     )
     assert (omitted, translucent, total) == (set(), {"P001"}, 2)
+
+
+def test_collision_only_cover_is_not_visible_but_still_collides() -> None:
+    manifest = {"occurrences": [
+        {"id": "root", "name": "root", "ref": "A001", "is_assembly": True},
+        {"id": "root/cover", "name": "cover", "ref": "A002", "is_assembly": True},
+        {"id": "root/cover/panel", "name": "panel", "ref": "P001", "is_assembly": False},
+        {"id": "root/optic", "name": "optic", "ref": "P002", "is_assembly": False},
+    ]}
+    recipe = {"omitted_names": {}, "collision_only_assemblies": ["cover"]}
+    omitted, _, _ = review_selection(manifest, recipe)
+    assert omitted == collision_only_refs(manifest, recipe) == {"P001"}
+    assert collision_refs(manifest, recipe) == {"P001", "P002"}
+
+
+def test_carry_review_preserves_hidden_cover_and_removes_disappeared_parts(tmp_path: Path) -> None:
+    step = tmp_path / "next.stp"
+    step.write_bytes(b"next revision")
+    old = {"occurrences": [
+        {"name": "root", "is_assembly": True},
+        {"name": "cover_oa_1", "is_assembly": True},
+        {"name": "removed", "is_assembly": False},
+    ]}
+    new = {"occurrences": [
+        {"id": "root", "ref": "A001", "name": "root", "is_assembly": True},
+        {"id": "root/cover", "ref": "A002", "name": "cover_oa_99", "is_assembly": True},
+        {"id": "root/cover/panel", "ref": "P010", "name": "panel", "is_assembly": False},
+        {"id": "root/new", "ref": "P011", "name": "new optic", "is_assembly": False},
+    ]}
+    recipe = {
+        "source_sha256": "old", "omitted_names": {"removed": ["obsolete"]},
+        "collision_only_assemblies": ["cover_oa_1"], "translucent_components": ["removed"],
+    }
+    carried, added = carry_review(old, new, recipe, step)
+    assert carried["omitted_names"] == {}
+    assert carried["translucent_components"] == []
+    assert collision_only_refs(new, carried) == {"P010"}
+    assert added == ["new optic", "panel"]
+
+
+def test_carry_review_reports_new_occurrences_of_known_names(tmp_path: Path) -> None:
+    step = tmp_path / "next.stp"
+    step.write_bytes(b"next revision")
+    old = {"occurrences": [{"name": "same", "is_assembly": False}]}
+    new = {"occurrences": [
+        {"ref": f"P{i:03}", "id": f"root/{i}", "name": "same", "is_assembly": False}
+        for i in (1, 2, 3)
+    ]}
+    carried, added = carry_review(old, new, {"omitted_names": {}}, step)
+    assert carried["omitted_names"] == {}
+    assert added == ["same", "same"]
+
+
+def test_new_assembly_review_uses_distinct_cache(tmp_path: Path) -> None:
+    assert review_cache_name(tmp_path / "other-assembly.yaml") != "43841-static-review"
+
+
+def test_collision_meshes_keep_hidden_cover_as_separate_source(tmp_path: Path) -> None:
+    from twin_lab.convex_collision import read_part_refs
+
+    step = Path("cad/DSG-000046520/source.stp")
+    manifest = extract_cad_manifest(step)
+    recipe = {
+        "source_sha256": "fixture",
+        "omitted_names": {},
+        "collision_only_assemblies": ["REF-000221283"],
+    }
+    sources = prepare_collision_meshes(step, manifest, recipe, output_dir=tmp_path)
+    assert [source.name for source in sources] == ["batch_000.obj", "collision_only_cover.obj"]
+    assert set(read_part_refs(sources[1])) == {"P001", "P002"}
+    assert "P001" not in read_part_refs(sources[0])
 
 
 def test_prepares_provisional_real_cad_motion_groups() -> None:

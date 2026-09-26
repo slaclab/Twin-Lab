@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -25,6 +26,7 @@ from .cad_geometry import leaf_occurrences, placed_shape, write_group_obj
 from .constraints_wizard import _occurrence_shape_by_ref, _read_step_document
 from .epics_playback import PlaybackSource
 from .paths import CACHE_ROOT, resolve_repo_path, review_artifact_stem
+from .static_review import collision_only_refs, normalized_name, review_selection
 
 AUTO_MOTION_LABEL = "Animation"
 AUTO_RANGE_LABEL = "Auto motion range (% of travel)"
@@ -109,6 +111,29 @@ def prepare_stage_cad(
     output_dir = CACHE_ROOT / "stage-cad" / review_artifact_stem(inventory_file)
     scene_path = output_dir / "scene.yaml"
     sources = [inventory_file, step_path, catalog_path, manifest_path]
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest_items = manifest["occurrences"]
+    by_ref = {item["ref"]: item for item in manifest_items}
+    reviewed_root = by_ref[inventory["subassembly"]["ref"]]
+    if normalized_name(str(reviewed_root["name"])) != normalized_name(
+        str(inventory["subassembly"]["name"])
+    ):
+        raise ValueError("Reviewed subassembly ref does not match the STEP manifest")
+    for instance in inventory["stage_instances"]:
+        if not str(by_ref[str(instance["ref"])]["name"]).startswith("LIB-"):
+            raise ValueError(f"Stage {instance['ref']} no longer identifies a library stage")
+    selected_omissions: set[str] = set()
+    collision_only: set[str] = set()
+    if "selection_review" in inventory:
+        review_path = resolve_repo_path(
+            inventory["selection_review"], relative_to=inventory_file.parent
+        )
+        sources.append(review_path)
+        review = yaml.safe_load(review_path.read_text(encoding="utf-8"))
+        if hashlib.sha256(step_path.read_bytes()).hexdigest() != review["source_sha256"]:
+            raise ValueError("Selection review does not match the inventory STEP revision")
+        selected_omissions, _, _ = review_selection(manifest, review)
+        collision_only = collision_only_refs(manifest, review)
     if not rebuild and scene_path.exists():
         cached_scene = yaml.safe_load(scene_path.read_text(encoding="utf-8"))
         cached_meshes = {Path(item["mesh"]) for item in cached_scene.get("instances", [])}
@@ -118,6 +143,9 @@ def prepare_stage_cad(
             cached_meshes.update(Path(item["mesh"]) for item in cached_scene["attachments"])
             cached_meshes.update(
                 Path(item["mesh"]) for item in cached_scene.get("static_geometry", [])
+            )
+            cached_meshes.update(
+                Path(item["mesh"]) for item in cached_scene.get("collision_only_geometry", [])
             )
             for stage_meshes in cached_scene.get("motion_stage_meshes", {}).values():
                 cached_meshes.update(Path(path) for path in stage_meshes.values())
@@ -161,12 +189,9 @@ def prepare_stage_cad(
         for _, shape, mesh_path in model_geometries:
             _write_shape_obj(shape, mesh_path, linear_deflection_mm)
 
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest_items = manifest["occurrences"]
-    by_ref = {item["ref"]: item for item in manifest_items}
     root_id = by_ref[inventory["subassembly"]["ref"]]["id"]
     stage_ids = [by_ref[str(item["ref"])]["id"] for item in inventory["stage_instances"]]
-    hidden_refs = {str(ref) for ref in inventory.get("hidden_occurrences", [])}
+    hidden_refs = {str(ref) for ref in inventory.get("hidden_occurrences", [])} | selected_omissions
     overrides = inventory.get("attachment_overrides", {})
     forced_fixed = {str(ref) for ref in overrides.get("fixed", [])}
     forced_parent = {
@@ -187,6 +212,20 @@ def prepare_stage_cad(
         and item["ref"] not in hidden_refs
     ]
     leaves = leaf_occurrences(roots)
+
+    collision_only_geometry = []
+    if collision_only:
+        mesh_path = output_dir / "collision_only_cover.obj"
+        if not _safe_write_group_obj(
+            [leaves[ref] for ref in sorted(collision_only)],
+            mesh_path,
+            linear_deflection_mm=linear_deflection_mm,
+        ):
+            raise ValueError("Collision-only cover contains no tessellated parts")
+        collision_only_geometry.append({
+            "name": "clamped_cover", "mesh": mesh_path.as_posix(),
+            "part_refs": sorted(collision_only),
+        })
 
     static_geometry = []
     used_static_refs: set[str] = set()
@@ -411,6 +450,7 @@ def prepare_stage_cad(
         "linear_deflection_mm": linear_deflection_mm,
         "instances": instances,
         "static_geometry": static_geometry,
+        "collision_only_geometry": collision_only_geometry,
         "attached_part_count": len(attached_refs),
         "attachments": attachments,
         "motion_stage_meshes": motion_stage_meshes,

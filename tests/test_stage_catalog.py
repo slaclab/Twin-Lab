@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
+import pytest
 
 from twin_lab.stage_cad_viewer import prepare_stage_cad
 
@@ -270,16 +271,9 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
     }
 
 
-def test_prepare_stage_cad_skips_empty_static_geometry() -> None:
-    scene_path = prepare_stage_cad(
-        "cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml",
-        rebuild=True,
-    )
-
-    assert scene_path.exists()
-    scene = yaml.safe_load(scene_path.read_text(encoding="utf-8"))
-    assert scene["schema"] == "slac-stage-cad-scene/v8"
-    assert any(item["source_ref"] == "P1355" for item in scene.get("static_geometry", [])) is False
+def test_prepare_stage_cad_rejects_stale_subassembly_identity() -> None:
+    with pytest.raises(ValueError, match="Reviewed subassembly ref does not match"):
+        prepare_stage_cad("cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml")
 
 
 def test_converts_stage_occurrence_transform_to_meters() -> None:

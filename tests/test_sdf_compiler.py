@@ -27,10 +27,12 @@ def test_compiles_portable_sdf_with_cad_relative_joint_limits(tmp_path: Path) ->
     moving = tmp_path / "moving.obj"
     attachment = tmp_path / "attachment.obj"
     environment = tmp_path / "environment.obj"
+    cover = tmp_path / "cover.obj"
     _write_triangle_obj(fixed)
     _write_triangle_obj(moving, 0.02)
     _write_triangle_obj(attachment, 0.04)
     _write_triangle_obj(environment, 0.06)
+    _write_triangle_obj(cover, 0.08)
 
     scene = {
         "schema": "slac-stage-cad-scene/v6",
@@ -45,6 +47,9 @@ def test_compiles_portable_sdf_with_cad_relative_joint_limits(tmp_path: Path) ->
                 "part_count": 1,
                 "rgba": [0.95, 0.78, 0.12, 0.28],
             }
+        ],
+        "collision_only_geometry": [
+            {"name": "clamped_cover", "mesh": str(cover), "part_refs": ["P2050"]}
         ],
         "motion_chains": [
             {
@@ -87,6 +92,13 @@ def test_compiles_portable_sdf_with_cad_relative_joint_limits(tmp_path: Path) ->
     assert any(
         "environment" in (visual.attrib.get("name") or "") for visual in root.findall(".//visual")
     )
+    assert not any("clamped_cover" in visual.attrib["name"] for visual in root.findall(".//visual"))
+    assert any(
+        "clamped_cover" in collision.attrib["name"]
+        for collision in root.findall(".//collision")
+    )
+    stamp = yaml.safe_load((sdf_path.parent / PACKAGE_MARKER_NAME).read_text(encoding="utf-8"))
+    assert stamp["collision_only_parts"] == ["P2050"]
     environment_visual = next(
         visual
         for visual in root.findall(".//visual")

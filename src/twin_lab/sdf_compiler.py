@@ -32,6 +32,7 @@ class LinkSpec:
 
     name: str
     meshes: list[tuple[str, Path, list[float] | None]] = field(default_factory=list)
+    collision_only_meshes: list[tuple[str, Path]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -179,6 +180,11 @@ def _build_tree(scene: dict[str, Any], scene_file: Path) -> tuple[list[LinkSpec]
             )
         )
 
+    for item in scene.get("collision_only_geometry", []):
+        base.collision_only_meshes.append(
+            (str(item["name"]), _resolve_path(item["mesh"], scene_file))
+        )
+
     instance_by_ref = {str(item["ref"]): item for item in scene["instances"]}
     last_link_by_stage: dict[str, LinkSpec] = {}
     for chain in scene["motion_chains"]:
@@ -289,6 +295,7 @@ def _package_build_key(
     """Every input that changes package content, recorded so a stale package is rebuilt."""
 
     sources = {source for link in links for _, source, _ in link.meshes}
+    sources.update(source for link in links for _, source in link.collision_only_meshes)
     inputs = [scene_file, *(source for source in sources if source.exists())]
     return {
         "schema": PACKAGE_STAMP_SCHEMA,
@@ -297,6 +304,11 @@ def _package_build_key(
         "collision_mode": collision_mode,
         "neutral_visuals": neutral_visuals,
         "decomposition": _read_decomposition_config(scene),
+        "collision_only_parts": sorted({
+            str(ref)
+            for item in scene.get("collision_only_geometry", [])
+            for ref in item.get("part_refs", [])
+        }),
         "source_mtime_ns": max(path.stat().st_mtime_ns for path in inputs),
     }
 
@@ -347,6 +359,7 @@ def _convert_meshes(
     decomposition_settings: PartSettings | None = None,
 ) -> tuple[dict[Path, str], dict[Path, str], dict[Path, list[tuple[str, str]]]]:
     sources = {source for link in links for _, source, _ in link.meshes}
+    sources.update(source for link in links for _, source in link.collision_only_meshes)
     visual_result: dict[Path, str] = {}
     stl_result: dict[Path, str] = {}
     collision_result: dict[Path, list[tuple[str, str]]] = {}
@@ -424,6 +437,16 @@ def _write_sdf(
                     {"name": f"{piece_name}_collision"},
                 )
                 _add_mesh_geometry(collision, uri, declare_convex=declare_convex)
+
+        if include_collisions:
+            for index, (label, source) in enumerate(link.collision_only_meshes, start=1):
+                geometry_name = _safe_name(f"{label}_{index}")
+                for suffix, uri in collision_mesh_uris[source]:
+                    piece_name = f"{geometry_name}_{suffix}" if suffix else geometry_name
+                    collision = ET.SubElement(
+                        link_element, "collision", {"name": f"{piece_name}_collision"}
+                    )
+                    _add_mesh_geometry(collision, uri, declare_convex=declare_convex)
 
     model.append(
         ET.Comment(

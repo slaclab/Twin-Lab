@@ -1,4 +1,6 @@
 schema: twin-lab-static-review/v1
+configuration: beamline
+# Camera leaf P643 (LIB-000000728) is selected but has no faces in this STEP.
 source_sha256: 948f9e9f88204dd7a830cc5660375761bfe9807de72a8d18f8ac879abc2e86c8
 baseline: 13e023b:cad/DSG-000095835/reviews/assembly.yaml
 omit_fasteners: true
@@ -6,11 +8,13 @@ omitted_assemblies:
 - DSG-000042902 # both camera assemblies
 - mo39152640 # both LJ detector configurations
 - DSG-000043457 # enclosure frame
-- DSG-000042408 # three-layer front cover on enclosure opening
 - DSG-000112246 # laser above the enclosure
 - DSG-000042534 # helium valve and its attached fittings
 - DSG-000081358 # front pillar and attached mounting hardware
-- DSG-000044829 # overlapping LJ chamber cover/configuration
+- DSG-000023730 # outdated left-side motor stack
+- DSG-000042618 # second obsolete LJ-adjacent motor stack and mount
+collision_only_assemblies:
+- DSG-000042408 # clamped-on cover: invisible normally, still checked for collision
 omitted_components:
 - 5091A15_NO THREADS_Low-Profile Hold-Down Toggle Clamp
 - Jergens__HoistRing_550lbs_.250-20__23404
@@ -24,6 +28,22 @@ omitted_components:
 - REF-00021979922 # electronics feedthrough bodies
 - DSG-000099332 # large-detector frame beside LJ chamber
 - DSG-000005121 # frame-mount bracket
+- DSG-000042821 # bulky LJ chamber front-cover body
+- DSG-000042972 # cover top plate
+- DSG-000042976 # surrounding front-cover frame
+- REF-000168820 # CAD beam path; beam obstruction uses the simulated beam
+- DSG-000048666 # four enclosure side-port flange plates
+- MDC__CenteringRing_NW100_AlumViton__810001 # four mating side-port rings
+- MDC__NW40CtrgRng__710012 # two rear-port rings
+- MDC__ClawClampSgl_NW63-100Flg__801000 # side-port mounting clamps
+- LIB-000032722 # crystal-stack alignment lasers
+- LIB-000032723 # crystal-stack laser optics
+- DSG-000111835 # crystal-stack laser mounts
+- LIB-000027025 # polycap-stack alignment irises
+- DSG-000111952 # iris supports
+- LIB-000032732 # iris mounting hardware
+- LIB-000032670 # iris mounting hardware
+- LIB-000018446 # iris retention hardware
 translucent_assemblies:
 - DSG-000043161 # enclosure box, without its omitted front cover
 translucent_components:
@@ -33,8 +53,11 @@ translucent_components:
 - LCL5010-010063 # LJ chamber shell
 - DSG-000053596 # LJ chamber shell
 - LCL5005-009569 # LJ chamber plate
-- DSG-000001328 # LJ chamber base panel
 - DSG-000052395 # LJ chamber wall
+- DSG-000042977 # LJ chamber front panel
+- DSG-000042978 # LJ chamber front panel
+- DSG-000042981 # LJ chamber front panel
+- DSG-000042982 # LJ chamber front panel
 omitted_names:
   0-80x.12 set scr, cup pt:
   - Fasteners and small retention hardware
@@ -92,8 +115,6 @@ omitted_names:
   helicoil__thrdinsert_8-32x.246l_nitronic60__1185-2en246:
   - Fasteners and small retention hardware
   lib-000000663:
-  - Empty geometry in source STEP
-  lib-000000728:
   - Empty geometry in source STEP
   lib-000005438:
   - Empty geometry in source STEP

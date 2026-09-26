@@ -113,11 +113,43 @@ python -m twin_lab.update_43841_step /path/to/new/DSG-000040389.stp --rebuild-vi
 
 This helper:
 
-1. Copies the STEP into `cad/DSG-000040389/source.stp` when needed.
-2. Backs up the previous manifest.
-3. Regenerates the manifest.
-4. Remaps the reviewed inventory with the checked-in alias file.
-5. Rebuilds the stage-viewer cache when requested.
+1. Generates a candidate manifest and remaps the inventory without changing tracked files.
+2. Rejects mismatched stage, static-part, attachment, or selection-review identities.
+3. Only after review passes, copies the STEP and installs the candidate manifest/inventory.
+4. Rebuilds the stage-viewer cache when requested.
+
+If the motion review fails, the helper leaves `manifest.json` and `inventory.yaml`
+under `.cache/twin_lab/43841-refresh-candidates/<STEP hash>/` for inspection.
+The checked-in STEP, inventory, and manifest stay unchanged; correct the reviewed
+identities before accepting the candidate. An unresolved `A###`/`P###` token can
+still point to a different part, so never start CoACD from the old motion scene.
+
+The current beamline selection is in
+`cad/DSG-000040389/reviews/43841-static-review.yaml`. It remembers omitted,
+translucent, and collision-only parts by CAD name rather than volatile `P###` refs.
+The clamped cover is collision-only: absent from the normal illustration, but its
+six parts remain in proximity queries and appear as translucent yellow/red hulls
+when within the warning band or contacting another part. The review is pinned to
+the STEP SHA-256, so an upload cannot silently reuse decisions from another export.
+
+To carry decisions to a new STEP without replacing the checked-in review:
+
+```bash
+uv run slac-static-review /path/to/new.stp \
+  --recipe cad/DSG-000040389/reviews/43841-static-review.yaml \
+  --carry-review cad/DSG-000040389/manifest.json \
+  --output-review /tmp/43841-candidate-review.yaml
+```
+
+Inspect the reported new or additional component occurrences and the candidate
+review before accepting it. A new assembly can start without any historical
+omission list: `uv run slac-static-review /path/to/new.stp --new-review --no-view
+--recipe cad/NEW/reviews/static-review.yaml`. Nothing is decomposed until the
+review is approved. The CoACD selection command is
+`uv run slac-static-review /path/to/new.stp --decompose --workers 2 --no-view`.
+It caches hulls for every selected tessellated leaf, including collision-only cover
+parts. This prepares hulls only; it does not validate joint frames or compile a
+Drake motion model.
 
 Use the lower-level commands below only when you need to inspect or debug the
 refresh process itself.

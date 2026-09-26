@@ -217,6 +217,7 @@ def remap_stage_inventory(
 
     return output_file, {
         "mapped_ref_count": len(ref_map),
+        "ref_map": ref_map,
         "unresolved_refs": sorted(unresolved),
         "alias_map": aliases,
     }
@@ -259,9 +260,18 @@ def _resolve_occurrence_match(
 ) -> dict[str, Any] | None:
     old_id = str(item["id"])
     occurrence_aliases = aliases["occurrence_id_aliases"]
-    # A reviewed alias must win over the identity fast path: SolidEdge occurrence ids
-    # are not stable identity, only usually-stable identity, and can coincidentally
-    # collide with a different physical instance across a resave (see A190/A191).
+    identical = new_by_id.get(old_id)
+    if identical and _strip_instance_suffix(str(item["name"])) == _strip_instance_suffix(
+        str(identical["name"])
+    ):
+        old_pose = item.get("transform_to_parent")
+        new_pose = identical.get("transform_to_parent")
+        if old_pose and new_pose and all(
+            abs(float(old_pose[row][column]) - float(new_pose[row][column])) < 1.0
+            for row in range(3) for column in range(4)
+        ):
+            return identical
+
     if old_id in occurrence_aliases and occurrence_aliases[old_id] in new_by_id:
         return new_by_id[occurrence_aliases[old_id]]
 

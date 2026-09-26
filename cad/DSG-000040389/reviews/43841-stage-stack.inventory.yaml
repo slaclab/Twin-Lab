@@ -1,6 +1,7 @@
 schema: slac-stage-inventory/v1
 source_step: cad/DSG-000040389/source.stp
 cad_manifest: cad/DSG-000040389/manifest.json
+selection_review: cad/DSG-000040389/reviews/43841-static-review.yaml
 stage_catalog: config/stage-catalog.yaml
 subassembly:
   ref: A038

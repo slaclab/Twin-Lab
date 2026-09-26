@@ -8,6 +8,7 @@ and the geometry being checked for interference are the same kinematics.
 from __future__ import annotations
 
 import csv
+import json
 import math
 import time
 from dataclasses import dataclass
@@ -201,7 +202,11 @@ def run_collision_viewer(
     meshcat.AddButton(ISOMETRIC_LABEL)
     meshcat.AddButton("Log clearance report")
     meshcat.AddButton("Stop viewer", "Escape")
-    highlighter = _Highlighter(meshcat, model)
+    stamp = package / ".slac-sdf-package"
+    package_stamp = json.loads(stamp.read_text(encoding="utf-8")) if stamp.exists() else {}
+    highlighter = _Highlighter(
+        meshcat, model, frozenset(package_stamp.get("collision_only_parts", []))
+    )
 
     print(f"{len(joints)} joints")
     print("Offending parts light up: YELLOW inside the warning band, RED where they touch.")
@@ -409,10 +414,14 @@ class _Highlighter:
     them over the illustration mesh marks the part without splitting its visual geometry.
     """
 
-    def __init__(self, meshcat, model: CollisionModel):
+    def __init__(
+        self, meshcat, model: CollisionModel,
+        collision_only_parts: frozenset[str] = frozenset(),
+    ):
         from pydrake.geometry import Role
 
         self._meshcat = meshcat
+        self._collision_only_parts = collision_only_parts
         inspector = _inspector(model)
         self._geometries = {}
         for geometry_id in inspector.GetAllGeometryIds(Role.kProximity):
@@ -440,7 +449,10 @@ class _Highlighter:
 
         path, shape, pose = self._geometries[name]
         if self._uploaded.get(name) != state:
-            self._meshcat.SetObject(path, shape, Rgba(*HIGHLIGHT_RGBA[state]))
+            rgba = HIGHLIGHT_RGBA[state]
+            if part_of(name) in self._collision_only_parts:
+                rgba = (*rgba[:3], 0.42)
+            self._meshcat.SetObject(path, shape, Rgba(*rgba))
             self._meshcat.SetTransform(path, pose)
             self._uploaded[name] = state
         return path

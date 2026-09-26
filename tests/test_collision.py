@@ -21,6 +21,7 @@ from twin_lab.collision import (
 from twin_lab.collision_viewer import (
     OFFENDER_LIMIT,
     SliderJoint,
+    _Highlighter,
     _offender_labels,
     read_joint_metadata,
 )
@@ -54,6 +55,29 @@ v 1 0 5
 v 0 1 5
 f 4 5 6
 """
+
+
+def test_collision_only_cover_highlight_is_translucent() -> None:
+    class MeshcatStub:
+        def SetObject(self, path, shape, rgba):
+            self.rgba = rgba
+
+        def SetTransform(self, path, pose):
+            pass
+
+    meshcat = MeshcatStub()
+    highlighter = _Highlighter.__new__(_Highlighter)
+    highlighter._meshcat = meshcat
+    highlighter._collision_only_parts = frozenset({"P2050"})
+    highlighter._geometries = {"assembly::cover_P2050_000": ("/cover", object(), object())}
+    highlighter._uploaded = {}
+
+    highlighter._paint("assembly::cover_P2050_000", "interference")
+    assert meshcat.rgba.r() > 0.9
+    assert meshcat.rgba.a() == pytest.approx(0.42)
+    highlighter._paint("assembly::cover_P2050_000", "close")
+    assert meshcat.rgba.g() > 0.7
+    assert meshcat.rgba.a() == pytest.approx(0.42)
 
 
 def test_read_obj_parts_splits_on_group_markers_and_rebases_indices(tmp_path):
