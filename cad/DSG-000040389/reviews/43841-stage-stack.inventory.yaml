@@ -4,11 +4,11 @@ cad_manifest: cad/DSG-000040389/manifest.json
 selection_review: cad/DSG-000040389/reviews/43841-static-review.yaml
 stage_catalog: config/stage-catalog.yaml
 subassembly:
-  ref: A038
-  name: DSG-000043841_oa_11
-  occurrence_count: 10
-  assembly_count: 3
-  leaf_part_count: 7
+  ref: A201
+  name: DSG-000043841
+  occurrence_count: 513
+  assembly_count: 33
+  leaf_part_count: 480
 
 # World-fixed geometry outside the focused stage-stack subtree. Keep these as
 # separate named groups so they can become independently reviewed collision
@@ -78,7 +78,8 @@ visual_styles:
 # Occurrence refs belong to this STEP revision. Catalog IDs remain reusable.
 stage_instances:
   - {ref: A204, library_id: LIB-000032416, catalog: micronix_vt_50l_c0014}
-
+  - {ref: A205, library_id: LIB-000032872, catalog: thorlabs_lx10}
+  - {ref: A206, library_id: LIB-000032872, catalog: thorlabs_lx10}
   - {ref: A208, library_id: LIB-000008869, catalog: kohzu_sxa0530_r01_bm}
   - {ref: A209, library_id: LIB-000008990, catalog: kohzu_sxa0750_r01_bm}
   - {ref: A210, library_id: LIB-000009442, catalog: kohzu_sa04b_rt02_r_bm}
@@ -98,13 +99,8 @@ stage_instances:
   - {ref: A225, library_id: LIB-000032469, catalog: kohzu_za05a_w101_bm}
   - {ref: A227, library_id: LIB-000007591, catalog: kohzu_ya04a_r102_nnr_bm}
   - {ref: A229, library_id: LIB-000032469, catalog: kohzu_za05a_w101_bm}
-  # UNRESOLVED: DSG-000046529 (the North Polycap Z/X/Y housing, parallel to the South
-  # DSG-000046520 and Middle DSG-000046526 assemblies used above) is entirely absent from
-  # the 2026-09-24 STEP. A066/A068 are stale refs left over from a Sep-14 remap bug and
-  # currently point at unrelated motor-controller internals (mo39134045, mo26110087), not
-  # a real stage. Do not decompose or simulate these until the STEP is confirmed/re-exported.
-  - {ref: A066, library_id: LIB-000032469, catalog: kohzu_za05a_w101_bm}
-  - {ref: A068, library_id: LIB-000009109, catalog: kohzu_ya04a_r102_rrn_bm}
+  - {ref: A231, library_id: LIB-000032469, catalog: kohzu_za05a_w101_bm}
+  - {ref: A233, library_id: LIB-000032455, catalog: kohzu_ya04a_r102_rrn_bm}
 
   # Long-jet stack, DSG-000007948, outside the 43841 subassembly and grounded through
   # the DSG-000024758 jet stage mounting plate on the breadboard.
@@ -114,7 +110,8 @@ stage_instances:
 
 # Reviewed base-to-payload order for the detector and three crystal stacks.
 motion_chains:
-  Detector: [A204]
+  # CAD-inferred base-to-payload order; confirm joint directions before hardware use.
+  Detector: [A206, A204, A205]
   North Crystal: [A216, A215, A214, A213]
   Middle Crystal: [A209, A208, A211, A210]
   South Crystal: [A221, A220, A219, A218]
@@ -126,12 +123,10 @@ motion_chains:
   Long Jet: [A007, A006, A005]
 
 compound_motion_chains:
-  # RE-REVIEW: North Polycap's stage_ref values (A066, A068) do not resolve to real
-  # stages in the 2026-09-24 STEP - see the UNRESOLVED note next to A066/A068 above.
   North Polycap:
-    - {key: A066:z, stage_ref: A066, fixed_role: fixed, moving_role: moving, name: z, axis_local: [0, 0, 1], limits: [-0.004, 0.004], cad_position: -0.003105455}
-    - {key: A068:y, stage_ref: A068, fixed_role: fixed, moving_role: y, name: y, axis_local: [1, 0, 0], limits: [-0.005, 0.005]}
-    - {key: A068:x, stage_ref: A068, moving_role: x, name: x, axis_local: [0, 1, 0], limits: [-0.005, 0.005]}
+    - {key: A231:z, stage_ref: A231, fixed_role: fixed, moving_role: moving, name: z, axis_local: [0, 0, 1], limits: [-0.004, 0.004], cad_position: -0.003105455}
+    - {key: A233:y, stage_ref: A233, fixed_role: fixed, moving_role: y, name: y, axis_local: [1, 0, 0], limits: [-0.005, 0.005]}
+    - {key: A233:x, stage_ref: A233, moving_role: x, name: x, axis_local: [0, 1, 0], limits: [-0.005, 0.005]}
   Middle Polycap:
     - {key: A229:z, stage_ref: A229, fixed_role: fixed, moving_role: moving, name: z, axis_local: [0, 0, 1], limits: [-0.004, 0.004], cad_position: -0.003105455}
     - {key: A227:y, stage_ref: A227, fixed_role: fixed, moving_role: y, name: y, axis_local: [1, 0, 0], limits: [-0.005, 0.005]}
@@ -230,7 +225,9 @@ attachment_overrides:
     # no longer exists under A204 in this revision - candidates DSG-000112058/59/61 sit in
     # the same subtree but none is confirmed, so it is deliberately left out rather than
     # guessed; it currently falls through to the default attached_refs walk instead.
-    A204: [P2388, P2394, P2397]  # EPIX 100P detector and two Newport locating pegs
+    A206: [P2403]        # lower LX10 carriage carries the long detector-stage bracket
+    A204: [P2406]        # VT-50L carriage to upper LX10 base
+    A205: [P2388, P2389, P2394, P2397]  # EPIX 100P detector and locating pegs
     A209: [P851]        # 34586: first linear carriage to second linear base
     A208: [P825]        # 41329: second linear carriage to rotation base
     A211: [P824]        # 28455: rotation carriage to tilt base
@@ -247,11 +244,8 @@ attachment_overrides:
     A224: [P1016, P1014, P1015]  # 40767 adapter and South collimating optic
     A229: [P1053]         # 46527: ZA carriage to 7591 fixed base, Middle Polycap
     A227: [P1052, P1058, P1059]  # 40909 adapter and Middle collimating optic
-    # RE-REVIEW: A066/A068 do not resolve to real stages (see UNRESOLVED note in
-    # stage_instances) and P1100/P1095/P1093/P1094 were never re-verified against the
-    # 2026-09-24 manifest, so this whole North Polycap attachment group is unconfirmed.
-    A066: [P1100]         # 46523: ZA carriage to 7591 fixed base, North Polycap
-    A068: [P1095, P1093, P1094]  # 40767 adapter and North collimating optic
+    A231: [P2789]         # 46523: ZA carriage to 7591 fixed base, North Polycap
+    A233: [P2784, P2782, P2783]  # 40767 adapter and North collimating optic
     # The whole jet rides the ZA05A lift: bracket, its clamp inserts, the LCL5009-010086
     # holder, and the DSG-000022427 jet cartridge that mounts to it magnetically.
     A005: [P005, P034, P036, P038, P040, P042, P051,

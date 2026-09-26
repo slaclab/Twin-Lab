@@ -248,6 +248,13 @@ def prepare_stage_cad(
                 f"{sorted(duplicate_refs)}"
             )
         if not references:
+            if "selection_review" in inventory and all(
+                item["ref"] in hidden_refs
+                for item in manifest_items
+                if not item["is_assembly"]
+                and (item["id"] == source_id or item["id"].startswith(f"{source_id}/"))
+            ):
+                continue
             raise ValueError(f"Static geometry {source_ref} contains no non-fastener parts")
         used_static_refs.update(references)
         mesh_path = output_dir / f"static_{source_ref}.obj"

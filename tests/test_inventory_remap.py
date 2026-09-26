@@ -76,6 +76,34 @@ def test_old_alias_does_not_swap_cameras_after_another_revision() -> None:
     assert mapped["A191"] == "A192"
 
 
+def test_duplicate_stage_siblings_map_only_when_pose_is_unique() -> None:
+    def occurrence(ref: str, parent: str | None, index: int, name: str, x: float) -> dict:
+        return {
+            "ref": ref, "id": f"{parent}/{index}:{name}" if parent else "root",
+            "name": name, "parent_id": parent, "depth": 1 if parent else 0,
+            "is_assembly": True,
+            "transform_to_parent": [[1, 0, 0, x], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
+        }
+
+    old = {"occurrences": [
+        occurrence("A001", None, 0, "root", 0),
+        occurrence("A002", "root", 7, "LIB-STAGE_oa_1", 10),
+        occurrence("A003", "root", 15, "LIB-STAGE_oa_2", 200),
+    ]}
+    new = {"occurrences": [
+        occurrence("A011", None, 0, "root", 0),
+        occurrence("A012", "root", 8, "LIB-STAGE", 10),
+        occurrence("A013", "root", 16, "LIB-STAGE", 200),
+    ]}
+    aliases = {"name_aliases": {}, "occurrence_id_aliases": {}}
+    mapping, unresolved = _build_manifest_ref_map(old, new, aliases)
+    assert mapping == {"A001": "A011", "A002": "A012", "A003": "A013"}
+    assert not unresolved
+    new["occurrences"][2]["transform_to_parent"][0][3] = 10
+    mapping, unresolved = _build_manifest_ref_map(old, new, aliases)
+    assert "A002" in unresolved
+
+
 def test_remaps_inventory_with_name_aliases(tmp_path: Path) -> None:
     previous_manifest = tmp_path / "previous-manifest.json"
     new_manifest = tmp_path / "new-manifest.json"

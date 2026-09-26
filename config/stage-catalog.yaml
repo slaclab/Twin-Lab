@@ -6,6 +6,15 @@ units:
 # These are reusable mechanism facts. Joint frames, positive directions, home
 # positions, and payload attachment groups remain assembly-specific review data.
 stages:
+  thorlabs_lx10:
+    manufacturer: THORLABS
+    model: LX10
+    joint_type: prismatic
+    axis_local: [1.0, 0.0, 0.0]
+    component_roles: {fixed: [1], moving: [2]}
+    travel: 0.025
+    limits: [-0.0125, 0.0125]
+
   micronix_vt_50l_c0014:
     manufacturer: MICRONIX USA
     model: VT-50L-C0014

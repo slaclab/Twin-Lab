@@ -310,6 +310,21 @@ def _resolve_occurrence_match(
     ]
     if len(base_named) == 1:
         return base_named[0]
+    old_pose = item.get("transform_to_parent")
+    if old_pose and len(base_named) > 1:
+        pose_matches = [
+            candidate for candidate in base_named
+            if candidate.get("transform_to_parent")
+            and all(
+                abs(
+                    float(old_pose[row][column])
+                    - float(candidate["transform_to_parent"][row][column])
+                ) < 1.0
+                for row in range(3) for column in range(4)
+            )
+        ]
+        if len(pose_matches) == 1:
+            return pose_matches[0]
 
     transformed_id = _transform_occurrence_id(old_id, aliases["name_aliases"])
     terminal = transformed_id.rsplit("/", 1)[-1]

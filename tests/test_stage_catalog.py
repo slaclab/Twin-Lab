@@ -271,8 +271,8 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
     }
 
 
-def test_prepare_stage_cad_rejects_stale_subassembly_identity() -> None:
-    with pytest.raises(ValueError, match="Reviewed subassembly ref does not match"):
+def test_prepare_stage_cad_rejects_stale_step_selection() -> None:
+    with pytest.raises(ValueError, match="Selection review does not match the inventory STEP"):
         prepare_stage_cad("cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml")
 
 
