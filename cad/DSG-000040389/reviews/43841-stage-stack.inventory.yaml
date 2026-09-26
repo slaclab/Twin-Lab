@@ -27,6 +27,7 @@ static_geometry:
 # while attached geometry is split into separately colored rigid meshes.
 visual_styles:
   stage_models:
+    thorlabs_lx10: [0.20, 0.58, 0.68, 1.0]
     micronix_vt_50l_c0014: [0.55, 0.24, 0.22, 1.0]
     kohzu_sa04b_rt02_bm: [0.95, 0.58, 0.16, 1.0]
     kohzu_sa04b_rt02_r_bm: [0.96, 0.72, 0.20, 1.0]

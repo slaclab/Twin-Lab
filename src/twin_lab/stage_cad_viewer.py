@@ -341,7 +341,12 @@ def prepare_stage_cad(
         os.path.commonpath([by_ref[str(ref)]["id"] for ref in refs]): refs
         for refs in inventory.get("motion_chains", {}).values()
     }
+    skipped_empty_refs: list[str] = []
     for reference in attached_refs:
+        center_m = _shape_center_m(placed_shape(leaves[reference]))
+        if center_m is None:
+            skipped_empty_refs.append(reference)
+            continue
         if reference in forced_fixed:
             style = attachment_style_by_ref.get(reference, "default")
             attachment_groups.setdefault((None, style), []).append(reference)
@@ -363,7 +368,6 @@ def prepare_stage_cad(
             style = attachment_style_by_ref.get(reference, "default")
             attachment_groups.setdefault((None, style), []).append(reference)
             continue
-        center_m = _shape_center_m(placed_shape(leaves[reference]))
         parent_ref = min(
             chain_refs,
             key=lambda ref: math.dist(center_m, instance_by_ref[ref]["translation_m"]),
@@ -459,6 +463,7 @@ def prepare_stage_cad(
         "static_geometry": static_geometry,
         "collision_only_geometry": collision_only_geometry,
         "attached_part_count": len(attached_refs),
+        "skipped_empty_refs": skipped_empty_refs,
         "attachments": attachments,
         "motion_stage_meshes": motion_stage_meshes,
         "motion_chains": motion_chains,
@@ -951,9 +956,11 @@ def _joint_displacement(joint: dict[str, Any], slider_value: float) -> float:
     return slider_value - float(joint.get("cad_position", joint["home"]))
 
 
-def _shape_center_m(shape: Any) -> list[float]:
+def _shape_center_m(shape: Any) -> list[float] | None:
     bounds = Bnd_Box()
     BRepBndLib.Add_s(shape, bounds, False)
+    if bounds.IsVoid():
+        return None
     x_min, y_min, z_min, x_max, y_max, z_max = bounds.Get()
     return [(x_min + x_max) * 0.0005, (y_min + y_max) * 0.0005, (z_min + z_max) * 0.0005]
 
