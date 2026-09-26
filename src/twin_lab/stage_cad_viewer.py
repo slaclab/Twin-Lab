@@ -35,6 +35,7 @@ PLAYBACK_SPEED_LABEL = "Playback speed (x)"
 PLAYBACK_PAUSED_LABEL = "Playback: paused"
 TRAVEL_SPEED_LABEL = "Travel speed (% of max)"
 SCRUB_LABEL = "Playback position (% of completion)"
+MANUAL_STAGE_PREFIX = "Manual stage"
 CONTINUOUS_STOP_LABEL = "Stop continuous playback"
 CONTINUOUS_RESUME_LABEL = "Resume continuous playback"
 ONGOING_PLAYBACK_ENDS = {"ongoing", "continuous"}
@@ -592,6 +593,7 @@ def view_stage_cad(
 
     joints = [joint for chain in scene.get("motion_chains", []) for joint in chain["joints"]]
     playback_keys = {joint["key"] for joint in joints if playback and joint["key"] in playback.joint_names}
+    manual_keys = manual_playback_keys(joints, instances) if playback is not None else set()
     # Playback/live modes are view-only: the recording (or the real hardware) is the only
     # thing allowed to move a joint, so the manual sliders and cyclic-animation controls
     # that would otherwise fight it are left off entirely.
@@ -614,6 +616,17 @@ def view_stage_cad(
         meshcat.AddSlider(AUTO_RANGE_LABEL, 0.0, 100.0, 1.0, 25.0)
         meshcat.AddSlider(AUTO_PERIOD_LABEL, 2.0, 60.0, 0.5, 12.0)
     if has_playback_controls:
+        for joint in joints:
+            if joint["key"] not in manual_keys:
+                continue
+            scale, unit = _slider_scale(joint)
+            meshcat.AddSlider(
+                f"{MANUAL_STAGE_PREFIX} {joint['key']} ({unit})",
+                joint["limits"][0] * scale,
+                joint["limits"][1] * scale,
+                0.1,
+                joint["home"] * scale,
+            )
         meshcat.AddSlider(PLAYBACK_SPEED_LABEL, 0.1, 8.0, 0.05, playback.speed)
         meshcat.AddSlider(PLAYBACK_PAUSED_LABEL, 0.0, 1.0, 1.0, 1.0 if playback.is_paused else 0.0)
         meshcat.AddButton("Restart playback")
@@ -736,6 +749,10 @@ def view_stage_cad(
                     playback.seek_fraction(scrub_value / 100.0)
                     last_scrub_value = scrub_value
             positions = playback.positions()
+            for index, joint in enumerate(joints):
+                if joint["key"] in manual_keys:
+                    label = f"{MANUAL_STAGE_PREFIX} {joint['key']} ({_slider_scale(joint)[1]})"
+                    values[index] = meshcat.GetSliderValue(label)
             moment = playback.current_moment()
             if tick - last_time_push >= TIME_PUSH_S:
                 last_time_push = tick
@@ -753,7 +770,7 @@ def view_stage_cad(
                     reported_status = status
                     set_viewer_status(meshcat, status)
             for index, joint in enumerate(joints):
-                if joint["key"] in playback_keys:
+                if joint["key"] in playback_keys and joint["key"] not in manual_keys:
                     values[index] = positions[joint["key"]] * scales[index]
             # With no manual sliders in this mode, this is the only numeric feedback that
             # values are actually changing (vs. just holding steady between commands).
@@ -942,6 +959,19 @@ def _slider_scale(joint: dict[str, Any]) -> tuple[float, str]:
     if joint["joint_type"] == "prismatic":
         return 1000.0, "mm"
     return 180.0 / math.pi, "deg"
+
+
+def manual_playback_keys(
+    joints: list[dict[str, Any]], instances: list[dict[str, Any]]
+) -> set[str]:
+    """Return unpowered stage joints that need manual positions during replay."""
+
+    unpowered_refs = {
+        str(instance["ref"])
+        for instance in instances
+        if instance.get("catalog") == "thorlabs_lx10"
+    }
+    return {str(joint["key"]) for joint in joints if str(joint["ref"]) in unpowered_refs}
 
 
 def _auto_amplitude(joint: dict[str, Any], span_fraction: float) -> float:

@@ -6,7 +6,9 @@ motion, visualization, and collision queries.
 
 The current reviewed model is subassembly `*43841` from drawing
 `DSG-000040389`. It contains an EPIX detector stage, three crystal stacks, and
-three polycapillary stacks with 22 controllable joints.
+three polycapillary stacks with 27 controllable joints. The two Thorlabs LX10
+detector stages are manual-only because they are not powered and have no EPICS
+archive data.
 
 ## For returning users
 
@@ -37,6 +39,58 @@ uv run slac-stage-cad cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
 
 The viewers open a Meshcat page at `http://localhost:7000` in your browser.
 First time here? Start at [Setup](#setup) instead.
+
+## Three simulation modes
+
+Twin Lab has three useful operating modes. All three use the same reviewed CAD
+inventory; they differ in what drives the joints and whether Drake queries
+clearance.
+
+### 1. Kinematic simulation
+
+Use the stage-CAD viewer for a fast geometry and motion check without collision
+queries:
+
+```bash
+uv run slac-stage-cad cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
+```
+
+Manual sliders drive all 27 joints. This is the right mode for checking joint
+order, axes, home pose, travel limits, and whether the reviewed CAD looks
+correct. It does not require CoACD.
+
+### 2. Kinematic simulation with collision detection
+
+Use the Drake collision viewer when the question is clearance or interference:
+
+```bash
+uv run slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
+```
+
+The viewer drives the same reviewed joints while querying the convex geometry.
+The clamped cover is hidden from the normal illustration but remains in the
+collision model; its reported hulls appear translucent yellow in the warning
+band and red on contact. The first convex build is expensive but cached.
+
+### 3. Live feed or replay mode
+
+Use replay/live mode to apply archived or current EPICS commands to the CAD:
+
+```bash
+uv run slac-stage-cad cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
+  --playback-recording recordings/session-20260826T1552.json
+```
+
+Powered stages are driven by the recording or live archive. The two unpowered
+LX10 stages have no EPICS tracks, so replay shows manual sliders only for
+`A205` and `A206`; set those sliders to the positions manually adjusted on the
+hardware before evaluating the replay pose. All other replayed joints remain
+view-only and follow the EPICS data. Replay itself does not perform collision
+queries; use mode 2 when collision results are required.
+
+Use fixed archive, pseudo-live, or live-file commands below when the source is
+not a saved recording. These modes are open-loop command reconstruction, not
+encoder readback.
 
 ## Collision detection
 
@@ -1183,7 +1237,7 @@ uv run ruff format --check .
 - Collision geometry is opt-in and lives in a separate package. Aggregate CAD
   meshes make poor convex hulls, so useful interference analysis needs the
   `convex` mode, which splits each part into CoACD hulls before Drake sees it.
-- The 43841 assembly has 22 scalar joints and 4798 convex collision hulls. Hull
+- The 43841 assembly has 27 scalar joints and 5613 convex collision hulls. Hull
   mode reports contact almost everywhere because the enclosure hull is solid;
   convex mode is the mode to trust.
 - Clearance is reported as a three-state readout: clear, close, and

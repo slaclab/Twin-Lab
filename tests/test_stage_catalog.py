@@ -21,6 +21,7 @@ from twin_lab.stage_cad_viewer import (
     _shape_center_m,
     _transform_data,
     _write_ongoing_resume,
+    manual_playback_keys,
 )
 
 
@@ -295,6 +296,23 @@ def test_current_43841_inventory_has_27_reviewed_joints_and_collision_cover() ->
         item["catalog"] for item in inventory["stage_instances"]
     }
     assert inventory["selection_review"].endswith("43841-static-review.yaml")
+
+
+def test_lx10_stage_instances_are_manual_replay_axes() -> None:
+    inventory = yaml.safe_load(
+        Path("cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml").read_text()
+    )
+    lx10 = [item for item in inventory["stage_instances"] if item["catalog"] == "thorlabs_lx10"]
+    assert [item["ref"] for item in lx10] == ["A205", "A206"]
+
+
+def test_manual_replay_keys_only_include_unpowered_lx10_stages() -> None:
+    joints = [{"key": "A205", "ref": "A205"}, {"key": "A204", "ref": "A204"}]
+    instances = [
+        {"ref": "A205", "catalog": "thorlabs_lx10"},
+        {"ref": "A204", "catalog": "micronix_vt_50l_c0014"},
+    ]
+    assert manual_playback_keys(joints, instances) == {"A205"}
 
 
 def test_empty_cad_shape_has_no_center() -> None:
