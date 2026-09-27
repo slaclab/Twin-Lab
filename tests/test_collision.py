@@ -442,6 +442,96 @@ def test_the_environment_stays_checked_against_a_stages_first_moving_link(tmp_pa
     assert live.CollisionFiltered(moving, ids["a010_fixed_0_p001_collision"])
 
 
+STACKED_STAGE_SDF = """\
+<?xml version="1.0"?>
+<sdf version="1.9">
+    <model name="rig">
+        <link name="assembly_base">
+            <collision name="environment_wall_p002_collision">
+                <geometry><box><size>0.1 0.1 0.1</size></box></geometry>
+            </collision>
+            <collision name="a010_fixed_0_p001_collision">
+                <geometry><box><size>0.1 0.1 0.1</size></box></geometry>
+            </collision>
+        </link>
+        <link name="stack_01_a010_motion">
+            <inertial><mass>1</mass>
+                <inertia><ixx>1</ixx><iyy>1</iyy><izz>1</izz></inertia>
+            </inertial>
+            <collision name="a010_moving_1_p003_collision">
+                <geometry><box><size>0.1 0.1 0.1</size></box></geometry>
+            </collision>
+            <collision name="a011_fixed_1_p004_collision">
+                <geometry><box><size>0.1 0.1 0.1</size></box></geometry>
+            </collision>
+        </link>
+        <link name="stack_02_a011_motion">
+            <inertial><mass>1</mass>
+                <inertia><ixx>1</ixx><iyy>1</iyy><izz>1</izz></inertia>
+            </inertial>
+            <collision name="a011_moving_1_p005_collision">
+                <geometry><box><size>0.1 0.1 0.1</size></box></geometry>
+            </collision>
+            <collision name="a011_attachment_1_p006_collision">
+                <geometry><box><size>0.1 0.1 0.1</size></box></geometry>
+            </collision>
+        </link>
+        <joint name="test_stack_a010_motion" type="prismatic">
+            <parent>assembly_base</parent><child>stack_01_a010_motion</child>
+            <axis><xyz>1 0 0</xyz><limit><lower>-1</lower><upper>1</upper></limit></axis>
+        </joint>
+        <joint name="test_stack_a011_motion" type="SECOND_JOINT_TYPE">
+            <parent>stack_01_a010_motion</parent><child>stack_02_a011_motion</child>
+            <axis><xyz>0 0 1</xyz><limit><lower>-1</lower><upper>1</upper></limit></axis>
+        </joint>
+        <joint name="assembly_base_to_world" type="fixed">
+            <parent>world</parent><child>assembly_base</child>
+        </joint>
+    </model>
+</sdf>
+"""
+
+
+@pytest.mark.parametrize(
+    ("second_joint_type", "same_stack_pair_filtered"),
+    [("prismatic", True), ("revolute", False)],
+)
+def test_same_stack_clearance_filter_preserves_rotary_sweeps(
+    tmp_path, second_joint_type, same_stack_pair_filtered
+):
+    from pydrake.geometry import Role
+
+    from twin_lab.collision import CollisionModel
+    from twin_lab.scene import load_scene
+
+    path = tmp_path / "stack.sdf"
+    path.write_text(
+        STACKED_STAGE_SDF.replace("SECOND_JOINT_TYPE", second_joint_type), encoding="utf-8"
+    )
+    model = CollisionModel(load_scene(path))
+    model.set_reviewed_home({"test_stack_a010_motion": 0.0, "test_stack_a011_motion": 0.0})
+    inspector = model.scene.scene_graph.model_inspector()
+    ids = {
+        part_of(inspector.GetName(geometry_id)): geometry_id
+        for geometry_id in inspector.GetAllGeometryIds(Role.kProximity)
+    }
+    context = model.scene.scene_graph.GetMyContextFromRoot(model.context)
+    query = model.scene.scene_graph.get_query_output_port().Eval(context)
+    live = query.inspector()
+
+    assert live.CollisionFiltered(ids["P004"], ids["P005"])
+    assert live.CollisionFiltered(ids["P003"], ids["P006"]) is same_stack_pair_filtered
+    report = model.report()
+    pair_reported = any(set(clearance.parts) == {"P003", "P006"} for clearance in report.clearances)
+    assert pair_reported is not same_stack_pair_filtered
+    assert report.status == ("clear" if same_stack_pair_filtered else "interference")
+    assert not any(set(clearance.parts) == {"P002", "P003"} for clearance in report.clearances)
+
+    model.set_positions({"test_stack_a010_motion": 0.05})
+    moved_report = model.report()
+    assert any(set(clearance.parts) == {"P002", "P003"} for clearance in moved_report.clearances)
+
+
 def test_read_ignored_pairs_is_order_independent(tmp_path):
     path = tmp_path / "ignore.yaml"
     path.write_text(

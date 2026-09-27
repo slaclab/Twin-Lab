@@ -200,6 +200,9 @@ def run_collision_viewer(
         _read_part_labels(label_source),
         decomposition_dir,
     )
+    model.set_reviewed_home(
+        {joint.joint_name: joint.to_sdf(joint.slider_bounds()[2]) for joint in joints}
+    )
     print(
         f"Loaded {_proximity_geometry_count(model)} collision geometries "
         f"in {time.monotonic() - load_start:.0f} s"
