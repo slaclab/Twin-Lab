@@ -283,9 +283,15 @@ def test_current_43841_inventory_has_33_reviewed_joints_and_collision_cover() ->
     assert inventory["motion_chains"]["Detector"] == ["A206", "A204", "A205"]
     assert inventory["motion_chains"]["LJ Detector"] == ["A024", "A026", "A030", "A032"]
     assert [joint["key"] for joint in inventory["compound_motion_chains"]["LJ Camera"]] == [
-        "A043:y",
         "A043:x",
+        "A043:rotation",
     ]
+    assert set(inventory["hidden_occurrences"]) >= {"P492", "P493", "P494"}
+    assert inventory["hidden_stage_geometry"] == ["A043"]
+    assert set(inventory["attachment_overrides"]["moving"]["A043"]) >= {
+        "P648",  # AVT Manta camera
+        "P654",  # Computar macro zoom lens
+    }
     assert sum(map(len, inventory["motion_chains"].values())) + sum(
         map(len, inventory["compound_motion_chains"].values())
     ) == 33

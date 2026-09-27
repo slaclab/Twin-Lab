@@ -160,6 +160,7 @@ def _build_tree(scene: dict[str, Any], scene_file: Path) -> tuple[list[LinkSpec]
     links = [base]
     joints: list[JointSpec] = []
     motion_meshes = scene["motion_stage_meshes"]
+    hidden_stage_geometry = set(scene.get("hidden_stage_geometry", []))
 
     for instance in scene["instances"]:
         if instance["ref"] not in motion_meshes:
@@ -187,13 +188,18 @@ def _build_tree(scene: dict[str, Any], scene_file: Path) -> tuple[list[LinkSpec]
 
     instance_by_ref = {str(item["ref"]): item for item in scene["instances"]}
     last_link_by_stage: dict[str, LinkSpec] = {}
+    link_by_joint_key: dict[str, LinkSpec] = {}
     for chain in scene["motion_chains"]:
         parent = base
         stack_slug = _safe_name(chain["name"])
         for index, item in enumerate(chain["joints"], start=1):
             reference = str(item["ref"])
             fixed_role = item.get("fixed_role")
-            if fixed_role and fixed_role in motion_meshes.get(reference, {}):
+            if (
+                reference not in hidden_stage_geometry
+                and fixed_role
+                and fixed_role in motion_meshes.get(reference, {})
+            ):
                 parent.meshes.append(
                     (
                         f"{reference}_{fixed_role}",
@@ -210,18 +216,19 @@ def _build_tree(scene: dict[str, Any], scene_file: Path) -> tuple[list[LinkSpec]
             axis_name = str(item["name"])
             child = LinkSpec(_safe_name(f"{stack_slug}_{index:02d}_{reference}_{axis_name}"))
             moving_role = str(item["moving_role"])
-            child.meshes.append(
-                (
-                    f"{reference}_{moving_role}",
-                    _resolve_path(motion_meshes[reference][moving_role], scene_file),
-                    [
-                        float(value)
-                        for value in instance_by_ref.get(reference, {}).get(
-                            "rgba", [0.62, 0.66, 0.72, 1.0]
-                        )
-                    ],
+            if reference not in hidden_stage_geometry:
+                child.meshes.append(
+                    (
+                        f"{reference}_{moving_role}",
+                        _resolve_path(motion_meshes[reference][moving_role], scene_file),
+                        [
+                            float(value)
+                            for value in instance_by_ref.get(reference, {}).get(
+                                "rgba", [0.62, 0.66, 0.72, 1.0]
+                            )
+                        ],
+                    )
                 )
-            )
             links.append(child)
 
             home = float(item.get("home", 0.0))
@@ -246,10 +253,16 @@ def _build_tree(scene: dict[str, Any], scene_file: Path) -> tuple[list[LinkSpec]
             )
             parent = child
             last_link_by_stage[reference] = child
+            link_by_joint_key[str(item["key"])] = child
 
     for attachment in scene["attachments"]:
         parent_ref = attachment["parent_stage_ref"]
-        target = base if parent_ref is None else last_link_by_stage[str(parent_ref)]
+        parent_joint_key = attachment.get("parent_joint_key")
+        target = (
+            link_by_joint_key[str(parent_joint_key)]
+            if parent_joint_key is not None
+            else base if parent_ref is None else last_link_by_stage[str(parent_ref)]
+        )
         label = "fixed_attachment" if parent_ref is None else f"{parent_ref}_attachment"
         target.meshes.append(
             (

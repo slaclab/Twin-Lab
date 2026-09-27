@@ -112,6 +112,9 @@ def prepare_stage_cad(
     output_dir = CACHE_ROOT / "stage-cad" / review_artifact_stem(inventory_file)
     scene_path = output_dir / "scene.yaml"
     sources = [inventory_file, step_path, catalog_path, manifest_path]
+    supplemental_attachments = inventory.get("supplemental_attachments", [])
+    for attachment in supplemental_attachments:
+        sources.append(resolve_repo_path(attachment["mesh"], relative_to=inventory_file.parent))
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest_items = manifest["occurrences"]
     by_ref = {item["ref"]: item for item in manifest_items}
@@ -419,6 +422,23 @@ def prepare_stage_cad(
             }
         )
 
+    for attachment in supplemental_attachments:
+        mesh_path = resolve_repo_path(attachment["mesh"], relative_to=inventory_file.parent)
+        attachments.append(
+            {
+                "parent_stage_ref": str(attachment["parent_stage_ref"]),
+                "parent_joint_key": attachment.get("parent_joint_key"),
+                "mesh": mesh_path.as_posix(),
+                "part_count": int(attachment.get("part_count", 1)),
+                "style": str(attachment.get("style", "default")),
+                "rgba": [
+                    float(value)
+                    for value in attachment.get("rgba", [0.45, 0.68, 0.78, 1.0])
+                ],
+                "name": str(attachment.get("name", mesh_path.stem)),
+            }
+        )
+
     motion_chains = []
     for chain_name, references in inventory.get("motion_chains", {}).items():
         joints = []
@@ -462,11 +482,15 @@ def prepare_stage_cad(
                     "stack": str(chain_name),
                     "name": str(spec["name"]),
                     "model": item["model"],
-                    "joint_type": "prismatic",
+                    "joint_type": str(spec.get("joint_type", "prismatic")),
                     "fixed_role": spec.get("fixed_role"),
                     "moving_role": str(spec["moving_role"]),
-                    "axis_world": _rotate_vector(item["rotation"], spec["axis_local"]),
-                    "origin_m": item["translation_m"],
+                    "axis_world": [float(value) for value in spec["axis_world"]]
+                    if "axis_world" in spec
+                    else _rotate_vector(item["rotation"], spec["axis_local"]),
+                    "origin_m": [
+                        float(value) for value in spec.get("origin_m", item["translation_m"])
+                    ],
                     "limits": _reviewed_limits(inventory, key, item["ref"], spec["limits"]),
                     "home": _reviewed_home(inventory, key, item["ref"]),
                     "cad_position": float(spec.get("cad_position", 0.0)),
@@ -485,6 +509,9 @@ def prepare_stage_cad(
         "skipped_empty_refs": skipped_empty_refs,
         "attachments": attachments,
         "motion_stage_meshes": motion_stage_meshes,
+        "hidden_stage_geometry": [
+            str(ref) for ref in inventory.get("hidden_stage_geometry", [])
+        ],
         "motion_chains": motion_chains,
     }
     scene_path.write_text(yaml.safe_dump(scene, sort_keys=False), encoding="utf-8")
@@ -534,6 +561,7 @@ def view_stage_cad(
 
     scene = yaml.safe_load(Path(scene_path).read_text(encoding="utf-8"))
     instances = scene["instances"]
+    hidden_stage_geometry = set(scene.get("hidden_stage_geometry", []))
     # Nothing here publishes a realtime rate, so the stats plot only ever covers the view.
     patch_meshcat_page()
     try:
@@ -567,6 +595,8 @@ def view_stage_cad(
     for item in instances:
         if item["ref"] in scene["motion_stage_meshes"]:
             meshes = scene["motion_stage_meshes"][item["ref"]]
+            if item["ref"] in hidden_stage_geometry:
+                continue
             for role, mesh_path in meshes.items():
                 meshcat.SetObject(
                     role_paths[(item["ref"], role)],
@@ -588,7 +618,10 @@ def view_stage_cad(
     for attachment in scene["attachments"]:
         parent_ref = attachment["parent_stage_ref"]
         style = attachment.get("style", "default")
-        if parent_ref in last_joint_path_by_stage:
+        parent_joint_key = attachment.get("parent_joint_key")
+        if parent_joint_key in joint_paths:
+            path = f"{joint_paths[parent_joint_key]}/{style} geometry"
+        elif parent_ref in last_joint_path_by_stage:
             path = f"{last_joint_path_by_stage[parent_ref]}/{style} geometry"
         elif parent_ref is not None:
             path = f"/pending motion/{parent_ref}/{style} geometry"

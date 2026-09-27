@@ -12,7 +12,6 @@ omitted_assemblies:
 - DSG-000042534 # helium valve and its attached fittings
 - DSG-000081358 # front pillar and attached mounting hardware
 - DSG-000023730 # outdated left-side motor stack
-- LCL5007-010087 # right-side LJ camera and local stage
 omitted_under_assemblies:
   DSG-000110737:
   - DSG-000111515 # optic-side square adapter; this stack mounts square on the stage side
