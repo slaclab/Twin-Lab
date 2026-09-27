@@ -155,6 +155,48 @@ compound_motion_chains:
     - {key: A043:x, stage_ref: A043, fixed_role: fixed, moving_role: y, name: x, axis_world: [1, 0, 0], limits: [-0.005, 0.005]}
     - {key: A043:rotation, stage_ref: A043, moving_role: x, name: rotation, joint_type: revolute, axis_world: [0, 0, 1], origin_m: [-0.1125, 0.1956, -0.0603], limits: [-3.141592654, 3.141592654]}
 
+# Line-of-sight beams: out of each collimating optic, off its Bragg crystal face,
+# stopping at the first part met. `ignore` lets a beam leave its own mount; `expected`
+# marks the parts it is meant to land on, so stopping there is not an obstruction.
+# Refs remapped to the 2026-09-24 STEP.
+beam_paths:
+  - name: South
+    diameter_mm: 20.0
+    subdivisions: 1
+    source:
+      ref: P2654                                   # REF-000221282 collimating optic
+      mesh: attached_A224_polycap_and_holder.obj
+      ignore: [P2655, P2669, P2690, P2696]         # optic body, KM and its adapters
+    crystal:
+      ref: P2577                                   # DSG-000042292 Bragg xtal holder clip
+      mesh: attached_A218_crystal_and_holder.obj
+      ignore: [P2579, P2638]                       # 42294 adapter and 27467 holder
+    expected: [P2578, P2388]                       # South annular PIPS diode, EPIX 100P
+  - name: Middle
+    diameter_mm: 20.0
+    subdivisions: 1
+    source:
+      ref: P2721                                   # REF-000221282 collimating optic
+      mesh: attached_A227_polycap_and_holder.obj
+      ignore: [P2722, P2725, P2726, P2727]         # optic body, KM and its adapters
+    crystal:
+      ref: P2507                                   # DSG-000041271 Bragg xtal holder clip
+      mesh: attached_A210_crystal_and_holder.obj
+      ignore: [P2508, P2509]                       # 27467 holder and 42294 adapter
+    expected: [P2504, P2388]                       # Middle annular PIPS diode, EPIX 100P
+  - name: North
+    diameter_mm: 20.0
+    subdivisions: 1
+    source:
+      ref: P2782                                   # REF-000221282 collimating optic
+      mesh: attached_A233_polycap_and_holder.obj
+      ignore: [P2783, P2805, P2807, P2818]         # optic body, KM and its adapters
+    crystal:
+      ref: P2511                                   # DSG-000041271 Bragg xtal holder clip
+      mesh: attached_A213_crystal_and_holder.obj
+      ignore: [P2512, P2527]                       # 42294 adapter and 27467 holder
+    expected: [P2513, P2388]                       # North annular PIPS diode, EPIX 100P
+
 # Editable logical operating limits and home positions. Angular values here are
 # degrees; A214/A219 use the assembly's 180-degree mounting orientation as home.
 joint_limit_overrides:
