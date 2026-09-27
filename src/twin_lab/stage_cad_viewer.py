@@ -338,9 +338,19 @@ def prepare_stage_cad(
             attachment_style_by_ref[reference] = str(style)
 
     attachment_groups: dict[tuple[str | None, str], list[str]] = {}
+    # Compound chains have to be here too: a polycap part that is not named in
+    # attachment_overrides would otherwise fall through to world-fixed instead of
+    # riding the stack it sits on.
+    chain_reference_sets = [
+        [str(ref) for ref in refs] for refs in inventory.get("motion_chains", {}).values()
+    ]
+    chain_reference_sets.extend(
+        list(dict.fromkeys(str(spec["stage_ref"]) for spec in specs))
+        for specs in inventory.get("compound_motion_chains", {}).values()
+    )
     chain_root_by_id = {
-        os.path.commonpath([by_ref[str(ref)]["id"] for ref in refs]): refs
-        for refs in inventory.get("motion_chains", {}).values()
+        os.path.commonpath([by_ref[ref]["id"] for ref in refs]): refs
+        for refs in chain_reference_sets
     }
     skipped_empty_refs: list[str] = []
     for reference in attached_refs:

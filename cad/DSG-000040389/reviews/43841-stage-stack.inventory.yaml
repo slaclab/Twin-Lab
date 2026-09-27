@@ -25,6 +25,7 @@ static_geometry:
   - {ref: P2031, name: 8020 base rail, cad_id: DSG-000048647}
   - {ref: P2032, name: 8020 base support, cad_id: DSG-000105928}
   - {ref: P2033, name: Breadboard, cad_id: Thorlabs_MB1836}
+  - {ref: A234, name: 8020 support frame, cad_id: DSG-000110674}
 
 # Semantic colors are assembly-review data: catalog stages are colored by model,
 # while attached geometry is split into separately colored rigid meshes.
@@ -47,16 +48,19 @@ visual_styles:
     adapter:
       rgba: [0.92, 0.42, 0.10, 1.0]
       refs: [P2458, P2526, P2528, P2642, P2643,
-             P2479, P2452, P2517, P2520, P2596, P2606,
-             P2660, P1021, P2717, P2788]
+             P2479, P2453, P2452, P2523, P2520, P2517,
+             P2625, P2606, P2596,
+             P2660, P2717, P2788, P2661, P2716, P2789]
     crystal_and_holder:
       rgba: [0.78, 0.22, 0.82, 1.0]
-      refs: [P872, P875, P876, P877,
-             P879, P880, P881, P895,
-             P941, P942, P943, P998]
+      refs: [P2504, P2507, P2508, P2509,
+             P2511, P2512, P2513, P2527,
+             P2577, P2578, P2579, P2638]
     polycap_and_holder:
       rgba: [0.05, 0.78, 0.76, 1.0]
-      refs: [P1014, P1015, P1058, P1059, P1093, P1094]
+      refs: [P2654, P2655, P2669, P2690, P2696,
+             P2721, P2722, P2725, P2726, P2727,
+             P2782, P2783, P2805, P2807, P2818]
     detector_adapter:
       # RE-REVIEW: the true 41969 adapter ref is unresolved after the Sep 2026 CAD
       # refresh (see attachment_overrides.moving.A204 comment); this now colors the
@@ -200,6 +204,7 @@ ignored_pairs:
 
 attachment_overrides:
   fixed:
+    - P2458   # DSG-000041331; Middle Crystal base mount
     - P2526   # DSG-000043036; North Crystal base mount
     - P2528   # DSG-000041169; North Crystal base support
     - P2642  # DSG-000043037; South Crystal base mount
@@ -231,23 +236,26 @@ attachment_overrides:
     A204: [P2406]        # VT-50L carriage to upper LX10 base
     A205: [P2388, P2389, P2394, P2397]  # EPIX 100P detector and locating pegs
     A209: [P2479]       # DSG-000034586: first linear carriage to second linear base
-    A208: [P2458]       # DSG-000041331: second linear carriage to rotation base
+    A208: [P2453]       # DSG-000041329: second linear carriage to rotation base
     A211: [P2452]       # DSG-000028455: rotation carriage to tilt base
-    A210: [P2494, P2495, P2504, P2507, P2508, P2509]  # final adapter, holder, and Middle Crystal
-    A216: [P2511]       # first-linear to second-linear adapter
+    # Tip/tilt carries the whole optical payload: bracket, KM, holder, Bragg crystal, diode.
+    A210: [P2507, P2508, P2509, P2504]
+    A216: [P2523]       # DSG-000044973: first linear carriage to second linear base
     A215: [P2520]       # DSG-000041276: second linear carriage to rotation base
     A214: [P2517]       # DSG-000028455: rotation carriage to tilt base
-    A213: [P2561, P2564, P2565, P2577, P2578, P2579]  # final adapter, holder, and North Crystal
-    A221: [P2638]      # first linear carriage to second linear base
-    A220: [P2606]      # DSG-000041276: second linear carriage to rotation base
-    A219: [P2596]      # DSG-000028455: rotation carriage to tilt base
-    A218: [P2625, P2630, P2611, P2612, P2577, P2578, P2579]  # final adapter, holder, and South Crystal
-    A225: [P1021]         # 46523: ZA carriage to 7591 fixed base, South Polycap
-    A224: [P1016, P1014, P1015]  # 40767 adapter and South collimating optic
-    A229: [P1053]         # 46527: ZA carriage to 7591 fixed base, Middle Polycap
-    A227: [P1052, P1058, P1059]  # 40909 adapter and Middle collimating optic
-    A231: [P2789]         # 46523: ZA carriage to 7591 fixed base, North Polycap
-    A233: [P2784, P2782, P2783]  # 40767 adapter and North collimating optic
+    A213: [P2511, P2512, P2527, P2513]
+    A221: [P2625]       # DSG-000035628: first linear carriage to second linear base
+    A220: [P2606]       # DSG-000041276: second linear carriage to rotation base
+    A219: [P2596]       # DSG-000028455: rotation carriage to tilt base
+    A218: [P2577, P2579, P2638, P2578]
+    A225: [P2661]         # DSG-000046523: ZA carriage to 7591 fixed base, South Polycap
+    # Each polycap chain ends at the collimating optic, carrying the retained
+    # stage-side and optic-side kinematic mounts with it.
+    A224: [P2690, P2696, P2669, P2654, P2655]
+    A229: [P2716]         # DSG-000046527: ZA carriage to 7591 fixed base, Middle Polycap
+    A227: [P2725, P2727, P2726, P2721, P2722]
+    A231: [P2789]         # DSG-000046523: ZA carriage to 7591 fixed base, North Polycap
+    A233: [P2807, P2818, P2805, P2782, P2783]
     # The whole jet rides the ZA05A lift: bracket, its clamp inserts, the LCL5009-010086
     # holder, and the DSG-000022427 jet cartridge that mounts to it magnetically.
     A005: [P005, P034, P036, P038, P040, P042, P051,

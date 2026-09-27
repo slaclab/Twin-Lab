@@ -401,3 +401,31 @@ def test_auto_amplitude_stays_inside_the_shorter_side_of_reviewed_limits() -> No
 def test_auto_amplitude_is_zero_when_home_sits_on_a_limit() -> None:
     assert _auto_amplitude({"limits": [0.0, 0.4], "home": 0.0}, 1.0) == 0.0
     assert _auto_amplitude({"limits": [0.0, 0.4], "home": -0.01}, 1.0) == 0.0
+
+
+def test_each_polycap_chain_ends_on_its_collimating_optic() -> None:
+    """The optic is the payload; if it is not on the last stage the stack is static."""
+
+    inventory = yaml.safe_load(
+        Path("cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    manifest = json.loads(
+        Path("cad/DSG-000040389/manifest.json").read_text(encoding="utf-8")
+    )
+    by_ref = {item["ref"]: item for item in manifest["occurrences"]}
+    optic_names = {"REF-000221282", "REF-000221284"}
+    moving = inventory["attachment_overrides"]["moving"]
+
+    polycap_chains = {
+        name: specs
+        for name, specs in inventory["compound_motion_chains"].items()
+        if "Polycap" in name
+    }
+    assert len(polycap_chains) == 3
+
+    for name, specs in polycap_chains.items():
+        terminal_ref = str(specs[-1]["stage_ref"])
+        carried = {by_ref[ref]["name"] for ref in moving.get(terminal_ref, [])}
+        assert optic_names <= carried, f"{name} does not carry its collimating optic"

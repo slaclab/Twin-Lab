@@ -16,10 +16,13 @@ omitted_assemblies:
 - LCL5007-010087 # right-side LJ camera and local stage
 omitted_under_assemblies:
   DSG-000110737:
-  - LIB-000027467 # optic-side KMs; stage-side mount is retained
-  - DSG-000111515 # optic-side square KM adapter
-  - DSG-000111522 # optic-side long KM adapter
+  - DSG-000111515 # optic-side square adapter; this stack mounts square on the stage side
+  - DSG-000111522 # stage-side long adapter; the long adapter belongs on the optic side
 omitted_placed_components:
+- parent: DSG-000110737
+  name: LIB-000027467
+  translation_mm: [-30.194, 51.896, 69.831]
+  tolerance_mm: 5
 - parent: DSG-000102548
   name: ThorLabs__PostHolderUniv_.50Diax2.0L__UPH2
   translation_mm: [-183.511, 152.934, -102.513]
@@ -64,6 +67,10 @@ omitted_components:
 - LIB-000032732 # iris mounting hardware
 - LIB-000032670 # iris mounting hardware
 - LIB-000018446 # iris retention hardware
+- LIB-000016968 # LX10 stage mounting bolts
+- DSG-000040767 # static polycap optic mount; the kinematic mount is used instead
+- DSG-000040909 # static polycap optic mount, middle stack
+- DSG-000111956 # alternate-configuration polycap optic bracket
 translucent_assemblies:
 - DSG-000043161 # enclosure box, without its omitted front cover
 translucent_components:
