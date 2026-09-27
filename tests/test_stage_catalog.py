@@ -44,8 +44,8 @@ def test_ongoing_playback_resume_round_trips_timestamp(tmp_path) -> None:
 def test_pv_name_labels_matches_real_crystal_stack_command_map() -> None:
     labels = _pv_name_labels("config/crystal-stack-command-map.yaml")
 
-    assert labels["A047"] == "POLYCAP:CRY:N:SWI"
-    assert labels["A067:x"] == "POLYCAP:PC:N:X"
+    assert labels["A213"] == "POLYCAP:CRY:N:SWI"
+    assert labels["A233:x"] == "POLYCAP:PC:N:X"
     assert len(labels) == 19
 
 

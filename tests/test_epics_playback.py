@@ -217,36 +217,51 @@ def test_load_command_map_reads_filled_entries(tmp_path) -> None:
 def test_real_crystal_stack_command_map_is_fully_filled_in() -> None:
     mappings, joint_types = load_command_map("config/crystal-stack-command-map.yaml")
 
-    assert mappings["A047"].command_pv == "POLYCAP:CRY:N:SWI"
-    assert joint_types["A047"] == "revolute"
-    assert mappings["A040"].command_pv == "POLYCAP:DET:Z"
-    assert mappings["A067:x"].command_pv == "POLYCAP:PC:N:X"
-    assert mappings["A065:z"].command_pv == "POLYCAP:PC:N:Z"
-    assert joint_types["A067:x"] == "prismatic"
+    assert mappings["A213"].command_pv == "POLYCAP:CRY:N:SWI"
+    assert joint_types["A213"] == "revolute"
+    assert mappings["A204"].command_pv == "POLYCAP:DET:Z"
+    assert mappings["A233:x"].command_pv == "POLYCAP:PC:N:X"
+    assert mappings["A231:z"].command_pv == "POLYCAP:PC:N:Z"
+    assert joint_types["A233:x"] == "prismatic"
     assert len(mappings) == 19  # 12 crystal + 1 detector + 3 polycap stacks x 2 axes
 
 
 def test_sdf_joint_name_matches_the_real_compiled_sdf() -> None:
     chains = load_joint_chains("config/crystal-stack-command-map.yaml")
 
-    assert sdf_joint_name(chains["A047"], "A047") == "north_crystal_a047_motion"
-    assert sdf_joint_name(chains["A040"], "A040") == "detector_a040_motion"
-    assert sdf_joint_name(chains["A067:x"], "A067:x") == "north_polycap_a067_x"
-    assert sdf_joint_name(chains["A065:z"], "A065:z") == "north_polycap_a065_z"
-    assert sdf_joint_name(chains["A058:x"], "A058:x") == "south_polycap_a058_x"
+    assert sdf_joint_name(chains["A213"], "A213") == "north_crystal_a213_motion"
+    assert sdf_joint_name(chains["A204"], "A204") == "detector_a204_motion"
+    assert sdf_joint_name(chains["A233:x"], "A233:x") == "north_polycap_a233_x"
+    assert sdf_joint_name(chains["A231:z"], "A231:z") == "north_polycap_a231_z"
+    assert sdf_joint_name(chains["A224:x"], "A224:x") == "south_polycap_a224_x"
 
 
 def test_load_sdf_joint_names_covers_every_command_map_joint() -> None:
     sdf_names = load_sdf_joint_names("config/crystal-stack-command-map.yaml")
 
-    assert sdf_names["A053"] == "south_crystal_a053_motion"
-    assert sdf_names["A061:x"] == "middle_polycap_a061_x"
-    # Every name here should be one the real compiled SDF actually has.
-    real_sdf = Path(
-        "exports/DSG-000040389.43841-stage-stack.collision/dsg_000040389_43841_stage_stack.sdf"
-    ).read_text()
+    assert sdf_names["A219"] == "south_crystal_a219_motion"
+    assert sdf_names["A227:x"] == "middle_polycap_a227_x"
+    # Every name here should be one the real compiled SDF actually has. The package is
+    # a generated artifact, so skip rather than fail when nobody has compiled one yet.
+    candidates = [
+        Path("exports/DSG-000040389.43841-stage-stack.collision"),
+        Path(".cache/twin_lab/33dof-convex"),
+        Path(".cache/twin_lab/33dof-hull"),
+    ]
+    compiled = next(
+        (
+            sdf
+            for directory in candidates
+            for sdf in sorted(directory.glob("*.sdf"))
+            if not sdf.name.endswith("_matlab.sdf")
+        ),
+        None,
+    )
+    if compiled is None:
+        pytest.skip("no compiled SDF package available; run slac-compile-sdf first")
+    real_sdf = compiled.read_text()
     for name in sdf_names.values():
-        assert f'name="{name}"' in real_sdf, f"{name} not found in the compiled SDF"
+        assert f'name="{name}"' in real_sdf, f"{name} not found in {compiled}"
 
 
 def test_load_home_positions_converts_degrees_and_defaults_to_zero(tmp_path) -> None:
@@ -267,13 +282,13 @@ def test_load_home_positions_converts_degrees_and_defaults_to_zero(tmp_path) -> 
 def test_load_max_speeds_from_real_stage_catalog() -> None:
     speeds = load_max_speeds(
         "cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml",
-        ["A050", "A048", "A067:x", "A040"],
+        ["A216", "A214", "A233:x", "A204"],
     )
 
-    assert speeds["A050"] == pytest.approx(0.01)  # SXA0750-R01-R-BM, 10 mm/s
-    assert speeds["A048"] == pytest.approx(0.3490659, rel=1e-4)  # RA04A-W01, 20 deg/s
-    assert speeds["A067:x"] == pytest.approx(0.005)  # YA04A-R102-RRN-BM, 5 mm/s
-    assert speeds["A040"] == pytest.approx(0.01)  # VT-50L-C0014, 10 mm/s
+    assert speeds["A216"] == pytest.approx(0.01)  # SXA0750-R01-R-BM, 10 mm/s
+    assert speeds["A214"] == pytest.approx(0.3490659, rel=1e-4)  # RA04A-W01, 20 deg/s
+    assert speeds["A233:x"] == pytest.approx(0.005)  # YA04A-R102-RRN-BM, 5 mm/s
+    assert speeds["A204"] == pytest.approx(0.01)  # VT-50L-C0014, 10 mm/s
 
 
 def test_load_recorded_commands_rejects_naive_timestamp(tmp_path) -> None:
@@ -372,9 +387,9 @@ def test_empty_recording_still_builds_a_static_playback(tmp_path) -> None:
     assert playback.has_commands is False
     assert playback.joint_names  # every mapped joint is still present, just idle
     positions = playback.positions()
-    assert positions["A050"] == pytest.approx(0.0)
-    # A048's reviewed home is 180 deg, so "static" must mean the reviewed home, not zero.
-    assert positions["A048"] == pytest.approx(math.pi)
+    assert positions["A216"] == pytest.approx(0.0)
+    # A214's reviewed home is 180 deg, so "static" must mean the reviewed home, not zero.
+    assert positions["A214"] == pytest.approx(math.pi)
 
 
 def test_full_crystal_stack_playback_recreates_a_reasonable_session(tmp_path) -> None:
@@ -388,12 +403,12 @@ def test_full_crystal_stack_playback_recreates_a_reasonable_session(tmp_path) ->
     session_start = datetime(2026, 8, 26, 17, 0, tzinfo=timezone.utc)
     # (joint ref, seconds after session start, commanded value in controls units)
     steps = [
-        ("A050", 0, 0.0), ("A050", 30, 2.0), ("A050", 150, -1.5),  # North x, mm
-        ("A049", 0, 0.0), ("A049", 40, -1.0),  # North y, mm
-        ("A048", 0, 0.0), ("A048", 50, 0.5),  # North swivel, deg
-        ("A047", 0, 0.0), ("A047", 180, -0.2),  # North pivot, deg
-        ("A052", 0, 0.0), ("A052", 80, -0.25),  # South pivot, deg
-        ("A053", 0, 0.0), ("A053", 70, 0.3),  # South swivel, deg
+        ("A216", 0, 0.0), ("A216", 30, 2.0), ("A216", 150, -1.5),  # North x, mm
+        ("A215", 0, 0.0), ("A215", 40, -1.0),  # North y, mm
+        ("A214", 0, 0.0), ("A214", 50, 0.5),  # North swivel, deg
+        ("A213", 0, 0.0), ("A213", 180, -0.2),  # North pivot, deg
+        ("A218", 0, 0.0), ("A218", 80, -0.25),  # South pivot, deg
+        ("A219", 0, 0.0), ("A219", 70, 0.3),  # South swivel, deg
     ]
     recording = tmp_path / "session.json"
     recording.write_text(
@@ -431,15 +446,15 @@ def test_full_crystal_stack_playback_recreates_a_reasonable_session(tmp_path) ->
 
     wall_start = playback._clock._wall_anchor  # test drives the clock deterministically
     before_first_command = playback.positions(now=wall_start)
-    # North swivel (A048) is mounted at 180deg home; before any command its
+    # North swivel (A214) is mounted at 180deg home; before any command its
     # position must be that reviewed home, not zero.
-    assert before_first_command["A048"] == pytest.approx(math.pi)
+    assert before_first_command["A214"] == pytest.approx(math.pi)
 
     mid_session = playback.positions(now=wall_start + 60)
-    # A050 has stepped past its second command (t=30s) by t=60s.
-    assert mid_session["A050"] == pytest.approx(0.002)
-    # A047 hasn't reached its only real step (t=180s) yet, so it still holds home.
-    assert mid_session["A047"] == pytest.approx(0.0)
+    # A216 has stepped past its second command (t=30s) by t=60s.
+    assert mid_session["A216"] == pytest.approx(0.002)
+    # A213 hasn't reached its only real step (t=180s) yet, so it still holds home.
+    assert mid_session["A213"] == pytest.approx(0.0)
 
     end_of_session = playback.positions(now=wall_start + 300)
     assert playback.is_finished(now=wall_start + 300)
@@ -629,3 +644,44 @@ def test_live_file_source_missing_file_holds_home(tmp_path) -> None:
     )
 
     assert source.positions()["j"] == pytest.approx(0.25)
+
+
+def test_pre_refresh_recording_still_replays_through_legacy_refs() -> None:
+    """A CAD refresh must not silently turn a historical session into a static pose."""
+
+    playback = build_playback_from_recording(
+        "recordings/session-real.json",
+        "config/crystal-stack-command-map.yaml",
+        "cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml",
+    )
+
+    assert playback.has_commands
+    wall_start = playback._clock._wall_anchor
+    moved = set()
+    previous = playback.positions(now=wall_start)
+    for offset in range(0, 3600, 60):
+        current = playback.positions(now=wall_start + offset)
+        moved.update(ref for ref, value in current.items() if value != previous.get(ref))
+        previous = current
+    # Every ref here is a current one; the recording itself stores pre-refresh refs.
+    assert {"A216", "A214", "A209", "A221"} <= moved
+
+
+def test_recording_from_an_unknown_revision_is_refused(tmp_path) -> None:
+    recording = tmp_path / "stale.json"
+    recording.write_text(
+        json.dumps(
+            {
+                "commands": [
+                    {"joint": "Z999", "timestamp": "2026-08-26T22:14:01+00:00", "commanded": 1.0}
+                ]
+            }
+        )
+    )
+
+    with pytest.raises(ValueError, match="older CAD revision"):
+        build_playback_from_recording(
+            recording,
+            "config/crystal-stack-command-map.yaml",
+            "cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml",
+        )

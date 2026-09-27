@@ -37,35 +37,62 @@ schema: slac-crystal-stack-command-map/v1
 # form (e.g. "A067:x") to match stage_cad_viewer.py's joint["key"] for
 # compound_motion_chains joints; crystal/Detector joints are simple
 # motion_chains, so their `ref` is just the bare stage ref.
+# Refs were remapped to the 2026-09-24 STEP (sha256 948f9e9f88...). The pre-refresh
+# refs are not just stale, they are dangerous: old Middle-Crystal x "A043" now
+# identifies the liquid-jet camera stage in this revision.
+# Recordings store the Twin-Lab ref, not the PV, so a CAD refresh would otherwise
+# orphan every historical session. These are the pre-2026-09-24 refs, kept so
+# recordings/session-real.json (2026-08-26) still replays.
+legacy_refs:
+  A050: A216
+  A049: A215
+  A048: A214
+  A047: A213
+  A043: A209
+  A042: A208
+  A045: A211
+  A044: A210
+  A055: A221
+  A054: A220
+  A053: A219
+  A052: A218
+  A040: A204
+  "A065:z": "A231:z"
+  "A067:x": "A233:x"
+  "A063:z": "A229:z"
+  "A061:x": "A227:x"
+  "A059:z": "A225:z"
+  "A058:x": "A224:x"
+
 joints:
   North Crystal:
-    x:      {ref: A050, joint_type: prismatic, command_pv: "POLYCAP:CRY:N:X"}
-    y:      {ref: A049, joint_type: prismatic, command_pv: "POLYCAP:CRY:N:Y"}
-    swivel: {ref: A048, joint_type: revolute,  command_pv: "POLYCAP:CRY:N:ROT"}
-    pivot:  {ref: A047, joint_type: revolute,  command_pv: "POLYCAP:CRY:N:SWI"}
+    x:      {ref: A216, joint_type: prismatic, command_pv: "POLYCAP:CRY:N:X"}
+    y:      {ref: A215, joint_type: prismatic, command_pv: "POLYCAP:CRY:N:Y"}
+    swivel: {ref: A214, joint_type: revolute,  command_pv: "POLYCAP:CRY:N:ROT"}
+    pivot:  {ref: A213, joint_type: revolute,  command_pv: "POLYCAP:CRY:N:SWI"}
   Middle Crystal:
-    x:      {ref: A043, joint_type: prismatic, command_pv: "POLYCAP:CRY:M:X"}
-    y:      {ref: A042, joint_type: prismatic, command_pv: "POLYCAP:CRY:M:Y"}
-    swivel: {ref: A045, joint_type: revolute,  command_pv: "POLYCAP:CRY:M:ROT"}
-    pivot:  {ref: A044, joint_type: revolute,  command_pv: "POLYCAP:CRY:M:SWI"}
+    x:      {ref: A209, joint_type: prismatic, command_pv: "POLYCAP:CRY:M:X"}
+    y:      {ref: A208, joint_type: prismatic, command_pv: "POLYCAP:CRY:M:Y"}
+    swivel: {ref: A211, joint_type: revolute,  command_pv: "POLYCAP:CRY:M:ROT"}
+    pivot:  {ref: A210, joint_type: revolute,  command_pv: "POLYCAP:CRY:M:SWI"}
   South Crystal:
-    x:      {ref: A055, joint_type: prismatic, command_pv: "POLYCAP:CRY:S:X"}
-    y:      {ref: A054, joint_type: prismatic, command_pv: "POLYCAP:CRY:S:Y"}
-    swivel: {ref: A053, joint_type: revolute,  command_pv: "POLYCAP:CRY:S:ROT"}
-    pivot:  {ref: A052, joint_type: revolute,  command_pv: "POLYCAP:CRY:S:SWI"}
+    x:      {ref: A221, joint_type: prismatic, command_pv: "POLYCAP:CRY:S:X"}
+    y:      {ref: A220, joint_type: prismatic, command_pv: "POLYCAP:CRY:S:Y"}
+    swivel: {ref: A219, joint_type: revolute,  command_pv: "POLYCAP:CRY:S:ROT"}
+    pivot:  {ref: A218, joint_type: revolute,  command_pv: "POLYCAP:CRY:S:SWI"}
   Detector:
-    z: {ref: A040, joint_type: prismatic, command_pv: "POLYCAP:DET:Z"}
+    z: {ref: A204, joint_type: prismatic, command_pv: "POLYCAP:DET:Z"}
   North Polycap:
-    z: {ref: "A065:z", joint_type: prismatic, command_pv: "POLYCAP:PC:N:Z"}
-    x: {ref: "A067:x", joint_type: prismatic, command_pv: "POLYCAP:PC:N:X"}
-    # y (A067:y) has no PV in the supplied PV table - the YA04A-R102 stage is
+    z: {ref: "A231:z", joint_type: prismatic, command_pv: "POLYCAP:PC:N:Z"}
+    x: {ref: "A233:x", joint_type: prismatic, command_pv: "POLYCAP:PC:N:X"}
+    # y (A233:y) has no PV in the supplied PV table - the YA04A-R102 stage is
     # a two-axis unit, so this joint can't be replayed until that PV shows up.
   Middle Polycap:
-    z: {ref: "A063:z", joint_type: prismatic, command_pv: "POLYCAP:PC:M:Z"}
-    x: {ref: "A061:x", joint_type: prismatic, command_pv: "POLYCAP:PC:M:X"}
-    # y (A061:y): same gap as North Polycap above.
+    z: {ref: "A229:z", joint_type: prismatic, command_pv: "POLYCAP:PC:M:Z"}
+    x: {ref: "A227:x", joint_type: prismatic, command_pv: "POLYCAP:PC:M:X"}
+    # y (A227:y): same gap as North Polycap above.
   South Polycap:
-    z: {ref: "A059:z", joint_type: prismatic, command_pv: "POLYCAP:PC:S:Z"}
-    x: {ref: "A058:x", joint_type: prismatic, command_pv: "POLYCAP:PC:S:X"}
-    # y (A058:y): same gap as North Polycap above.
+    z: {ref: "A225:z", joint_type: prismatic, command_pv: "POLYCAP:PC:S:Z"}
+    x: {ref: "A224:x", joint_type: prismatic, command_pv: "POLYCAP:PC:S:X"}
+    # y (A224:y): same gap as North Polycap above.
 

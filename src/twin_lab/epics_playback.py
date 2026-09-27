@@ -17,6 +17,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 import json
 import time
 from bisect import bisect_right
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from math import copysign, pi
@@ -442,6 +443,44 @@ def load_recorded_commands(path: str | Path) -> tuple[datetime | None, list[Moto
     return session_start, commands
 
 
+def load_legacy_refs(path: str | Path) -> dict[str, str]:
+    """Pre-refresh joint ref -> current ref, from a command-map YAML.
+
+    Recordings store the Twin-Lab ref rather than the PV, so without this a CAD
+    refresh silently turns every historical session into a static pose.
+    """
+
+    data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    return {str(old): str(new) for old, new in (data.get("legacy_refs") or {}).items()}
+
+
+def _retarget_legacy_refs(
+    commands: list[MotorCommand],
+    aliases: Mapping[str, str],
+    mappings: Mapping[str, MotorPvMap],
+) -> list[MotorCommand]:
+    """Rename pre-refresh refs, refusing a recording whose joints all went stale."""
+
+    renamed = [
+        MotorCommand(
+            aliases.get(command.joint_name, command.joint_name),
+            command.timestamp,
+            command.commanded,
+        )
+        for command in commands
+    ]
+    recorded = {command.joint_name for command in renamed}
+    if recorded and recorded.isdisjoint(mappings):
+        raise ValueError(
+            "No joint in this recording matches the command map. It was probably made "
+            f"against an older CAD revision; add its refs to legacy_refs. Saw: {sorted(recorded)}"
+        )
+    unmatched = sorted(recorded - set(mappings))
+    if unmatched:
+        print(f"Ignoring {len(unmatched)} recorded joint(s) absent from the command map: {unmatched}")
+    return renamed
+
+
 def build_playback_from_recording(
     recording_path: str | Path,
     command_map_path: str | Path,
@@ -453,6 +492,7 @@ def build_playback_from_recording(
 
     mappings, joint_types = load_command_map(command_map_path)
     session_start, commands = load_recorded_commands(recording_path)
+    commands = _retarget_legacy_refs(commands, load_legacy_refs(command_map_path), mappings)
     # A window with no commands still describes a real assembly, so it renders statically
     # at the reviewed home rather than refusing to open.
     if session_start is None:
