@@ -156,3 +156,24 @@ stages:
       - The STEP occurrence is SLAC library part LIB-000032478.
       - Cross-roller X stage; the short stroke is why it carries the transverse axis.
     source: https://www.kohzu.co.jp/products/positioning-stages/item/xa05a-r202/
+
+  lj_detector_vertical:
+    manufacturer: KOHZU
+    model: LIB-000032451
+    joint_type: prismatic
+    axis_local: [0.0, 0.0, 1.0]
+    component_roles: {fixed: [2], moving: [1]}
+    limits: [-0.004, 0.004]
+    notes:
+      - The STEP occurrences are A024 and A030 in the liquid-jet detector tower.
+
+  lj_camera_xy:
+    manufacturer: UNKNOWN
+    model: LIB-000013709
+    joint_type: planar_xy
+    component_roles: {fixed: [1], y: [2], x: [3]}
+    limits:
+      x: [-0.005, 0.005]
+      y: [-0.005, 0.005]
+    notes:
+      - The STEP occurrence is A043 in the liquid-jet camera stack.

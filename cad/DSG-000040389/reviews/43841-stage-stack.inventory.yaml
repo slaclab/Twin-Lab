@@ -44,6 +44,8 @@ visual_styles:
     kohzu_za05a_w101_bm: [0.82, 0.34, 0.48, 1.0]
     kohzu_xa05a_l202_r: [0.16, 0.52, 0.44, 1.0]
     kohzu_xa05a_r202: [0.32, 0.74, 0.62, 1.0]
+    lj_detector_vertical: [0.20, 0.62, 0.72, 1.0]
+    lj_camera_xy: [0.88, 0.48, 0.18, 1.0]
   attachment_groups:
     adapter:
       rgba: [0.92, 0.42, 0.10, 1.0]
@@ -115,6 +117,12 @@ stage_instances:
   - {ref: A006, library_id: LIB-000032478, catalog: kohzu_xa05a_r202}
   - {ref: A005, library_id: LIB-000032469, catalog: kohzu_za05a_w101_bm}
 
+  - {ref: A024, library_id: LIB-000032451, catalog: lj_detector_vertical}
+  - {ref: A026, library_id: LIB-000032478, catalog: kohzu_xa05a_r202}
+  - {ref: A030, library_id: LIB-000032451, catalog: lj_detector_vertical}
+  - {ref: A032, library_id: LIB-000032478, catalog: kohzu_xa05a_r202}
+  - {ref: A043, library_id: LIB-000013709, catalog: lj_camera_xy}
+
 # Reviewed base-to-payload order for the detector and three crystal stacks.
 motion_chains:
   # CAD-inferred base-to-payload order; confirm joint directions before hardware use.
@@ -128,6 +136,7 @@ motion_chains:
   # along Z. Each stage's own rail confirms it - A006 has only 5 mm of clearance in Y
   # and needs 15 mm, so it cannot be the Y axis.
   Long Jet: [A007, A006, A005]
+  LJ Detector: [A024, A026, A030, A032]
 
 compound_motion_chains:
   North Polycap:
@@ -142,6 +151,9 @@ compound_motion_chains:
     - {key: A225:z, stage_ref: A225, fixed_role: fixed, moving_role: moving, name: z, axis_local: [0, 0, 1], limits: [-0.004, 0.004], cad_position: -0.003105455}
     - {key: A224:y, stage_ref: A224, fixed_role: fixed, moving_role: y, name: y, axis_local: [1, 0, 0], limits: [-0.005, 0.005]}
     - {key: A224:x, stage_ref: A224, moving_role: x, name: x, axis_local: [0, 1, 0], limits: [-0.005, 0.005]}
+  LJ Camera:
+    - {key: A043:y, stage_ref: A043, fixed_role: fixed, moving_role: y, name: y, axis_local: [0, 1, 0], limits: [-0.005, 0.005]}
+    - {key: A043:x, stage_ref: A043, moving_role: x, name: x, axis_local: [1, 0, 0], limits: [-0.005, 0.005]}
 
 # Editable logical operating limits and home positions. Angular values here are
 # degrees; A214/A219 use the assembly's 180-degree mounting orientation as home.
@@ -225,6 +237,19 @@ attachment_overrides:
     - P045   # Thorlabs RS1P; jet stage mounting-plate pedestal
     - P047   # Thorlabs RS1P; jet stage mounting-plate pedestal
     - P049   # Thorlabs RS1P; jet stage mounting-plate pedestal
+    - P232   # detector tower base plate
+    - P281   # detector tower support
+    - P282   # detector tower support extension
+    - P283   # detector tower support foot
+    - P330   # detector tower base plate
+    - P331   # detector tower support
+    - P340   # detector tower mounting bracket
+    - P345   # detector tower support extension
+    - P346   # detector tower support foot
+    - P347   # detector tower support extension
+    - P348   # detector tower support foot
+    - P349   # detector tower support extension
+    - P350   # detector tower support foot
   moving:
     # RE-REVIEW: refs stale after the Sep 2026 CAD refresh (see git history of this file).
     # EPIX 100P detector (P2388) and both Newport locating pegs (P2394, P2397) are
@@ -256,6 +281,7 @@ attachment_overrides:
     A227: [P2725, P2727, P2726, P2721, P2722]
     A231: [P2789]         # DSG-000046523: ZA carriage to 7591 fixed base, North Polycap
     A233: [P2807, P2818, P2805, P2782, P2783]
+    A043: [P492, P493, P494]
     # The whole jet rides the ZA05A lift: bracket, its clamp inserts, the LCL5009-010086
     # holder, and the DSG-000022427 jet cartridge that mounts to it magnetically.
     A005: [P005, P034, P036, P038, P040, P042, P051,

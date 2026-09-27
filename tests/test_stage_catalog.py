@@ -272,7 +272,7 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
     }
 
 
-def test_current_43841_inventory_has_27_reviewed_joints_and_collision_cover() -> None:
+def test_current_43841_inventory_has_33_reviewed_joints_and_collision_cover() -> None:
     inventory = yaml.safe_load(
         Path("cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml").read_text()
     )
@@ -281,9 +281,14 @@ def test_current_43841_inventory_has_27_reviewed_joints_and_collision_cover() ->
     by_ref = {item["ref"]: item for item in manifest["occurrences"]}
     assert by_ref[inventory["subassembly"]["ref"]]["name"] == "DSG-000043841"
     assert inventory["motion_chains"]["Detector"] == ["A206", "A204", "A205"]
+    assert inventory["motion_chains"]["LJ Detector"] == ["A024", "A026", "A030", "A032"]
+    assert [joint["key"] for joint in inventory["compound_motion_chains"]["LJ Camera"]] == [
+        "A043:y",
+        "A043:x",
+    ]
     assert sum(map(len, inventory["motion_chains"].values())) + sum(
         map(len, inventory["compound_motion_chains"].values())
-    ) == 27
+    ) == 33
     lx10_catalogs = [
         item["catalog"] for item in inventory["stage_instances"]
         if item["ref"] in ("A205", "A206")

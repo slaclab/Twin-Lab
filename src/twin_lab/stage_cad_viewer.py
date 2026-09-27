@@ -203,11 +203,19 @@ def prepare_stage_cad(
     # A reviewed attachment may name a part outside the focused subassembly, because a
     # stack elsewhere in the STEP can still carry payload that has to move with it.
     reviewed_refs = forced_fixed | set(forced_parent)
+    motion_root_ids = {
+        os.path.commonpath([by_ref[str(ref)]["id"] for ref in refs])
+        for refs in inventory.get("motion_chains", {}).values()
+    }
     attached_refs = [
         item["ref"]
         for item in manifest_items
         if not item["is_assembly"]
-        and (item["id"].startswith(f"{root_id}/") or item["ref"] in reviewed_refs)
+        and (
+            item["id"].startswith(f"{root_id}/")
+            or any(item["id"].startswith(f"{motion_root_id}/") for motion_root_id in motion_root_ids)
+            or item["ref"] in reviewed_refs
+        )
         and not any(item["id"].startswith(f"{stage_id}/") for stage_id in stage_ids)
         and not _is_fastener_name(str(item["name"]))
         and item["ref"] not in hidden_refs
