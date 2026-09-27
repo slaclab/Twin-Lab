@@ -159,6 +159,13 @@ compound_motion_chains:
 # stopping at the first part met. `ignore` lets a beam leave its own mount; `expected`
 # marks the parts it is meant to land on, so stopping there is not an obstruction.
 # Refs remapped to the 2026-09-24 STEP.
+#
+# The crystal itself is not separately identifiable in this CAD. Each `crystal.ref`
+# is the holder, whose topmost face normal to local +z is the lip the crystal seats
+# in; that lip's proud face is flush with the crystal surface (reviewed 2026-09-27),
+# so it is the diffracting plane with no normal offset applied. The face reads as a
+# 28 mm circle; its normal comes from the part transform, not the tessellation, so
+# mesh deflection does not enter the reflected angle.
 beam_paths:
   - name: South
     diameter_mm: 20.0
