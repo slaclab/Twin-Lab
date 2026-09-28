@@ -284,7 +284,6 @@ def test_current_43841_inventory_has_33_reviewed_joints_and_collision_cover() ->
     assert inventory["motion_chains"]["LJ Detector 1"] == ["A024", "A026"]
     assert inventory["motion_chains"]["LJ Detector 2"] == ["A030", "A032"]
     assert [joint["key"] for joint in inventory["compound_motion_chains"]["LJ Camera"]] == [
-        "A043:x",
         "A043:rotation",
     ]
     assert set(inventory["hidden_occurrences"]) >= {"P492", "P493", "P494"}
@@ -303,7 +302,7 @@ def test_current_43841_inventory_has_33_reviewed_joints_and_collision_cover() ->
     assert camera_envelope["parent_joint_key"] == "A043:rotation"
     assert sum(map(len, inventory["motion_chains"].values())) + sum(
         map(len, inventory["compound_motion_chains"].values())
-    ) == 33
+    ) == 32
     lx10_catalogs = [
         item["catalog"] for item in inventory["stage_instances"]
         if item["ref"] in ("A205", "A206")

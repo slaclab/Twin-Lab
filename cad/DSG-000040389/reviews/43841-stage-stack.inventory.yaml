@@ -153,7 +153,7 @@ compound_motion_chains:
     - {key: A224:y, stage_ref: A224, fixed_role: fixed, moving_role: y, name: y, axis_local: [1, 0, 0], limits: [-0.005, 0.005]}
     - {key: A224:x, stage_ref: A224, moving_role: x, name: x, axis_local: [0, 1, 0], limits: [-0.005, 0.005]}
   LJ Camera:
-    - {key: A043:x, stage_ref: A043, fixed_role: fixed, moving_role: y, name: x, axis_world: [1, 0, 0], limits: [-0.005, 0.005]}
+    # The X slide is frozen pending CAD origin correction; only the rotary remains actuated.
     - {key: A043:rotation, stage_ref: A043, moving_role: x, name: rotation, joint_type: revolute, axis_world: [0, 0, 1], origin_m: [-0.1125, 0.1956, -0.0603], limits: [-3.141592654, 3.141592654]}
 
 # Line-of-sight beams: out of each collimating optic, off its Bragg crystal face,
