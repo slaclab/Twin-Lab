@@ -189,9 +189,13 @@ class CollisionModel:
         part_labels: Mapping[str, str] | None = None,
         decomposition_dir: str | Path | None = None,
         collision_excluded_parts: frozenset[str] = frozenset(),
+        home_ignored_pairs: frozenset[tuple[str, str]] = frozenset(),
     ):
         self.scene = scene
         self.ignored_pairs = ignored_pairs
+        self.home_ignored_pairs = frozenset(
+            tuple(sorted((first.upper(), second.upper()))) for first, second in home_ignored_pairs
+        )
         self.part_labels = dict(part_labels or {})
         self.collision_excluded_parts = frozenset(
             reference.upper() for reference in collision_excluded_parts
@@ -396,7 +400,10 @@ class CollisionModel:
         excluded = (
             read_collision_excluded_parts(ignore_file) if ignore_file is not None else frozenset()
         )
-        return cls(scene, ignored, labels, decomposition_dir, excluded)
+        home_ignored = (
+            read_home_ignored_pairs(ignore_file) if ignore_file is not None else frozenset()
+        )
+        return cls(scene, ignored, labels, decomposition_dir, excluded, home_ignored)
 
     def joint_names(self) -> list[str]:
         from pydrake.multibody.tree import JointIndex
@@ -454,6 +461,7 @@ class CollisionModel:
             )
             for item in distances
             if _pair_key(item.a, item.b) not in self.ignored_pairs
+            and not (at_home and _pair_key(item.a, item.b) in self.home_ignored_pairs)
             and not (at_home and item.distance_m <= 0.0)
         )
         return ClearanceReport(clearances=clearances, warn_m=warn_m, part_labels=self.part_labels)
@@ -511,6 +519,16 @@ def read_collision_excluded_parts(path: str | Path) -> frozenset[str]:
     data = yaml.safe_load(resolve_repo_path(path).read_text(encoding="utf-8")) or {}
     return frozenset(
         str(reference).upper() for reference in data.get("collision_excluded_parts", [])
+    )
+
+
+def read_home_ignored_pairs(path: str | Path) -> frozenset[tuple[str, str]]:
+    """Read reviewed contacts suppressed only at the configured home pose."""
+
+    data = yaml.safe_load(resolve_repo_path(path).read_text(encoding="utf-8")) or {}
+    return frozenset(
+        tuple(sorted(str(value).upper() for value in entry["pair"]))
+        for entry in data.get("home_ignored_pairs", [])
     )
 
 

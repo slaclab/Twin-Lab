@@ -136,7 +136,8 @@ motion_chains:
   # along Z. Each stage's own rail confirms it - A006 has only 5 mm of clearance in Y
   # and needs 15 mm, so it cannot be the Y axis.
   Long Jet: [A007, A006, A005]
-  LJ Detector: [A024, A026, A030, A032]
+  LJ Detector 1: [A024, A026]
+  LJ Detector 2: [A030, A032]
 
 compound_motion_chains:
   North Polycap:
@@ -278,6 +279,14 @@ ignored_pairs:
     reason: chamber support DSG-000001328 and camera bracket DSG-000001429 are mounted together by design
   - pair: [P349, P258]
     reason: fixed detector-tower support extension P349 mounts directly to the A024 stack component P258
+  - pair: [P330, P251]
+    reason: fixed detector-tower base plate P330 is mounted to the A024 lifting-stage bracket P251
+  - pair: [P330, P252]
+    reason: fixed detector-tower base plate P330 is mounted to the A024 lifting-stage bracket P252
+  - pair: [P232, P300]
+    reason: fixed detector-tower base plate P232 is mounted to the A030 lifting-stage bracket P300
+  - pair: [P232, P301]
+    reason: fixed detector-tower base plate P232 is mounted to the A030 lifting-stage bracket P301
   - pair: [P1095, P3079]
     reason: touching at reviewed CAD home (-2.69 mm)
   - pair: [P1052, P3079]
@@ -296,6 +305,15 @@ ignored_pairs:
   # threshold/max_hulls sweep was run and did not reduce it.
   - pair: [P763, P788]
     reason: 4556T43 cable-carrier bracket flush on the 41969 detector adapter at home (-1.34 mm of hull inflation, true gap 0.000 mm)
+
+# The two detector towers are separately grounded, but their assembled home geometry
+# overlaps at these interfaces. Keep them clear in the home display while retaining
+# collision checks as soon as either tower moves.
+home_ignored_pairs:
+  - pair: [P267, P307]
+    reason: adjacent LJ detector tower mounts are assembled 2.21 mm apart at home
+  - pair: [P330, P258]
+    reason: adjacent LJ detector tower base and mount are assembled together at home
 
 attachment_overrides:
   fixed:

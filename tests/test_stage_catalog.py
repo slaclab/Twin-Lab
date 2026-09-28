@@ -281,7 +281,8 @@ def test_current_43841_inventory_has_33_reviewed_joints_and_collision_cover() ->
     by_ref = {item["ref"]: item for item in manifest["occurrences"]}
     assert by_ref[inventory["subassembly"]["ref"]]["name"] == "DSG-000043841"
     assert inventory["motion_chains"]["Detector"] == ["A206", "A204", "A205"]
-    assert inventory["motion_chains"]["LJ Detector"] == ["A024", "A026", "A030", "A032"]
+    assert inventory["motion_chains"]["LJ Detector 1"] == ["A024", "A026"]
+    assert inventory["motion_chains"]["LJ Detector 2"] == ["A030", "A032"]
     assert [joint["key"] for joint in inventory["compound_motion_chains"]["LJ Camera"]] == [
         "A043:x",
         "A043:rotation",

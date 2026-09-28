@@ -17,6 +17,7 @@ from twin_lab.collision import (
     _short,
     part_of,
     read_collision_excluded_parts,
+    read_home_ignored_pairs,
     read_ignored_pairs,
 )
 from twin_lab.collision_viewer import (
@@ -583,6 +584,51 @@ def test_read_ignored_pairs_is_order_independent(tmp_path):
     assert _pair_key("A050", "A037") in pairs
 
 
+def test_home_ignored_pairs_return_to_collision_checks_after_motion(tmp_path):
+    inventory = tmp_path / "inventory.yaml"
+    inventory.write_text(
+        "home_ignored_pairs:\n"
+        "  - pair: [P002, P003]\n"
+        "    reason: reviewed home mount relationship\n",
+        encoding="utf-8",
+    )
+    collision = STACKED_STAGE_SDF.replace(
+        "<collision name=\"a010_moving_1_p003_collision\">\n"
+        "                <geometry>",
+        "<collision name=\"a010_moving_1_p003_collision\">\n"
+        "                <pose>0.104 0 0 0 0 0</pose>\n"
+        "                <geometry>",
+    )
+    path = tmp_path / "stack.sdf"
+    path.write_text(collision.replace("SECOND_JOINT_TYPE", "prismatic"), encoding="utf-8")
+
+    from twin_lab.collision import CollisionModel
+    from twin_lab.scene import load_scene
+
+    model = CollisionModel(
+        load_scene(path), home_ignored_pairs=read_home_ignored_pairs(inventory)
+    )
+    model.set_reviewed_home(
+        {"test_stack_a010_motion": 0.0, "test_stack_a011_motion": 0.0}
+    )
+
+    assert any(
+        {part_of(clearance.a), part_of(clearance.b)} == {"P002", "P003"}
+        and clearance.distance_m > 0.0
+        for clearance in model.scene.signed_distances(model.context, max_distance_m=0.005)
+    )
+    assert not any(
+        set(clearance.parts) == {"P002", "P003"}
+        for clearance in model.report().clearances
+    )
+
+    model.set_positions({"test_stack_a010_motion": -0.005})
+    assert any(
+        set(clearance.parts) == {"P002", "P003"} and clearance.distance_m <= 0.0
+        for clearance in model.report().clearances
+    )
+
+
 def test_camera_stage_base_to_breadboard_is_a_reviewed_ignored_pair(tmp_path):
     inventory = tmp_path / "inventory.yaml"
     inventory.write_text(
@@ -678,30 +724,43 @@ def test_intentional_chamber_to_camera_mount_pair_is_ignored(tmp_path):
     assert not any(set(clearance.parts) == {"P516", "P647"} for clearance in report.clearances)
 
 
-def test_detector_stage_to_its_fixed_support_is_not_a_clearance_warning(tmp_path):
+@pytest.mark.parametrize(
+    ("support_ref", "stage_ref"),
+    [
+        ("P349", "P258"),
+        ("P330", "P251"),
+        ("P330", "P252"),
+        ("P232", "P300"),
+        ("P232", "P301"),
+    ],
+)
+def test_detector_stage_to_its_fixed_support_is_not_a_clearance_warning(
+    tmp_path, support_ref, stage_ref
+):
     from twin_lab.collision import CollisionModel
     from twin_lab.scene import load_scene
 
     inventory = tmp_path / "inventory.yaml"
     inventory.write_text(
         "ignored_pairs:\n"
-        "  - pair: [P349, P258]\n"
+        f"  - pair: [{support_ref}, {stage_ref}]\n"
         "    reason: detector stage mount to fixed support\n",
         encoding="utf-8",
     )
     path = tmp_path / "stack.sdf"
     path.write_text(
         STACKED_STAGE_SDF.replace("SECOND_JOINT_TYPE", "prismatic")
-        .replace("p002", "p349")
-        .replace("p003", "p258"),
+        .replace("p002", support_ref.lower())
+        .replace("p003", stage_ref.lower()),
         encoding="utf-8",
     )
     model = CollisionModel(load_scene(path), read_ignored_pairs(inventory))
     raw = model.scene.signed_distances(model.context, max_distance_m=0.005)
     report = model.report()
 
-    assert any(set((part_of(item.a), part_of(item.b))) == {"P349", "P258"} for item in raw)
-    assert not any(set(clearance.parts) == {"P349", "P258"} for clearance in report.clearances)
+    expected = {support_ref, stage_ref}
+    assert any(set((part_of(item.a), part_of(item.b))) == expected for item in raw)
+    assert not any(set(clearance.parts) == expected for clearance in report.clearances)
 
 
 def test_collision_excluded_parts_are_filtered_from_the_whole_scene(tmp_path):

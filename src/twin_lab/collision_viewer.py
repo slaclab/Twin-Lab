@@ -17,7 +17,12 @@ from typing import cast
 
 import numpy as np
 
-from .collision import CollisionModel, part_of, read_collision_excluded_parts
+from .collision import (
+    CollisionModel,
+    part_of,
+    read_collision_excluded_parts,
+    read_home_ignored_pairs,
+)
 from .meshcat_ui import FRAMING_DISTANCE, ISOMETRIC_DIRECTION
 from .paths import CACHE_ROOT, EXPORT_ROOT, resolve_repo_path, review_artifact_stem
 
@@ -200,6 +205,7 @@ def run_collision_viewer(
         _read_part_labels(label_source),
         decomposition_dir,
         read_collision_excluded_parts(ignore_file) if ignore_file is not None else frozenset(),
+        read_home_ignored_pairs(ignore_file) if ignore_file is not None else frozenset(),
     )
     model.set_reviewed_home(
         {joint.joint_name: joint.to_sdf(joint.slider_bounds()[2]) for joint in joints}
