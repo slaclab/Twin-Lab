@@ -59,24 +59,57 @@ f 4 5 6
 
 
 def test_collision_only_cover_highlight_is_translucent() -> None:
+    import numpy as np
+
     class MeshcatStub:
-        def SetObject(self, path, shape, rgba):
+        def SetTriangleMesh(self, path, vertices, faces, rgba):
+            self.path = path
+            self.vertices = vertices
+            self.faces = faces
             self.rgba = rgba
 
         def SetTransform(self, path, pose):
             pass
 
+        def SetProperty(self, path, name, value):
+            pass
+
     meshcat = MeshcatStub()
     highlighter = _Highlighter.__new__(_Highlighter)
     highlighter._meshcat = meshcat
+    highlighter._refiner = None
     highlighter._collision_only_parts = frozenset({"P2050"})
-    highlighter._geometries = {"assembly::cover_P2050_000": ("/cover", object(), object())}
+    part_key = "cover/P2050"
+    vertices = np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    faces = np.asarray([[0, 1, 2]], dtype=np.int32)
+    highlighter._parts = {part_key: ("/cover", "P2050", object())}
+    highlighter._part_meshes = {part_key: (vertices, faces)}
+    highlighter._geometry_parts = {
+        "assembly::cover_P2050_000": part_key,
+        "assembly::cover_P2050_001": part_key,
+    }
     highlighter._uploaded = {}
+    highlighter._shown = {}
 
-    highlighter._paint("assembly::cover_P2050_000", "interference")
+    class Report:
+        def geometry_states(self):
+            return {
+                "assembly::cover_P2050_000": "close",
+                "assembly::cover_P2050_001": "interference",
+            }
+
+    highlighter.update(Report())
+    assert meshcat.path == "/cover"
+    np.testing.assert_array_equal(meshcat.vertices, vertices.T)
+    np.testing.assert_array_equal(meshcat.faces, faces.T)
     assert meshcat.rgba.r() > 0.9
     assert meshcat.rgba.a() == pytest.approx(0.42)
-    highlighter._paint("assembly::cover_P2050_000", "close")
+
+    class CloseReport:
+        def geometry_states(self):
+            return {"assembly::cover_P2050_000": "close"}
+
+    highlighter.update(CloseReport())
     assert meshcat.rgba.g() > 0.7
     assert meshcat.rgba.a() == pytest.approx(0.42)
 
