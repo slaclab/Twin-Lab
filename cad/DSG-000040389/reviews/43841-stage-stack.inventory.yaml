@@ -235,7 +235,7 @@ hidden_stage_geometry:
 collision_excluded_parts: [P514, P527]  # LIB-000017334
 
 supplemental_attachments:
-  - parent_joint_key: A043:x
+  - parent_joint_key: A043:rotation
     parent_stage_ref: A043
     mesh: cad/DSG-000040389/supplements/lib-000000728-camera-linear-stage-envelope.obj
     name: LIB-000000728-envelope
@@ -317,6 +317,8 @@ home_ignored_pairs:
 
 attachment_overrides:
   fixed:
+    - P642   # Kohzu RM07A-C1 rotary-stage base
+    - P649   # DSG-000001433 base bracket below the rotary carriage
     - P2458   # DSG-000041331; Middle Crystal base mount
     - P2526   # DSG-000043036; North Crystal base mount
     - P2528   # DSG-000041169; North Crystal base support
@@ -382,7 +384,7 @@ attachment_overrides:
     A227: [P2725, P2727, P2726, P2721, P2722]
     A231: [P2789]         # DSG-000046523: ZA carriage to 7591 fixed base, North Polycap
     A233: [P2807, P2818, P2805, P2782, P2783]
-    A043: [P642, P644, P647, P648, P649, P654, P659, P665]
+    A043: [P644, P647, P648, P654, P659, P665]
     # The recovered LCL5009-010086 mesh rides the ZA05A lift through
     # supplemental_attachments; the flat DSG-000022427 cartridge is excluded.
     A005: [P005, P034, P036, P038, P040, P042, P051]

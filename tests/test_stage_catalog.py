@@ -293,6 +293,14 @@ def test_current_43841_inventory_has_33_reviewed_joints_and_collision_cover() ->
         "P648",  # AVT Manta camera
         "P654",  # Computar macro zoom lens
     }
+    assert {"P642", "P649"} <= set(inventory["attachment_overrides"]["fixed"])
+    assert not {"P642", "P649"} & set(inventory["attachment_overrides"]["moving"]["A043"])
+    camera_envelope = next(
+        attachment
+        for attachment in inventory["supplemental_attachments"]
+        if attachment["name"] == "LIB-000000728-envelope"
+    )
+    assert camera_envelope["parent_joint_key"] == "A043:rotation"
     assert sum(map(len, inventory["motion_chains"].values())) + sum(
         map(len, inventory["compound_motion_chains"].values())
     ) == 33
