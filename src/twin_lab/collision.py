@@ -198,8 +198,6 @@ class CollisionModel:
         )
         self.context = scene.create_context()
         self._reviewed_home_positions: np.ndarray | None = None
-        self._geometry_paths: dict[str, tuple[int, ...]] = {}
-        self._revolute_joints: dict[int, bool] = {}
         self.reopened_joints = self._reopen_joint_adjacent_pairs()
         self._configure_stack_interference_filters()
         self.refiner = (
@@ -335,13 +333,9 @@ class CollisionModel:
             return body_paths[original_index]
 
         groups: dict[str, dict[tuple[int, str, str], list]] = {}
-        geometry_paths = {}
         for geometry_id in inspector.GetAllGeometryIds(Role.kProximity):
             leaf = _leaf(inspector.GetName(geometry_id))
             body = plant.GetBodyFromFrameId(inspector.GetFrameId(geometry_id))
-            geometry_paths[self.scene.geometry_name(inspector, geometry_id)] = path_to_body(
-                body.index()
-            )
             stage = STAGE_PATTERN.match(leaf)
             if stage is None:
                 continue
@@ -358,8 +352,6 @@ class CollisionModel:
             key = (body.index(), reference, role)
             groups.setdefault(stack, {}).setdefault(key, []).append(geometry_id)
 
-        self._geometry_paths = geometry_paths
-        self._revolute_joints = revolute_joints
         declaration = CollisionFilterDeclaration()
         changed = False
         for entries in groups.values():
@@ -443,16 +435,6 @@ class CollisionModel:
         positions = self.scene.plant.GetPositions(plant_context)
         return bool(np.allclose(positions, self._reviewed_home_positions, rtol=0.0, atol=1e-9))
 
-    def _pair_crosses_rotary(self, first: str, second: str) -> bool:
-        first_path = self._geometry_paths.get(first)
-        second_path = self._geometry_paths.get(second)
-        if first_path is None or second_path is None:
-            return True
-        return any(
-            self._revolute_joints.get(index, False)
-            for index in _separating_joints(first_path, second_path)
-        )
-
     def report(
         self, *, warn_m: float = 0.005, max_distance_m: float | None = None
     ) -> ClearanceReport:
@@ -472,9 +454,7 @@ class CollisionModel:
             )
             for item in distances
             if _pair_key(item.a, item.b) not in self.ignored_pairs
-            and not (
-                at_home and item.distance_m <= 0.0 and not self._pair_crosses_rotary(item.a, item.b)
-            )
+            and not (at_home and item.distance_m <= 0.0)
         )
         return ClearanceReport(clearances=clearances, warn_m=warn_m, part_labels=self.part_labels)
 

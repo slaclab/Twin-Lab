@@ -524,13 +524,15 @@ def test_same_stack_clearance_filter_preserves_rotary_sweeps(
     assert live.CollisionFiltered(ids["P003"], ids["P006"]) is same_stack_pair_filtered
     report = model.report()
     pair_reported = any(set(clearance.parts) == {"P003", "P006"} for clearance in report.clearances)
-    assert pair_reported is not same_stack_pair_filtered
-    assert report.status == ("clear" if same_stack_pair_filtered else "interference")
+    assert not pair_reported
+    assert report.status == "clear"
     assert not any(set(clearance.parts) == {"P002", "P003"} for clearance in report.clearances)
 
-    model.set_positions({"test_stack_a010_motion": 0.05})
+    moved_joint = "test_stack_a010_motion" if same_stack_pair_filtered else "test_stack_a011_motion"
+    model.set_positions({moved_joint: 0.05})
     moved_report = model.report()
-    assert any(set(clearance.parts) == {"P002", "P003"} for clearance in moved_report.clearances)
+    expected_pair = {"P002", "P003"} if same_stack_pair_filtered else {"P003", "P006"}
+    assert any(set(clearance.parts) == expected_pair for clearance in moved_report.clearances)
 
 
 def test_read_ignored_pairs_is_order_independent(tmp_path):
@@ -581,6 +583,92 @@ def test_camera_stage_base_to_breadboard_is_a_reviewed_ignored_pair(tmp_path):
     assert not any(
         set(clearance.parts) == {"P2033", "P642"} for clearance in model.report().clearances
     )
+
+
+def test_camera_mounts_to_rotary_stage_are_not_clearance_warnings(tmp_path):
+    from twin_lab.collision import CollisionModel
+    from twin_lab.scene import load_scene
+
+    inventory = tmp_path / "inventory.yaml"
+    inventory.write_text(
+        "ignored_pairs:\n"
+        "  - pair: [A043, P647]\n"
+        "    reason: camera bracket mounted to rotary stage\n"
+        "  - pair: [A043, P644]\n"
+        "    reason: camera mount fixed to rotary stage\n",
+        encoding="utf-8",
+    )
+    path = tmp_path / "stack.sdf"
+    path.write_text(
+        STACKED_STAGE_SDF.replace("SECOND_JOINT_TYPE", "prismatic")
+        .replace("p002", "a043")
+        .replace("p003", "p647")
+        .replace("p004", "p644"),
+        encoding="utf-8",
+    )
+    model = CollisionModel(load_scene(path), read_ignored_pairs(inventory))
+    raw = model.scene.signed_distances(model.context, max_distance_m=0.005)
+    report = model.report()
+    pairs = {frozenset((part_of(item.a), part_of(item.b))) for item in raw}
+
+    assert frozenset(("A043", "P647")) in pairs
+    assert frozenset(("A043", "P644")) in pairs
+    assert not any(
+        set(clearance.parts) in ({"A043", "P647"}, {"A043", "P644"})
+        for clearance in report.clearances
+    )
+
+
+def test_intentional_chamber_to_camera_mount_pair_is_ignored(tmp_path):
+    from twin_lab.collision import CollisionModel
+    from twin_lab.scene import load_scene
+
+    inventory = tmp_path / "inventory.yaml"
+    inventory.write_text(
+        "ignored_pairs:\n"
+        "  - pair: [P516, P647]\n"
+        "    reason: chamber support and camera bracket are mounted together\n",
+        encoding="utf-8",
+    )
+    path = tmp_path / "stack.sdf"
+    path.write_text(
+        STACKED_STAGE_SDF.replace("SECOND_JOINT_TYPE", "prismatic")
+        .replace("p002", "p516")
+        .replace("p003", "p647"),
+        encoding="utf-8",
+    )
+    model = CollisionModel(load_scene(path), read_ignored_pairs(inventory))
+    raw = model.scene.signed_distances(model.context, max_distance_m=0.005)
+    report = model.report()
+
+    assert any(set((part_of(item.a), part_of(item.b))) == {"P516", "P647"} for item in raw)
+    assert not any(set(clearance.parts) == {"P516", "P647"} for clearance in report.clearances)
+
+
+def test_detector_stage_to_its_fixed_support_is_not_a_clearance_warning(tmp_path):
+    from twin_lab.collision import CollisionModel
+    from twin_lab.scene import load_scene
+
+    inventory = tmp_path / "inventory.yaml"
+    inventory.write_text(
+        "ignored_pairs:\n"
+        "  - pair: [P349, P258]\n"
+        "    reason: detector stage mount to fixed support\n",
+        encoding="utf-8",
+    )
+    path = tmp_path / "stack.sdf"
+    path.write_text(
+        STACKED_STAGE_SDF.replace("SECOND_JOINT_TYPE", "prismatic")
+        .replace("p002", "p349")
+        .replace("p003", "p258"),
+        encoding="utf-8",
+    )
+    model = CollisionModel(load_scene(path), read_ignored_pairs(inventory))
+    raw = model.scene.signed_distances(model.context, max_distance_m=0.005)
+    report = model.report()
+
+    assert any(set((part_of(item.a), part_of(item.b))) == {"P349", "P258"} for item in raw)
+    assert not any(set(clearance.parts) == {"P349", "P258"} for clearance in report.clearances)
 
 
 def test_collision_excluded_parts_are_filtered_from_the_whole_scene(tmp_path):

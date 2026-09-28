@@ -270,6 +270,14 @@ decomposition:
 ignored_pairs:
   - pair: [P642, P2033]
     reason: fixed LJ camera-stage base bolted to the world-fixed breadboard; this mount interface cannot move
+  - pair: [A043, P647]
+    reason: camera bracket DSG-000001429 mounted to the A043 rotary-stage assembly
+  - pair: [A043, P644]
+    reason: camera mount mo39131788 mounted to the A043 rotary-stage assembly
+  - pair: [P516, P647]
+    reason: chamber support DSG-000001328 and camera bracket DSG-000001429 are mounted together by design
+  - pair: [P349, P258]
+    reason: fixed detector-tower support extension P349 mounts directly to the A024 stack component P258
   - pair: [P1095, P3079]
     reason: touching at reviewed CAD home (-2.69 mm)
   - pair: [P1052, P3079]
