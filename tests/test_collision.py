@@ -16,6 +16,7 @@ from twin_lab.collision import (
     _pair_key,
     _short,
     part_of,
+    read_collision_excluded_parts,
     read_ignored_pairs,
 )
 from twin_lab.collision_viewer import (
@@ -545,6 +546,34 @@ def test_read_ignored_pairs_is_order_independent(tmp_path):
 
     assert _pair_key("A037", "A050") in pairs
     assert _pair_key("A050", "A037") in pairs
+
+
+def test_collision_excluded_parts_are_filtered_from_the_whole_scene(tmp_path):
+    from pydrake.geometry import Role
+
+    from twin_lab.collision import CollisionModel
+    from twin_lab.scene import load_scene
+
+    path = tmp_path / "stack.sdf"
+    path.write_text(STACKED_STAGE_SDF.replace("SECOND_JOINT_TYPE", "prismatic"), encoding="utf-8")
+    model = CollisionModel(load_scene(path), collision_excluded_parts=frozenset({"P002"}))
+    inspector = model.scene.scene_graph.model_inspector()
+    ids = {
+        part_of(inspector.GetName(geometry_id)): geometry_id
+        for geometry_id in inspector.GetAllGeometryIds(Role.kProximity)
+    }
+    context = model.scene.scene_graph.GetMyContextFromRoot(model.context)
+    query = model.scene.scene_graph.get_query_output_port().Eval(context)
+
+    assert query.inspector().CollisionFiltered(ids["P002"], ids["P003"])
+    assert not any("P002" in clearance.parts for clearance in model.report().clearances)
+
+
+def test_read_collision_excluded_parts_normalizes_references(tmp_path):
+    path = tmp_path / "review.yaml"
+    path.write_text("collision_excluded_parts: [P514, p527]\n", encoding="utf-8")
+
+    assert read_collision_excluded_parts(path) == frozenset({"P514", "P527"})
 
 
 def test_prismatic_slider_bounds_are_reported_in_millimetres_about_the_logical_home():

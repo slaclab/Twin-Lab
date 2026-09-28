@@ -188,10 +188,14 @@ class CollisionModel:
         ignored_pairs: frozenset[tuple[str, str]] = frozenset(),
         part_labels: Mapping[str, str] | None = None,
         decomposition_dir: str | Path | None = None,
+        collision_excluded_parts: frozenset[str] = frozenset(),
     ):
         self.scene = scene
         self.ignored_pairs = ignored_pairs
         self.part_labels = dict(part_labels or {})
+        self.collision_excluded_parts = frozenset(
+            reference.upper() for reference in collision_excluded_parts
+        )
         self.context = scene.create_context()
         self._reviewed_home_positions: np.ndarray | None = None
         self._geometry_paths: dict[str, tuple[int, ...]] = {}
@@ -201,6 +205,33 @@ class CollisionModel:
         self.refiner = (
             ClearanceRefiner(decomposition_dir) if decomposition_dir is not None else None
         )
+        self._exclude_collision_parts()
+
+    def _exclude_collision_parts(self) -> None:
+        if not self.collision_excluded_parts:
+            return
+
+        from pydrake.geometry import CollisionFilterDeclaration, GeometrySet, Role
+
+        scene_graph = self.scene.scene_graph
+        inspector = scene_graph.model_inspector()
+        geometry_ids = list(inspector.GetAllGeometryIds(Role.kProximity))
+        excluded = [
+            geometry_id
+            for geometry_id in geometry_ids
+            if part_of(inspector.GetName(geometry_id)) in self.collision_excluded_parts
+        ]
+        found = {part_of(inspector.GetName(geometry_id)) for geometry_id in excluded}
+        missing = self.collision_excluded_parts - found
+        if missing:
+            raise ValueError(
+                f"Collision-excluded parts have no collision geometry: {sorted(missing)}"
+            )
+
+        declaration = CollisionFilterDeclaration()
+        declaration.ExcludeBetween(GeometrySet(excluded), GeometrySet(geometry_ids))
+        scene_context = scene_graph.GetMyContextFromRoot(self.context)
+        scene_graph.collision_filter_manager(scene_context).Apply(declaration)
 
     def _reopen_joint_adjacent_pairs(self) -> int:
         """Restore clearance checking across every joint except the bearing it represents.
@@ -370,7 +401,10 @@ class CollisionModel:
         scene = load_scene(sdf_path)
         ignored = read_ignored_pairs(ignore_file) if ignore_file is not None else frozenset()
         labels = read_part_labels(label_source) if label_source is not None else {}
-        return cls(scene, ignored, labels, decomposition_dir)
+        excluded = (
+            read_collision_excluded_parts(ignore_file) if ignore_file is not None else frozenset()
+        )
+        return cls(scene, ignored, labels, decomposition_dir, excluded)
 
     def joint_names(self) -> list[str]:
         from pydrake.multibody.tree import JointIndex
@@ -489,6 +523,15 @@ def read_ignored_pairs(path: str | Path) -> frozenset[tuple[str, str]]:
         first, second = (str(value) for value in entry["pair"])
         pairs.add(tuple(sorted((first.upper(), second.upper()))))
     return frozenset(pairs)
+
+
+def read_collision_excluded_parts(path: str | Path) -> frozenset[str]:
+    """Read reviewed occurrences that should never enter collision queries."""
+
+    data = yaml.safe_load(resolve_repo_path(path).read_text(encoding="utf-8")) or {}
+    return frozenset(
+        str(reference).upper() for reference in data.get("collision_excluded_parts", [])
+    )
 
 
 def read_part_labels(inventory_path: str | Path) -> dict[str, str]:

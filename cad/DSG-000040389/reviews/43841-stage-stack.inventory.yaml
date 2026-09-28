@@ -230,6 +230,9 @@ hidden_occurrences:
 hidden_stage_geometry:
   - A043   # surrogate frame only; the exported camera X stage has zero faces
 
+# Flexible LJ chamber boots remain visible but are not rigid collision geometry.
+collision_excluded_parts: [P514, P527]  # LIB-000017334
+
 supplemental_attachments:
   - parent_joint_key: A043:x
     parent_stage_ref: A043

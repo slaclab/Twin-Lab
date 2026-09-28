@@ -17,7 +17,7 @@ from typing import cast
 
 import numpy as np
 
-from .collision import CollisionModel, part_of
+from .collision import CollisionModel, part_of, read_collision_excluded_parts
 from .meshcat_ui import FRAMING_DISTANCE, ISOMETRIC_DIRECTION
 from .paths import CACHE_ROOT, EXPORT_ROOT, resolve_repo_path, review_artifact_stem
 
@@ -199,6 +199,7 @@ def run_collision_viewer(
         _read_ignored(ignore_file),
         _read_part_labels(label_source),
         decomposition_dir,
+        read_collision_excluded_parts(ignore_file) if ignore_file is not None else frozenset(),
     )
     model.set_reviewed_home(
         {joint.joint_name: joint.to_sdf(joint.slider_bounds()[2]) for joint in joints}
@@ -207,6 +208,11 @@ def run_collision_viewer(
         f"Loaded {_proximity_geometry_count(model)} collision geometries "
         f"in {time.monotonic() - load_start:.0f} s"
     )
+    if model.collision_excluded_parts:
+        print(
+            "Excluded non-rigid parts from collision detection: "
+            + ", ".join(sorted(model.collision_excluded_parts))
+        )
     print(
         f"Reopened the surroundings of {model.reopened_joints} joints that Drake's "
         "joint-adjacency filter had hidden from the static environment."
