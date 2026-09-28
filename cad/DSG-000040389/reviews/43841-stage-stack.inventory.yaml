@@ -153,9 +153,8 @@ compound_motion_chains:
     - {key: A224:y, stage_ref: A224, fixed_role: fixed, moving_role: y, name: y, axis_local: [1, 0, 0], limits: [-0.005, 0.005]}
     - {key: A224:x, stage_ref: A224, moving_role: x, name: x, axis_local: [0, 1, 0], limits: [-0.005, 0.005]}
   LJ Camera:
-    # The X slide is frozen pending CAD origin correction; only the rotary remains actuated.
+    # X translation stays frozen pending CAD origin review; only the rotary is actuated.
     - {key: A043:rotation, stage_ref: A043, moving_role: x, name: rotation, joint_type: revolute, axis_world: [0, 0, 1], origin_m: [-0.1125, 0.1956, -0.0603], limits: [-3.141592654, 3.141592654]}
-
 # Line-of-sight beams: out of each collimating optic, off its Bragg crystal face,
 # stopping at the first part met. `ignore` lets a beam leave its own mount; `expected`
 # marks the parts it is meant to land on, so stopping there is not an obstruction.
@@ -384,7 +383,7 @@ attachment_overrides:
     A227: [P2725, P2727, P2726, P2721, P2722]
     A231: [P2789]         # DSG-000046523: ZA carriage to 7591 fixed base, North Polycap
     A233: [P2807, P2818, P2805, P2782, P2783]
-    A043: [P644, P647, P648, P654, P659, P665]
+    A043: [P643, P644, P647, P648, P654, P659, P665]
     # The recovered LCL5009-010086 mesh rides the ZA05A lift through
     # supplemental_attachments; the flat DSG-000022427 cartridge is excluded.
     A005: [P005, P034, P036, P038, P040, P042, P051]
