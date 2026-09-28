@@ -548,6 +548,41 @@ def test_read_ignored_pairs_is_order_independent(tmp_path):
     assert _pair_key("A050", "A037") in pairs
 
 
+def test_camera_stage_base_to_breadboard_is_a_reviewed_ignored_pair(tmp_path):
+    inventory = tmp_path / "inventory.yaml"
+    inventory.write_text(
+        "ignored_pairs:\n"
+        "  - pair: [P642, P2033]\n"
+        "    reason: fixed camera-stage base mounted to breadboard\n",
+        encoding="utf-8",
+    )
+    sdf_path = tmp_path / "stack.sdf"
+    sdf_path.write_text(
+        STACKED_STAGE_SDF.replace("SECOND_JOINT_TYPE", "prismatic")
+        .replace("p002", "p2033")
+        .replace("p003", "p642"),
+        encoding="utf-8",
+    )
+    from pydrake.geometry import Role
+
+    from twin_lab.collision import CollisionModel
+    from twin_lab.scene import load_scene
+
+    model = CollisionModel(load_scene(sdf_path), read_ignored_pairs(inventory))
+    inspector = model.scene.scene_graph.model_inspector()
+    context = model.scene.scene_graph.GetMyContextFromRoot(model.context)
+    query = model.scene.scene_graph.get_query_output_port().Eval(context)
+    parts = {
+        part_of(inspector.GetName(geometry_id)): geometry_id
+        for geometry_id in inspector.GetAllGeometryIds(Role.kProximity)
+    }
+
+    assert not query.inspector().CollisionFiltered(parts["P2033"], parts["P642"])
+    assert not any(
+        set(clearance.parts) == {"P2033", "P642"} for clearance in model.report().clearances
+    )
+
+
 def test_collision_excluded_parts_are_filtered_from_the_whole_scene(tmp_path):
     from pydrake.geometry import Role
 

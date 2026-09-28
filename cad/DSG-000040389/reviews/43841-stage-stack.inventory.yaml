@@ -268,6 +268,8 @@ decomposition:
 # are 0.5-2.7 mm. NOT yet individually validated as by-design; re-review if a stack
 # is re-modelled.
 ignored_pairs:
+  - pair: [P642, P2033]
+    reason: fixed LJ camera-stage base bolted to the world-fixed breadboard; this mount interface cannot move
   - pair: [P1095, P3079]
     reason: touching at reviewed CAD home (-2.69 mm)
   - pair: [P1052, P3079]
