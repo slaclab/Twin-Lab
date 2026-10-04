@@ -16,11 +16,14 @@ from twin_lab.collision import (
     _pair_key,
     _short,
     part_of,
+    read_collision_excluded_parts,
+    read_home_ignored_pairs,
     read_ignored_pairs,
 )
 from twin_lab.collision_viewer import (
     OFFENDER_LIMIT,
     SliderJoint,
+    _Highlighter,
     _offender_labels,
     read_joint_metadata,
 )
@@ -54,6 +57,62 @@ v 1 0 5
 v 0 1 5
 f 4 5 6
 """
+
+
+def test_collision_only_cover_highlight_is_translucent() -> None:
+    import numpy as np
+
+    class MeshcatStub:
+        def SetTriangleMesh(self, path, vertices, faces, rgba):
+            self.path = path
+            self.vertices = vertices
+            self.faces = faces
+            self.rgba = rgba
+
+        def SetTransform(self, path, pose):
+            pass
+
+        def SetProperty(self, path, name, value):
+            pass
+
+    meshcat = MeshcatStub()
+    highlighter = _Highlighter.__new__(_Highlighter)
+    highlighter._meshcat = meshcat
+    highlighter._refiner = None
+    highlighter._collision_only_parts = frozenset({"P2050"})
+    part_key = "cover/P2050"
+    vertices = np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    faces = np.asarray([[0, 1, 2]], dtype=np.int32)
+    highlighter._parts = {part_key: ("/cover", "P2050", object())}
+    highlighter._part_meshes = {part_key: (vertices, faces)}
+    highlighter._geometry_parts = {
+        "assembly::cover_P2050_000": part_key,
+        "assembly::cover_P2050_001": part_key,
+    }
+    highlighter._uploaded = {}
+    highlighter._shown = {}
+
+    class Report:
+        def geometry_states(self):
+            return {
+                "assembly::cover_P2050_000": "close",
+                "assembly::cover_P2050_001": "interference",
+            }
+
+    highlighter.update(Report())
+    assert meshcat.path == "/cover"
+    np.testing.assert_array_equal(meshcat.vertices, vertices.T)
+    np.testing.assert_array_equal(meshcat.faces, faces.T)
+    assert meshcat.rgba.r() > 0.9
+    assert meshcat.rgba.a() == pytest.approx(0.42)
+
+    class CloseReport:
+        def geometry_states(self):
+            return {"assembly::cover_P2050_000": "close"}
+
+    highlighter.update(CloseReport())
+    assert meshcat.rgba.g() > 0.7
+    assert meshcat.rgba.a() == pytest.approx(0.42)
 
 
 def test_read_obj_parts_splits_on_group_markers_and_rebases_indices(tmp_path):
@@ -418,6 +477,98 @@ def test_the_environment_stays_checked_against_a_stages_first_moving_link(tmp_pa
     assert live.CollisionFiltered(moving, ids["a010_fixed_0_p001_collision"])
 
 
+STACKED_STAGE_SDF = """\
+<?xml version="1.0"?>
+<sdf version="1.9">
+    <model name="rig">
+        <link name="assembly_base">
+            <collision name="environment_wall_p002_collision">
+                <geometry><box><size>0.1 0.1 0.1</size></box></geometry>
+            </collision>
+            <collision name="a010_fixed_0_p001_collision">
+                <geometry><box><size>0.1 0.1 0.1</size></box></geometry>
+            </collision>
+        </link>
+        <link name="stack_01_a010_motion">
+            <inertial><mass>1</mass>
+                <inertia><ixx>1</ixx><iyy>1</iyy><izz>1</izz></inertia>
+            </inertial>
+            <collision name="a010_moving_1_p003_collision">
+                <geometry><box><size>0.1 0.1 0.1</size></box></geometry>
+            </collision>
+            <collision name="a011_fixed_1_p004_collision">
+                <geometry><box><size>0.1 0.1 0.1</size></box></geometry>
+            </collision>
+        </link>
+        <link name="stack_02_a011_motion">
+            <inertial><mass>1</mass>
+                <inertia><ixx>1</ixx><iyy>1</iyy><izz>1</izz></inertia>
+            </inertial>
+            <collision name="a011_moving_1_p005_collision">
+                <geometry><box><size>0.1 0.1 0.1</size></box></geometry>
+            </collision>
+            <collision name="a011_attachment_1_p006_collision">
+                <geometry><box><size>0.1 0.1 0.1</size></box></geometry>
+            </collision>
+        </link>
+        <joint name="test_stack_a010_motion" type="prismatic">
+            <parent>assembly_base</parent><child>stack_01_a010_motion</child>
+            <axis><xyz>1 0 0</xyz><limit><lower>-1</lower><upper>1</upper></limit></axis>
+        </joint>
+        <joint name="test_stack_a011_motion" type="SECOND_JOINT_TYPE">
+            <parent>stack_01_a010_motion</parent><child>stack_02_a011_motion</child>
+            <axis><xyz>0 0 1</xyz><limit><lower>-1</lower><upper>1</upper></limit></axis>
+        </joint>
+        <joint name="assembly_base_to_world" type="fixed">
+            <parent>world</parent><child>assembly_base</child>
+        </joint>
+    </model>
+</sdf>
+"""
+
+
+@pytest.mark.parametrize(
+    ("second_joint_type", "same_stack_pair_filtered"),
+    [("prismatic", True), ("revolute", False)],
+)
+def test_same_stack_clearance_filter_preserves_rotary_sweeps(
+    tmp_path, second_joint_type, same_stack_pair_filtered
+):
+    from pydrake.geometry import Role
+
+    from twin_lab.collision import CollisionModel
+    from twin_lab.scene import load_scene
+
+    path = tmp_path / "stack.sdf"
+    path.write_text(
+        STACKED_STAGE_SDF.replace("SECOND_JOINT_TYPE", second_joint_type), encoding="utf-8"
+    )
+    model = CollisionModel(load_scene(path))
+    model.set_reviewed_home({"test_stack_a010_motion": 0.0, "test_stack_a011_motion": 0.0})
+    inspector = model.scene.scene_graph.model_inspector()
+    ids = {
+        part_of(inspector.GetName(geometry_id)): geometry_id
+        for geometry_id in inspector.GetAllGeometryIds(Role.kProximity)
+    }
+    context = model.scene.scene_graph.GetMyContextFromRoot(model.context)
+    query = model.scene.scene_graph.get_query_output_port().Eval(context)
+    live = query.inspector()
+
+    assert live.CollisionFiltered(ids["P004"], ids["P005"])
+    assert live.CollisionFiltered(ids["P003"], ids["P006"]) is same_stack_pair_filtered
+    report = model.report()
+    pair_reported = any(set(clearance.parts) == {"P003", "P006"} for clearance in report.clearances)
+    assert not pair_reported
+    assert report.status == "clear"
+    assert not any(set(clearance.parts) == {"P002", "P003"} for clearance in report.clearances)
+
+    moved_joint = "test_stack_a010_motion" if same_stack_pair_filtered else "test_stack_a011_motion"
+    model.set_positions({moved_joint: 0.05})
+    moved_report = model.report()
+    expected_pair = {"P002", "P003"} if same_stack_pair_filtered else {"P003", "P006"}
+    assert any(set(clearance.parts) == expected_pair for clearance in moved_report.clearances)
+
+
 def test_read_ignored_pairs_is_order_independent(tmp_path):
     path = tmp_path / "ignore.yaml"
     path.write_text(
@@ -431,6 +582,213 @@ def test_read_ignored_pairs_is_order_independent(tmp_path):
 
     assert _pair_key("A037", "A050") in pairs
     assert _pair_key("A050", "A037") in pairs
+
+
+def test_home_ignored_pairs_return_to_collision_checks_after_motion(tmp_path):
+    inventory = tmp_path / "inventory.yaml"
+    inventory.write_text(
+        "home_ignored_pairs:\n"
+        "  - pair: [P002, P003]\n"
+        "    reason: reviewed home mount relationship\n",
+        encoding="utf-8",
+    )
+    collision = STACKED_STAGE_SDF.replace(
+        "<collision name=\"a010_moving_1_p003_collision\">\n"
+        "                <geometry>",
+        "<collision name=\"a010_moving_1_p003_collision\">\n"
+        "                <pose>0.104 0 0 0 0 0</pose>\n"
+        "                <geometry>",
+    )
+    path = tmp_path / "stack.sdf"
+    path.write_text(collision.replace("SECOND_JOINT_TYPE", "prismatic"), encoding="utf-8")
+
+    from twin_lab.collision import CollisionModel
+    from twin_lab.scene import load_scene
+
+    model = CollisionModel(
+        load_scene(path), home_ignored_pairs=read_home_ignored_pairs(inventory)
+    )
+    model.set_reviewed_home(
+        {"test_stack_a010_motion": 0.0, "test_stack_a011_motion": 0.0}
+    )
+
+    assert any(
+        {part_of(clearance.a), part_of(clearance.b)} == {"P002", "P003"}
+        and clearance.distance_m > 0.0
+        for clearance in model.scene.signed_distances(model.context, max_distance_m=0.005)
+    )
+    assert not any(
+        set(clearance.parts) == {"P002", "P003"}
+        for clearance in model.report().clearances
+    )
+
+    model.set_positions({"test_stack_a010_motion": -0.005})
+    assert any(
+        set(clearance.parts) == {"P002", "P003"} and clearance.distance_m <= 0.0
+        for clearance in model.report().clearances
+    )
+
+
+def test_camera_stage_base_to_breadboard_is_a_reviewed_ignored_pair(tmp_path):
+    inventory = tmp_path / "inventory.yaml"
+    inventory.write_text(
+        "ignored_pairs:\n"
+        "  - pair: [P642, P2033]\n"
+        "    reason: fixed camera-stage base mounted to breadboard\n",
+        encoding="utf-8",
+    )
+    sdf_path = tmp_path / "stack.sdf"
+    sdf_path.write_text(
+        STACKED_STAGE_SDF.replace("SECOND_JOINT_TYPE", "prismatic")
+        .replace("p002", "p2033")
+        .replace("p003", "p642"),
+        encoding="utf-8",
+    )
+    from pydrake.geometry import Role
+
+    from twin_lab.collision import CollisionModel
+    from twin_lab.scene import load_scene
+
+    model = CollisionModel(load_scene(sdf_path), read_ignored_pairs(inventory))
+    inspector = model.scene.scene_graph.model_inspector()
+    context = model.scene.scene_graph.GetMyContextFromRoot(model.context)
+    query = model.scene.scene_graph.get_query_output_port().Eval(context)
+    parts = {
+        part_of(inspector.GetName(geometry_id)): geometry_id
+        for geometry_id in inspector.GetAllGeometryIds(Role.kProximity)
+    }
+
+    assert not query.inspector().CollisionFiltered(parts["P2033"], parts["P642"])
+    assert not any(
+        set(clearance.parts) == {"P2033", "P642"} for clearance in model.report().clearances
+    )
+
+
+def test_camera_mounts_to_rotary_stage_are_not_clearance_warnings(tmp_path):
+    from twin_lab.collision import CollisionModel
+    from twin_lab.scene import load_scene
+
+    inventory = tmp_path / "inventory.yaml"
+    inventory.write_text(
+        "ignored_pairs:\n"
+        "  - pair: [A043, P647]\n"
+        "    reason: camera bracket mounted to rotary stage\n"
+        "  - pair: [A043, P644]\n"
+        "    reason: camera mount fixed to rotary stage\n",
+        encoding="utf-8",
+    )
+    path = tmp_path / "stack.sdf"
+    path.write_text(
+        STACKED_STAGE_SDF.replace("SECOND_JOINT_TYPE", "prismatic")
+        .replace("p002", "a043")
+        .replace("p003", "p647")
+        .replace("p004", "p644"),
+        encoding="utf-8",
+    )
+    model = CollisionModel(load_scene(path), read_ignored_pairs(inventory))
+    raw = model.scene.signed_distances(model.context, max_distance_m=0.005)
+    report = model.report()
+    pairs = {frozenset((part_of(item.a), part_of(item.b))) for item in raw}
+
+    assert frozenset(("A043", "P647")) in pairs
+    assert frozenset(("A043", "P644")) in pairs
+    assert not any(
+        set(clearance.parts) in ({"A043", "P647"}, {"A043", "P644"})
+        for clearance in report.clearances
+    )
+
+
+def test_intentional_chamber_to_camera_mount_pair_is_ignored(tmp_path):
+    from twin_lab.collision import CollisionModel
+    from twin_lab.scene import load_scene
+
+    inventory = tmp_path / "inventory.yaml"
+    inventory.write_text(
+        "ignored_pairs:\n"
+        "  - pair: [P516, P647]\n"
+        "    reason: chamber support and camera bracket are mounted together\n",
+        encoding="utf-8",
+    )
+    path = tmp_path / "stack.sdf"
+    path.write_text(
+        STACKED_STAGE_SDF.replace("SECOND_JOINT_TYPE", "prismatic")
+        .replace("p002", "p516")
+        .replace("p003", "p647"),
+        encoding="utf-8",
+    )
+    model = CollisionModel(load_scene(path), read_ignored_pairs(inventory))
+    raw = model.scene.signed_distances(model.context, max_distance_m=0.005)
+    report = model.report()
+
+    assert any(set((part_of(item.a), part_of(item.b))) == {"P516", "P647"} for item in raw)
+    assert not any(set(clearance.parts) == {"P516", "P647"} for clearance in report.clearances)
+
+
+@pytest.mark.parametrize(
+    ("support_ref", "stage_ref"),
+    [
+        ("P349", "P258"),
+        ("P330", "P251"),
+        ("P330", "P252"),
+        ("P232", "P300"),
+        ("P232", "P301"),
+    ],
+)
+def test_detector_stage_to_its_fixed_support_is_not_a_clearance_warning(
+    tmp_path, support_ref, stage_ref
+):
+    from twin_lab.collision import CollisionModel
+    from twin_lab.scene import load_scene
+
+    inventory = tmp_path / "inventory.yaml"
+    inventory.write_text(
+        "ignored_pairs:\n"
+        f"  - pair: [{support_ref}, {stage_ref}]\n"
+        "    reason: detector stage mount to fixed support\n",
+        encoding="utf-8",
+    )
+    path = tmp_path / "stack.sdf"
+    path.write_text(
+        STACKED_STAGE_SDF.replace("SECOND_JOINT_TYPE", "prismatic")
+        .replace("p002", support_ref.lower())
+        .replace("p003", stage_ref.lower()),
+        encoding="utf-8",
+    )
+    model = CollisionModel(load_scene(path), read_ignored_pairs(inventory))
+    raw = model.scene.signed_distances(model.context, max_distance_m=0.005)
+    report = model.report()
+
+    expected = {support_ref, stage_ref}
+    assert any(set((part_of(item.a), part_of(item.b))) == expected for item in raw)
+    assert not any(set(clearance.parts) == expected for clearance in report.clearances)
+
+
+def test_collision_excluded_parts_are_filtered_from_the_whole_scene(tmp_path):
+    from pydrake.geometry import Role
+
+    from twin_lab.collision import CollisionModel
+    from twin_lab.scene import load_scene
+
+    path = tmp_path / "stack.sdf"
+    path.write_text(STACKED_STAGE_SDF.replace("SECOND_JOINT_TYPE", "prismatic"), encoding="utf-8")
+    model = CollisionModel(load_scene(path), collision_excluded_parts=frozenset({"P002"}))
+    inspector = model.scene.scene_graph.model_inspector()
+    ids = {
+        part_of(inspector.GetName(geometry_id)): geometry_id
+        for geometry_id in inspector.GetAllGeometryIds(Role.kProximity)
+    }
+    context = model.scene.scene_graph.GetMyContextFromRoot(model.context)
+    query = model.scene.scene_graph.get_query_output_port().Eval(context)
+
+    assert query.inspector().CollisionFiltered(ids["P002"], ids["P003"])
+    assert not any("P002" in clearance.parts for clearance in model.report().clearances)
+
+
+def test_read_collision_excluded_parts_normalizes_references(tmp_path):
+    path = tmp_path / "review.yaml"
+    path.write_text("collision_excluded_parts: [P514, p527]\n", encoding="utf-8")
+
+    assert read_collision_excluded_parts(path) == frozenset({"P514", "P527"})
 
 
 def test_prismatic_slider_bounds_are_reported_in_millimetres_about_the_logical_home():

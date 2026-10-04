@@ -5,7 +5,103 @@ from pathlib import Path
 
 import yaml
 
-from twin_lab.constraints_wizard import remap_stage_inventory
+from twin_lab.constraints_wizard import _build_manifest_ref_map, remap_stage_inventory
+from twin_lab.update_43841_step import validate_review_identity
+
+
+def test_refresh_preflight_rejects_stale_stage_and_attachment_refs() -> None:
+    manifest = {"occurrences": [
+        {"ref": "A001", "id": "root/stack", "name": "stack"},
+        {"ref": "A002", "id": "root/stack/stage", "name": "LIB-NEW"},
+        {"ref": "P001", "id": "root/stack/bracket", "name": "bracket"},
+        {"ref": "P002", "id": "root/other/bracket", "name": "bracket"},
+    ]}
+    review = {
+        "subassembly": {"ref": "A001", "name": "stack"},
+        "stage_instances": [{"ref": "A002", "catalog": "motor"}],
+        "static_geometry": [],
+        "attachment_overrides": {"moving": {"A002": ["P001"]}},
+    }
+    assert validate_review_identity(review, manifest) == []
+    review["attachment_overrides"]["moving"]["A002"].append("P002")
+    assert validate_review_identity(review, manifest) == []
+    previous = {"occurrences": [dict(item) for item in manifest["occurrences"]]}
+    manifest["occurrences"][3]["name"] = "wrong bracket"
+    assert "attachment P002 on A002 changed identity" in validate_review_identity(
+        review, manifest, previous
+    )
+    manifest["occurrences"][1]["name"] = "unrelated"
+    assert any("stage A002" in issue for issue in validate_review_identity(review, manifest))
+
+
+def test_refresh_preflight_uses_old_identity_when_refs_shift() -> None:
+    previous = {"occurrences": [
+        {"ref": "A001", "name": "stack", "id": "root/stack"},
+        {"ref": "A002", "name": "LIB-A", "id": "root/stack/stage"},
+        {"ref": "P001", "name": "adapter", "id": "root/stack/adapter"},
+    ]}
+    current = {"occurrences": [
+        {"ref": "A003", "name": "stack", "id": "root/stack"},
+        {"ref": "A004", "name": "LIB-A", "id": "root/stack/stage"},
+        {"ref": "P002", "name": "adapter", "id": "root/stack/adapter"},
+    ]}
+    review = {
+        "subassembly": {"ref": "A003", "name": "stack"},
+        "stage_instances": [{"ref": "A004", "catalog": "motor"}],
+        "attachment_overrides": {"moving": {"A004": ["P002"]}},
+    }
+    ref_map = {"A001": "A003", "A002": "A004", "P001": "P002"}
+    assert validate_review_identity(review, current, previous, ref_map) == []
+    current["occurrences"][1]["name"] = "LIB-OTHER"
+    assert any("stage A004 changed identity" in issue for issue in validate_review_identity(
+        review, current, previous, ref_map
+    ))
+
+
+def test_old_alias_does_not_swap_cameras_after_another_revision() -> None:
+    def occurrence(ref: str, index: int, x: float) -> dict:
+        return {
+            "ref": ref, "id": f"root/{index}:camera", "name": "camera",
+            "parent_id": "root", "depth": 1, "is_assembly": True,
+            "transform_to_parent": [[1, 0, 0, x], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
+        }
+
+    old = {"occurrences": [occurrence("A191", 6, 105), occurrence("A192", 7, -315)]}
+    new = {"occurrences": [occurrence("A191", 6, 105.062), occurrence("A192", 7, -315)]}
+    aliases = {"occurrence_id_aliases": {"root/6:camera": "root/7:camera"}, "name_aliases": {}}
+    mapped, _ = _build_manifest_ref_map(old, new, aliases)
+    assert mapped == {"A191": "A191", "A192": "A192"}
+    new["occurrences"][0]["transform_to_parent"][0][3] = -315
+    mapped, _ = _build_manifest_ref_map(old, new, aliases)
+    assert mapped["A191"] == "A192"
+
+
+def test_duplicate_stage_siblings_map_only_when_pose_is_unique() -> None:
+    def occurrence(ref: str, parent: str | None, index: int, name: str, x: float) -> dict:
+        return {
+            "ref": ref, "id": f"{parent}/{index}:{name}" if parent else "root",
+            "name": name, "parent_id": parent, "depth": 1 if parent else 0,
+            "is_assembly": True,
+            "transform_to_parent": [[1, 0, 0, x], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
+        }
+
+    old = {"occurrences": [
+        occurrence("A001", None, 0, "root", 0),
+        occurrence("A002", "root", 7, "LIB-STAGE_oa_1", 10),
+        occurrence("A003", "root", 15, "LIB-STAGE_oa_2", 200),
+    ]}
+    new = {"occurrences": [
+        occurrence("A011", None, 0, "root", 0),
+        occurrence("A012", "root", 8, "LIB-STAGE", 10),
+        occurrence("A013", "root", 16, "LIB-STAGE", 200),
+    ]}
+    aliases = {"name_aliases": {}, "occurrence_id_aliases": {}}
+    mapping, unresolved = _build_manifest_ref_map(old, new, aliases)
+    assert mapping == {"A001": "A011", "A002": "A012", "A003": "A013"}
+    assert not unresolved
+    new["occurrences"][2]["transform_to_parent"][0][3] = 10
+    mapping, unresolved = _build_manifest_ref_map(old, new, aliases)
+    assert "A002" in unresolved
 
 
 def test_remaps_inventory_with_name_aliases(tmp_path: Path) -> None:

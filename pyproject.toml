@@ -38,6 +38,9 @@ cad = [
 drake = [
     "drake>=1.54",
 ]
+epics = [
+    "archapp @ git+https://github.com/pcdshub/archapp.git",
+]
 collision = [
     "coacd>=1.0",
     "numpy>=1.26",
@@ -46,6 +49,9 @@ collision = [
 [project.scripts]
 slac-cad-manifest = "twin_lab.constraints_wizard:main"
 slac-stage-cad = "twin_lab.stage_cad_viewer:main"
+slac-live-feed = "twin_lab.stage_cad_viewer:main_live"
+slac-export-session = "twin_lab.archive_export:main"
+slac-export-live = "twin_lab.archive_export:main_live"
 slac-compile-sdf = "twin_lab.sdf_compiler:main"
 slac-collision = "twin_lab.collision_viewer:main"
 slac-decompose = "twin_lab.convex_collision:main"
@@ -54,6 +60,7 @@ slac-accuracy = "twin_lab.accuracy:main"
 slac-inflate-hulls = "twin_lab.hull_inflation:main"
 slac-view = "twin_lab.scene:main"
 slac-refresh-43841 = "twin_lab.update_43841_step:main"
+slac-static-review = "twin_lab.static_review:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

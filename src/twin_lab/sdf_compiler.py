@@ -32,6 +32,7 @@ class LinkSpec:
 
     name: str
     meshes: list[tuple[str, Path, list[float] | None]] = field(default_factory=list)
+    collision_only_meshes: list[tuple[str, Path]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -159,6 +160,7 @@ def _build_tree(scene: dict[str, Any], scene_file: Path) -> tuple[list[LinkSpec]
     links = [base]
     joints: list[JointSpec] = []
     motion_meshes = scene["motion_stage_meshes"]
+    hidden_stage_geometry = set(scene.get("hidden_stage_geometry", []))
 
     for instance in scene["instances"]:
         if instance["ref"] not in motion_meshes:
@@ -179,15 +181,25 @@ def _build_tree(scene: dict[str, Any], scene_file: Path) -> tuple[list[LinkSpec]
             )
         )
 
+    for item in scene.get("collision_only_geometry", []):
+        base.collision_only_meshes.append(
+            (str(item["name"]), _resolve_path(item["mesh"], scene_file))
+        )
+
     instance_by_ref = {str(item["ref"]): item for item in scene["instances"]}
     last_link_by_stage: dict[str, LinkSpec] = {}
+    link_by_joint_key: dict[str, LinkSpec] = {}
     for chain in scene["motion_chains"]:
         parent = base
         stack_slug = _safe_name(chain["name"])
         for index, item in enumerate(chain["joints"], start=1):
             reference = str(item["ref"])
             fixed_role = item.get("fixed_role")
-            if fixed_role:
+            if (
+                reference not in hidden_stage_geometry
+                and fixed_role
+                and fixed_role in motion_meshes.get(reference, {})
+            ):
                 parent.meshes.append(
                     (
                         f"{reference}_{fixed_role}",
@@ -204,18 +216,19 @@ def _build_tree(scene: dict[str, Any], scene_file: Path) -> tuple[list[LinkSpec]
             axis_name = str(item["name"])
             child = LinkSpec(_safe_name(f"{stack_slug}_{index:02d}_{reference}_{axis_name}"))
             moving_role = str(item["moving_role"])
-            child.meshes.append(
-                (
-                    f"{reference}_{moving_role}",
-                    _resolve_path(motion_meshes[reference][moving_role], scene_file),
-                    [
-                        float(value)
-                        for value in instance_by_ref.get(reference, {}).get(
-                            "rgba", [0.62, 0.66, 0.72, 1.0]
-                        )
-                    ],
+            if reference not in hidden_stage_geometry:
+                child.meshes.append(
+                    (
+                        f"{reference}_{moving_role}",
+                        _resolve_path(motion_meshes[reference][moving_role], scene_file),
+                        [
+                            float(value)
+                            for value in instance_by_ref.get(reference, {}).get(
+                                "rgba", [0.62, 0.66, 0.72, 1.0]
+                            )
+                        ],
+                    )
                 )
-            )
             links.append(child)
 
             home = float(item.get("home", 0.0))
@@ -240,10 +253,16 @@ def _build_tree(scene: dict[str, Any], scene_file: Path) -> tuple[list[LinkSpec]
             )
             parent = child
             last_link_by_stage[reference] = child
+            link_by_joint_key[str(item["key"])] = child
 
     for attachment in scene["attachments"]:
         parent_ref = attachment["parent_stage_ref"]
-        target = base if parent_ref is None else last_link_by_stage[str(parent_ref)]
+        parent_joint_key = attachment.get("parent_joint_key")
+        target = (
+            link_by_joint_key[str(parent_joint_key)]
+            if parent_joint_key is not None
+            else base if parent_ref is None else last_link_by_stage[str(parent_ref)]
+        )
         label = "fixed_attachment" if parent_ref is None else f"{parent_ref}_attachment"
         target.meshes.append(
             (
@@ -289,6 +308,7 @@ def _package_build_key(
     """Every input that changes package content, recorded so a stale package is rebuilt."""
 
     sources = {source for link in links for _, source, _ in link.meshes}
+    sources.update(source for link in links for _, source in link.collision_only_meshes)
     inputs = [scene_file, *(source for source in sources if source.exists())]
     return {
         "schema": PACKAGE_STAMP_SCHEMA,
@@ -297,6 +317,11 @@ def _package_build_key(
         "collision_mode": collision_mode,
         "neutral_visuals": neutral_visuals,
         "decomposition": _read_decomposition_config(scene),
+        "collision_only_parts": sorted({
+            str(ref)
+            for item in scene.get("collision_only_geometry", [])
+            for ref in item.get("part_refs", [])
+        }),
         "source_mtime_ns": max(path.stat().st_mtime_ns for path in inputs),
     }
 
@@ -347,6 +372,7 @@ def _convert_meshes(
     decomposition_settings: PartSettings | None = None,
 ) -> tuple[dict[Path, str], dict[Path, str], dict[Path, list[tuple[str, str]]]]:
     sources = {source for link in links for _, source, _ in link.meshes}
+    sources.update(source for link in links for _, source in link.collision_only_meshes)
     visual_result: dict[Path, str] = {}
     stl_result: dict[Path, str] = {}
     collision_result: dict[Path, list[tuple[str, str]]] = {}
@@ -424,6 +450,16 @@ def _write_sdf(
                     {"name": f"{piece_name}_collision"},
                 )
                 _add_mesh_geometry(collision, uri, declare_convex=declare_convex)
+
+        if include_collisions:
+            for index, (label, source) in enumerate(link.collision_only_meshes, start=1):
+                geometry_name = _safe_name(f"{label}_{index}")
+                for suffix, uri in collision_mesh_uris[source]:
+                    piece_name = f"{geometry_name}_{suffix}" if suffix else geometry_name
+                    collision = ET.SubElement(
+                        link_element, "collision", {"name": f"{piece_name}_collision"}
+                    )
+                    _add_mesh_geometry(collision, uri, declare_convex=declare_convex)
 
     model.append(
         ET.Comment(

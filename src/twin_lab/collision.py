@@ -188,15 +188,52 @@ class CollisionModel:
         ignored_pairs: frozenset[tuple[str, str]] = frozenset(),
         part_labels: Mapping[str, str] | None = None,
         decomposition_dir: str | Path | None = None,
+        collision_excluded_parts: frozenset[str] = frozenset(),
+        home_ignored_pairs: frozenset[tuple[str, str]] = frozenset(),
     ):
         self.scene = scene
         self.ignored_pairs = ignored_pairs
+        self.home_ignored_pairs = frozenset(
+            tuple(sorted((first.upper(), second.upper()))) for first, second in home_ignored_pairs
+        )
         self.part_labels = dict(part_labels or {})
+        self.collision_excluded_parts = frozenset(
+            reference.upper() for reference in collision_excluded_parts
+        )
         self.context = scene.create_context()
+        self._reviewed_home_positions: np.ndarray | None = None
         self.reopened_joints = self._reopen_joint_adjacent_pairs()
+        self._configure_stack_interference_filters()
         self.refiner = (
             ClearanceRefiner(decomposition_dir) if decomposition_dir is not None else None
         )
+        self._exclude_collision_parts()
+
+    def _exclude_collision_parts(self) -> None:
+        if not self.collision_excluded_parts:
+            return
+
+        from pydrake.geometry import CollisionFilterDeclaration, GeometrySet, Role
+
+        scene_graph = self.scene.scene_graph
+        inspector = scene_graph.model_inspector()
+        geometry_ids = list(inspector.GetAllGeometryIds(Role.kProximity))
+        excluded = [
+            geometry_id
+            for geometry_id in geometry_ids
+            if part_of(inspector.GetName(geometry_id)) in self.collision_excluded_parts
+        ]
+        found = {part_of(inspector.GetName(geometry_id)) for geometry_id in excluded}
+        missing = self.collision_excluded_parts - found
+        if missing:
+            raise ValueError(
+                f"Collision-excluded parts have no collision geometry: {sorted(missing)}"
+            )
+
+        declaration = CollisionFilterDeclaration()
+        declaration.ExcludeBetween(GeometrySet(excluded), GeometrySet(geometry_ids))
+        scene_context = scene_graph.GetMyContextFromRoot(self.context)
+        scene_graph.collision_filter_manager(scene_context).Apply(declaration)
 
     def _reopen_joint_adjacent_pairs(self) -> int:
         """Restore clearance checking across every joint except the bearing it represents.
@@ -267,6 +304,87 @@ class CollisionModel:
             scene_graph.collision_filter_manager(scene_context).Apply(declaration)
         return reopened
 
+    def _configure_stack_interference_filters(self) -> None:
+        """Exclude linear same-stack contacts but retain interference across rotary joints."""
+
+        from pydrake.geometry import CollisionFilterDeclaration, GeometrySet, Role
+        from pydrake.multibody.tree import JointIndex, RevoluteJoint
+
+        plant = self.scene.plant
+        scene_graph = self.scene.scene_graph
+        inspector = scene_graph.model_inspector()
+        parent_joint: dict[int, tuple[int, int]] = {}
+        stack_by_stage: dict[str, str] = {}
+        revolute_joints: dict[int, bool] = {}
+        for index in range(plant.num_joints()):
+            joint = plant.get_joint(JointIndex(index))
+            parent_joint[joint.child_body().index()] = (joint.parent_body().index(), index)
+            revolute_joints[index] = isinstance(joint, RevoluteJoint)
+            stage = STAGE_PATTERN.search(joint.name())
+            if stage is not None and joint.num_positions() > 0:
+                stack_by_stage[stage.group(1).upper()] = joint.name()[: stage.start()].rstrip("_")
+
+        body_paths: dict[int, tuple[int, ...]] = {}
+
+        def path_to_body(body_index: int) -> tuple[int, ...]:
+            original_index = body_index
+            if original_index not in body_paths:
+                path = []
+                while body_index in parent_joint:
+                    body_index, joint_index = parent_joint[body_index]
+                    path.append(joint_index)
+                body_paths[original_index] = tuple(reversed(path))
+            return body_paths[original_index]
+
+        groups: dict[str, dict[tuple[int, str, str], list]] = {}
+        for geometry_id in inspector.GetAllGeometryIds(Role.kProximity):
+            leaf = _leaf(inspector.GetName(geometry_id))
+            body = plant.GetBodyFromFrameId(inspector.GetFrameId(geometry_id))
+            stage = STAGE_PATTERN.match(leaf)
+            if stage is None:
+                continue
+            reference = stage.group(1).upper()
+            stack = stack_by_stage.get(reference)
+            if stack is None:
+                continue
+            if leaf.startswith(f"{reference.lower()}_fixed_"):
+                role = "fixed"
+            elif leaf.startswith(f"{reference.lower()}_attachment_"):
+                role = "attachment"
+            else:
+                role = "moving"
+            key = (body.index(), reference, role)
+            groups.setdefault(stack, {}).setdefault(key, []).append(geometry_id)
+
+        declaration = CollisionFilterDeclaration()
+        changed = False
+        for entries in groups.values():
+            items = list(entries.items())
+            for first_index, ((first_body, first_ref, first_role), first_ids) in enumerate(items):
+                for (second_body, second_ref, second_role), second_ids in items[first_index + 1 :]:
+                    if first_body == second_body:
+                        continue
+                    first_path = path_to_body(first_body)
+                    second_path = path_to_body(second_body)
+                    separating = _separating_joints(first_path, second_path)
+                    roles = {first_role, second_role}
+                    own_bearing = (
+                        first_ref == second_ref
+                        and "fixed" in roles
+                        and bool(roles & {"moving", "attachment"})
+                    )
+                    crosses_rotary = any(revolute_joints[index] for index in separating)
+                    first_set, second_set = GeometrySet(first_ids), GeometrySet(second_ids)
+                    if own_bearing or not crosses_rotary:
+                        declaration.ExcludeBetween(first_set, second_set)
+                    else:
+                        declaration.AllowBetween(first_set, second_set)
+                    changed = True
+
+        if changed:
+            scene_context = scene_graph.GetMyContextFromRoot(self.context)
+            scene_graph.collision_filter_manager(scene_context).Apply(declaration)
+
     @classmethod
     def load(
         cls,
@@ -279,7 +397,13 @@ class CollisionModel:
         scene = load_scene(sdf_path)
         ignored = read_ignored_pairs(ignore_file) if ignore_file is not None else frozenset()
         labels = read_part_labels(label_source) if label_source is not None else {}
-        return cls(scene, ignored, labels, decomposition_dir)
+        excluded = (
+            read_collision_excluded_parts(ignore_file) if ignore_file is not None else frozenset()
+        )
+        home_ignored = (
+            read_home_ignored_pairs(ignore_file) if ignore_file is not None else frozenset()
+        )
+        return cls(scene, ignored, labels, decomposition_dir, excluded, home_ignored)
 
     def joint_names(self) -> list[str]:
         from pydrake.multibody.tree import JointIndex
@@ -304,9 +428,24 @@ class CollisionModel:
             values[joint.position_start()] = min(max(float(value), lower), upper)
         plant.SetPositions(plant_context, values)
 
+    def set_reviewed_home(self, positions: Mapping[str, float]) -> None:
+        """Set and remember the reviewed home pose for baseline-contact suppression."""
+
+        self.set_positions(positions)
+        plant_context = self.scene.plant.GetMyContextFromRoot(self.context)
+        self._reviewed_home_positions = self.scene.plant.GetPositions(plant_context).copy()
+
+    def _at_reviewed_home(self) -> bool:
+        if self._reviewed_home_positions is None:
+            return False
+        plant_context = self.scene.plant.GetMyContextFromRoot(self.context)
+        positions = self.scene.plant.GetPositions(plant_context)
+        return bool(np.allclose(positions, self._reviewed_home_positions, rtol=0.0, atol=1e-9))
+
     def report(
         self, *, warn_m: float = 0.005, max_distance_m: float | None = None
     ) -> ClearanceReport:
+        at_home = self._at_reviewed_home()
         distances = self.scene.signed_distances(
             self.context, max_distance_m=max_distance_m if max_distance_m is not None else warn_m
         )
@@ -322,6 +461,8 @@ class CollisionModel:
             )
             for item in distances
             if _pair_key(item.a, item.b) not in self.ignored_pairs
+            and not (at_home and _pair_key(item.a, item.b) in self.home_ignored_pairs)
+            and not (at_home and item.distance_m <= 0.0)
         )
         return ClearanceReport(clearances=clearances, warn_m=warn_m, part_labels=self.part_labels)
 
@@ -372,6 +513,25 @@ def read_ignored_pairs(path: str | Path) -> frozenset[tuple[str, str]]:
     return frozenset(pairs)
 
 
+def read_collision_excluded_parts(path: str | Path) -> frozenset[str]:
+    """Read reviewed occurrences that should never enter collision queries."""
+
+    data = yaml.safe_load(resolve_repo_path(path).read_text(encoding="utf-8")) or {}
+    return frozenset(
+        str(reference).upper() for reference in data.get("collision_excluded_parts", [])
+    )
+
+
+def read_home_ignored_pairs(path: str | Path) -> frozenset[tuple[str, str]]:
+    """Read reviewed contacts suppressed only at the configured home pose."""
+
+    data = yaml.safe_load(resolve_repo_path(path).read_text(encoding="utf-8")) or {}
+    return frozenset(
+        tuple(sorted(str(value).upper() for value in entry["pair"]))
+        for entry in data.get("home_ignored_pairs", [])
+    )
+
+
 def read_part_labels(inventory_path: str | Path) -> dict[str, str]:
     """Map each reviewed occurrence ref to its Teamcenter number, read from the CAD manifest."""
 
@@ -397,6 +557,13 @@ def read_part_labels(inventory_path: str | Path) -> dict[str, str]:
 def _pair_key(a: str, b: str) -> tuple[str, str]:
     first, second = sorted((part_of(a), part_of(b)))
     return first, second
+
+
+def _separating_joints(first: tuple[int, ...], second: tuple[int, ...]) -> tuple[int, ...]:
+    shared = 0
+    while shared < min(len(first), len(second)) and first[shared] == second[shared]:
+        shared += 1
+    return (*first[shared:], *second[shared:])
 
 
 def _leaf(scoped_name: str) -> str:

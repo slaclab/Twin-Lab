@@ -8,6 +8,7 @@ and the geometry being checked for interference are the same kinematics.
 from __future__ import annotations
 
 import csv
+import json
 import math
 import time
 from dataclasses import dataclass
@@ -16,7 +17,12 @@ from typing import cast
 
 import numpy as np
 
-from .collision import CollisionModel, part_of
+from .collision import (
+    CollisionModel,
+    part_of,
+    read_collision_excluded_parts,
+    read_home_ignored_pairs,
+)
 from .meshcat_ui import FRAMING_DISTANCE, ISOMETRIC_DIRECTION
 from .paths import CACHE_ROOT, EXPORT_ROOT, resolve_repo_path, review_artifact_stem
 
@@ -198,11 +204,21 @@ def run_collision_viewer(
         _read_ignored(ignore_file),
         _read_part_labels(label_source),
         decomposition_dir,
+        read_collision_excluded_parts(ignore_file) if ignore_file is not None else frozenset(),
+        read_home_ignored_pairs(ignore_file) if ignore_file is not None else frozenset(),
+    )
+    model.set_reviewed_home(
+        {joint.joint_name: joint.to_sdf(joint.slider_bounds()[2]) for joint in joints}
     )
     print(
         f"Loaded {_proximity_geometry_count(model)} collision geometries "
         f"in {time.monotonic() - load_start:.0f} s"
     )
+    if model.collision_excluded_parts:
+        print(
+            "Excluded non-rigid parts from collision detection: "
+            + ", ".join(sorted(model.collision_excluded_parts))
+        )
     print(
         f"Reopened the surroundings of {model.reopened_joints} joints that Drake's "
         "joint-adjacency filter had hidden from the static environment."
@@ -229,7 +245,11 @@ def run_collision_viewer(
     meshcat.AddButton(ISOMETRIC_LABEL)
     meshcat.AddButton("Log clearance report")
     meshcat.AddButton("Stop viewer", "Escape")
-    highlighter = _Highlighter(meshcat, model)
+    stamp = package / ".slac-sdf-package"
+    package_stamp = json.loads(stamp.read_text(encoding="utf-8")) if stamp.exists() else {}
+    highlighter = _Highlighter(
+        meshcat, model, frozenset(package_stamp.get("collision_only_parts", []))
+    )
     beam_drawer = _BeamDrawer(meshcat) if beam_specs else None
 
     print(f"{len(joints)} joints")
@@ -561,25 +581,34 @@ def _reset_status(meshcat) -> None:
 
 
 class _Highlighter:
-    """Repaints the offending collision hulls so the reported pair is findable on screen.
+    """Repaints the original CAD tessellations for parts flagged by collision hulls."""
 
-    The hulls are what Drake actually tests, and they wrap the reviewed part, so drawing
-    them over the illustration mesh marks the part without splitting its visual geometry.
-    """
-
-    def __init__(self, meshcat, model: CollisionModel):
+    def __init__(
+        self, meshcat, model: CollisionModel,
+        collision_only_parts: frozenset[str] = frozenset(),
+    ):
         from pydrake.geometry import Role
 
         self._meshcat = meshcat
+        self._collision_only_parts = collision_only_parts
+        self._refiner = model.refiner
         inspector = _inspector(model)
-        self._geometries = {}
+        self._geometry_parts: dict[str, str] = {}
+        self._parts: dict[str, tuple[str, str, object]] = {}
+        self._part_meshes: dict[str, tuple[np.ndarray, np.ndarray] | None] = {}
         for geometry_id in inspector.GetAllGeometryIds(Role.kProximity):
             frame_path = inspector.GetName(inspector.GetFrameId(geometry_id)).replace("::", "/")
-            leaf = inspector.GetName(geometry_id).replace("::", "_")
-            self._geometries[model.scene.geometry_name(inspector, geometry_id)] = (
-                f"{VISUALIZER_PREFIX}/{frame_path}/{HIGHLIGHT_GROUP}/{leaf}",
-                inspector.GetShape(geometry_id),
-                inspector.GetPoseInFrame(geometry_id),
+            geometry_name = model.scene.geometry_name(inspector, geometry_id)
+            reference = part_of(geometry_name)
+            part_key = f"{frame_path}/{reference}"
+            self._geometry_parts[geometry_name] = part_key
+            self._parts.setdefault(
+                part_key,
+                (
+                    f"{VISUALIZER_PREFIX}/{frame_path}/{HIGHLIGHT_GROUP}/{reference}",
+                    reference,
+                    inspector.GetPoseInFrame(geometry_id),
+                ),
             )
         self._visuals: list[str] = []
         for geometry_id in inspector.GetAllGeometryIds(Role.kIllustration):
@@ -591,33 +620,61 @@ class _Highlighter:
         self._uploaded: dict[str, str] = {}
         self._hidden: frozenset[str] = frozenset()
 
-    def _paint(self, name: str, state: str) -> str:
-        """Upload a hull only when its colour is wrong; uploads cost ~3 ms each."""
+    def _paint(self, part_key: str, state: str) -> str | None:
+        """Upload the source tessellation only when its highlight colour changes."""
 
         from pydrake.geometry import Rgba
 
-        path, shape, pose = self._geometries[name]
-        if self._uploaded.get(name) != state:
-            self._meshcat.SetObject(path, shape, Rgba(*HIGHLIGHT_RGBA[state]))
+        path, reference, pose = self._parts[part_key]
+        if part_key not in self._part_meshes:
+            self._part_meshes[part_key] = (
+                None if self._refiner is None else self._refiner.part_mesh(reference)
+            )
+        mesh = self._part_meshes[part_key]
+        if mesh is None:
+            return None
+        if self._uploaded.get(part_key) != state:
+            vertices, faces = mesh
+            rgba = HIGHLIGHT_RGBA[state]
+            if reference in self._collision_only_parts:
+                rgba = (*rgba[:3], 0.42)
+            self._meshcat.SetTriangleMesh(
+                path,
+                np.asfortranarray(vertices.T.astype(np.float64)),
+                np.asfortranarray(faces.T.astype(np.int32)),
+                Rgba(*rgba),
+            )
             self._meshcat.SetTransform(path, pose)
-            self._uploaded[name] = state
+            self._meshcat.SetProperty(f"{path}/<object>", "material.polygonOffset", True)
+            self._meshcat.SetProperty(f"{path}/<object>", "material.polygonOffsetFactor", -1)
+            self._meshcat.SetProperty(f"{path}/<object>", "material.polygonOffsetUnits", -1)
+            self._uploaded[part_key] = state
         return path
 
     def update(self, report, parts: frozenset[str] | None = None) -> None:
         """Light up every offending hull, or only those of ``parts`` when given."""
 
-        wanted = {
-            name: state
-            for name, state in report.geometry_states().items()
-            if name in self._geometries and (parts is None or part_of(name) in parts)
-        }
-        for name in self._shown.keys() - wanted.keys():
-            self._meshcat.SetProperty(self._geometries[name][0], "visible", False)
-        for name, state in wanted.items():
-            path = self._paint(name, state)
-            if name not in self._shown:
+        priority = {"close": 0, "interference": 1}
+        wanted = {}
+        for name, state in report.geometry_states().items():
+            part_key = self._geometry_parts.get(name)
+            if part_key is None or (parts is not None and part_of(name) not in parts):
+                continue
+            current = wanted.get(part_key)
+            if current is None or priority[state] > priority[current]:
+                wanted[part_key] = state
+
+        for part_key in self._shown.keys() - wanted.keys():
+            self._meshcat.SetProperty(self._parts[part_key][0], "visible", False)
+        shown = {}
+        for part_key, state in wanted.items():
+            path = self._paint(part_key, state)
+            if path is None:
+                continue
+            if part_key not in self._shown:
                 self._meshcat.SetProperty(path, "visible", True)
-        self._shown = wanted
+            shown[part_key] = state
+        self._shown = shown
 
     def isolate(self, isolated: bool) -> None:
         """Drop the illustration meshes so only the highlighted hulls are left on screen.
@@ -634,8 +691,8 @@ class _Highlighter:
         self._hidden = hidden
 
     def clear(self) -> None:
-        for name in self._shown:
-            self._meshcat.SetProperty(self._geometries[name][0], "visible", False)
+        for part_key in self._shown:
+            self._meshcat.SetProperty(self._parts[part_key][0], "visible", False)
         self._shown = {}
 
 

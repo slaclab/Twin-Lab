@@ -6,20 +6,228 @@ motion, visualization, and collision queries.
 
 The current reviewed model is subassembly `*43841` from drawing
 `DSG-000040389`. It contains an EPIX detector stage, three crystal stacks, and
-three polycapillary stacks with 22 controllable joints.
+three polycapillary stacks with 27 controllable joints. The two Thorlabs LX10
+detector stages are manual-only because they are not powered and have no EPICS
+archive data.
 
 ## For returning users
 
 Set up already? Open the repository in VS Code, open a terminal with
-`` Ctrl+Shift+` ``, and start the collision viewer:
+`` Ctrl+Shift+` ``, and use the branch that matches the job in front of you.
+
+Collision review:
 
 ```bash
 uv run slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
 ```
 
-It opens a Meshcat page at `http://localhost:7000` in your browser. Everything
-it can do is in [Collision detection](#collision-detection). First time here?
-Start at [Setup](#setup) instead.
+Pseudo-live archive playback from a known start time:
+
+```bash
+uv run slac-stage-cad cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
+  --playback-start 2026-08-26T15:32:20-07:00 \
+  --playback-end ongoing
+```
+
+Resume pseudo-live archive playback from the last stopped timestamp:
+
+```bash
+uv run slac-stage-cad cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
+  --playback-start resume \
+  --playback-end ongoing
+```
+
+The viewers open a Meshcat page at `http://localhost:7000` in your browser.
+First time here? Start at [Setup](#setup) instead.
+
+## Three simulation modes
+
+Twin Lab has three useful operating modes. All three use the same reviewed CAD
+inventory; they differ in what drives the joints and whether Drake queries
+clearance.
+
+### 1. Kinematic simulation
+
+Use the stage-CAD viewer for a fast geometry and motion check without collision
+queries:
+
+```bash
+uv run slac-stage-cad cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
+```
+
+Manual sliders drive all 27 joints. This is the right mode for checking joint
+order, axes, home pose, travel limits, and whether the reviewed CAD looks
+correct. It does not require CoACD.
+
+### 2. Kinematic simulation with collision detection
+
+Use the Drake collision viewer when the question is clearance or interference:
+
+```bash
+uv run slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
+```
+
+The viewer drives the same reviewed joints while querying the convex geometry.
+The clamped cover is hidden from the normal illustration but remains in the
+collision model; its reported hulls appear translucent yellow in the warning
+band and red on contact. The first convex build is expensive but cached.
+
+### 3. Live feed or replay mode
+
+Use replay/live mode to apply archived or current EPICS commands to the CAD:
+
+```bash
+uv run slac-stage-cad cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
+  --playback-recording recordings/session-20260826T1552.json
+```
+
+Powered stages are driven by the recording or live archive. The two unpowered
+LX10 stages have no EPICS tracks, so replay shows manual sliders only for
+`A205` and `A206`; set those sliders to the positions manually adjusted on the
+hardware before evaluating the replay pose. All other replayed joints remain
+view-only and follow the EPICS data. Replay itself does not perform collision
+queries; use mode 2 when collision results are required.
+
+Use fixed archive, pseudo-live, or live-file commands below when the source is
+not a saved recording. These modes are open-loop command reconstruction, not
+encoder readback.
+
+## Collision detection
+
+Collision detection is the top-level design-review tool: it answers whether a
+candidate pose or motion sweep is clear, close, or interfering before anyone
+trusts a playback trace or a manually adjusted pose.
+
+```bash
+uv run slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
+```
+
+The viewer opens the reviewed `43841` assembly with collision checking on. Move
+joints with sliders or run the built-in animation sweep; the background and
+part highlights report the state immediately. Use this first when the question
+is geometric safety, clearance, or whether the current CAD/inventory model is
+ready to compare against real motion.
+
+Detailed collision modes, hull-error auditing, and CAD contact rechecking are
+kept later in [Collision reference and rechecking](#collision-reference-and-rechecking)
+because they are follow-up tools once the basic collision result needs deeper
+interpretation.
+
+## Playback and live data
+
+Playback is the bridge between the reviewed CAD model and real EPICS motor
+commands. The controls are open-loop, so every branch below shows commanded
+motion reconstructed with each stage's catalog speed limits; it is not encoder
+readback or proof that the hardware physically arrived.
+
+| Branch | Command shape | Controls | Why it matters |
+| --- | --- | --- | --- |
+| Saved session replay | `slac-export-session`, then `slac-stage-cad --playback-recording recordings/session-....json` | Speed, pause, restart, scrub | Portable and repeatable. Use it for design reviews, demos, and sharing an exact historical run without needing archiver access later. |
+| Fixed archive replay | `slac-stage-cad --playback-start ISO --playback-end ISO` | Speed, pause, restart, scrub | Fastest path when this machine can reach the archiver and you just want to inspect one finite time window. The top-left viewer label is `fixed playback mode`. |
+| Pseudo-live archive replay | `slac-stage-cad --playback-start ISO --playback-end ongoing` | `Stop continuous playback`, `Resume continuous playback`, plus travel-speed derating | Starts from a user-selected historical time and keeps extending the archive query at 1x. The top-left viewer label is `continuous playback mode`, matching its role as the integration bridge for true live feed. |
+| Resumed pseudo-live replay | `slac-stage-cad --playback-start resume --playback-end ongoing` | `Stop continuous playback`, `Resume continuous playback`, plus travel-speed derating | Reopens continuous mode from the timestamp saved when the previous viewer process closed. Inside an already-open viewer, use **Resume continuous playback** instead of switching back to VS Code. |
+| Current archiver live mirror | `slac-export-live` plus `slac-live-feed --live-file recordings/live.json`, or direct `slac-live-feed` where archive access works | Stop only, plus travel-speed derating | Tracks the present hardware run with a few seconds of archiver lag. This is the practical near-live workflow available now. |
+| Future true EPICS live feed | Not implemented yet; waiting on controls-system details | Stop only | This should swap the data source under the same live viewer contract once the controls person gives us the supported direct live feed path. It matters because it removes archiver lag and makes Twin Lab a real run-time mirror. |
+
+### Saved session replay
+
+Use this when you want a durable artifact. Export once on a PCDS-networked
+machine, then replay the resulting JSON anywhere:
+
+```bash
+uv run slac-export-session
+uv run slac-stage-cad cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
+  --playback-recording recordings/session-20260826T1552.json
+```
+
+The replay viewer is view-only: the recording drives the joints, so manual
+sliders are hidden. Because the window is finite and historical, the Meshcat
+panel includes playback speed, pause, restart, and scrub controls.
+
+### Fixed archive replay
+
+Use this when the current machine can reach the archive REST endpoint and you
+do not need to save a JSON file first:
+
+```bash
+uv run slac-stage-cad cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
+  --playback-start 2026-08-26T15:32:20-07:00 \
+  --playback-end 2026-08-26T15:36:40-07:00 \
+  --playback-speed 8
+```
+
+This is regular historical playback, labeled `fixed playback mode` in the
+viewer. Pause is for inspecting one pose in that finite window; it is not the
+live-mode stop command.
+
+### Pseudo-live archive replay
+
+Use this when you want live-like behavior from archived data. The user supplies
+the start, and the end is `ongoing` or `continuous`:
+
+```bash
+uv run slac-stage-cad cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
+  --playback-start 2026-08-26T15:32:20-07:00 \
+  --playback-end ongoing
+```
+
+This mode is labeled `continuous playback mode` in the viewer. It advances at
+real time and refreshes the growing archive window in the background with an
+8-second lookahead buffer, so commands should already be cached before their
+timestamp reaches the viewer clock and a slow archiver response should not
+freeze frame updates. Press
+**Stop continuous playback** to stop the feed at the current archive timestamp,
+then **Resume continuous playback** to continue from that same timestamp without
+leaving the browser. This is intentionally separate from finite playback's
+pause control, and continuous mode still has no speed multiplier, restart, or
+scrub controls.
+
+Escape or **Stop viewer** closes the viewer process. On close, it saves the last
+archive timestamp to `recordings/ongoing-playback-resume.json` by default. If
+you later need to reopen from that point, run the full command:
+
+```bash
+uv run slac-stage-cad cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
+  --playback-start resume \
+  --playback-end ongoing
+```
+
+Use `--playback-resume-file path/to/resume.json` if you need separate resume
+state for two different runs. Use `--playback-poll-period-s` to tune how often
+the growing archive window is refreshed, and `--playback-lookahead-s` to adjust
+the buffer if 8 seconds is too short or too conservative for a particular
+network path.
+
+### Current archiver live mirror
+
+For watching a real experiment while it is happening, run the live exporter on
+a PCDS-networked machine:
+
+```bash
+uv run slac-export-live
+```
+
+Then point the live viewer at that continuously refreshed file:
+
+```bash
+uv run slac-live-feed cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
+  --live-file recordings/live.json
+```
+
+Where direct archive access works from the viewer machine, `slac-live-feed` can
+also poll the archive itself. Either way, this branch follows the present run,
+not a chosen historical start. It has live-style controls only: stop the feed,
+optionally derate travel speed, and do not scrub or speed-scale reality.
+
+### Future true EPICS live feed
+
+This is the branch still waiting on information from the controls person. The
+intended shape is the same live viewer contract used above - a source that
+reports current joint positions and a current timestamp - but the source will
+come from the supported direct live EPICS feed rather than from archived REST
+queries or a refreshed JSON file. Keeping pseudo-live and archiver-live modes
+separate now lets us swap that source in later without changing the viewer's
+stop-only live behavior.
 
 ## Setup
 
@@ -294,9 +502,51 @@ there is only ever one form to copy.
 uv run pytest -q
 ```
 
-Expect `53 passed` in roughly 15 seconds. The suite exercises the CAD manifest,
+Expect about `214 passed` in roughly 15 seconds. The suite exercises the CAD manifest,
 inventory remap, SDF compiler, and collision plumbing without opening a viewer.
 If this passes, setup is done.
+
+### 7. EPICS archiver access (optional, one-time)
+
+Only needed for recreating or mirroring real motor commands (see
+[Playback and live data](#playback-and-live-data). Playback from a saved JSON
+recording (`--playback-recording`) does not need any of this.
+
+`archapp` (https://github.com/pcdshub/archapp), PCDS's Python interface to
+the archiver appliance, is already part of `uv sync --all-extras` from step 4
+above - it is a normal pip-installable package straight from its GitHub repo,
+not something that needs the PCDS conda environment. There is no separate
+one-time step here beyond the setup you already did.
+
+Do not clone `archapp` into the Twin-Lab checkout. The upstream `archapp`
+README's old "go to archapp/lib and type ipython" instruction is a manual
+developer workflow for that standalone package; in Twin-Lab, `uv` has already
+installed it into `.venv`. You can verify that with:
+
+```bash
+uv run python3 -c "from archapp.interactive import EpicsArchive; print('archapp OK')"
+```
+
+What this does *not* solve, and can't: actually reaching the archiver host
+still requires being on the PCDS network (on-site or VPN) at the time you run
+the command. Installing `archapp` only means the *code* is available - if a
+command below fails to fetch data, that is a network reachability problem,
+not a missing-dependency problem, and the command will tell you so plainly
+rather than showing a raw error.
+
+Twin-Lab uses `archapp` for real archiver access. `archapp` defaults to a
+hostname of `psctlws01` (overridable via the `ARCHAPP_HOSTNAME` environment
+variable, `ARCHAPP_DATA_PORT`/`ARCHAPP_MGMT_PORT` for the ports). If that
+default doesn't resolve for your connection even while on VPN - your own DNS
+server explicitly says it doesn't exist, rather than timing out - that's a
+sign you are not on the PCDS network view that exposes that hostname, or the
+archiver's real hostname is different for how you're connecting. Ask the PCDS
+controls team for the correct `archapp` hostname or for the supported host
+where `/reg/g/pcds/setup` is available, then set the hostname, e.g.:
+
+```bash
+ARCHAPP_HOSTNAME=the-right-hostname uv run slac-export-session
+```
 
 ### Running commands
 
@@ -306,9 +556,10 @@ plain terminal, on a machine without the Python extension, or in a script — an
 so there is never a question of whether the right Python is selected. Run them
 in the VS Code terminal, which already opens at the repository root.
 
-## Collision detection
+## Collision reference and rechecking
 
-This is the point of the model. Quick start, from the repository root:
+This is the deeper collision-reference material behind the quick workflow near
+the top. From the repository root:
 
 ```bash
 uv run slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
@@ -786,6 +1037,12 @@ None of this touches the model or the clearance checking, only the camera, so th
 mouse still works normally afterwards. For a clean plate in a screenshot, clear
 **Collision detection** first so no parts are lit yellow or red.
 
+## Playback reference
+
+The active playback workflow is now near the top in
+[Playback and live data](#playback-and-live-data). Keep lower sections focused
+on CAD refreshes, older viewer tools, and repository maintenance.
+
 ## Updating the 43841 STEP
 
 **Only when a new STEP revision arrives.** Nothing in this section is part of
@@ -928,7 +1185,10 @@ entry points, all installed with the package. Prefix each with `uv run`:
 
 | Command | Module | Purpose |
 | --- | --- | --- |
-| `slac-stage-cad` | `stage_cad_viewer` | Cached CAD viewer with manual sliders and animation |
+| `slac-stage-cad` | `stage_cad_viewer` | Cached CAD viewer with manual sliders and animation; also plays finite playback and pseudo-live archive playback (`--playback-end ongoing`) |
+| `slac-live-feed` | `stage_cad_viewer` | View-only viewer mirroring current EPICS commands live or from a refreshed live JSON file |
+| `slac-export-session` | `archive_export` | Guided one-time export of a fixed past EPICS window to a replayable JSON file |
+| `slac-export-live` | `archive_export` | Guided continuous export of a trailing EPICS window, for `slac-live-feed --live-file` to tail |
 | `slac-collision` | `collision_viewer` | Drake viewer with live clearance reporting |
 | `slac-compile-sdf` | `sdf_compiler` | Portable SDF share package |
 | `slac-decompose` | `convex_collision` | Convex-decompose cached meshes ahead of time |
@@ -977,7 +1237,7 @@ uv run ruff format --check .
 - Collision geometry is opt-in and lives in a separate package. Aggregate CAD
   meshes make poor convex hulls, so useful interference analysis needs the
   `convex` mode, which splits each part into CoACD hulls before Drake sees it.
-- The 43841 assembly has 22 scalar joints and 4798 convex collision hulls. Hull
+- The 43841 assembly has 27 scalar joints and 5613 convex collision hulls. Hull
   mode reports contact almost everywhere because the enclosure hull is solid;
   convex mode is the mode to trust.
 - Clearance is reported as a three-state readout: clear, close, and

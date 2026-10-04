@@ -1,0 +1,98 @@
+schema: slac-crystal-stack-command-map/v1
+# Maps known stage joints to their real motor command PVs, for
+# twin_lab.epics_playback.load_command_map(). Originally just the 12
+# crystal-stack joints (3 stacks x 4 axes) moved during the 2026-08-26
+# session; now also covers the Detector and the three Polycap stacks from
+# the same controls PV table (image supplied 2026-08-26).
+#
+# Each top-level key is the exact chain name from
+# cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
+# (motion_chains / compound_motion_chains) - twin_lab.epics_playback relies
+# on that exact match to derive the compiled SDF joint name (see
+# sdf_joint_name()), so don't rename these groups without also checking
+# stage_cad_viewer.py's motion_chains output and the compiled SDF.
+#
+# Crystal stacks derived from motion_chains (listed base-to-payload) crossed
+# with each ref's joint_type in config/stage-catalog.yaml, then matched to
+# the PV list (POLYCAP:CRY:*) by stack letter (S/M/N = South/Middle/North
+# Crystal, confirmed via the unambiguous SXA0750 X-stage model match) and
+# stage model family:
+#   x      = bottom-most stage (closest to the base mount), translates
+#            parallel to the base-mount plane (SXA0750-R01-BM* -> PV suffix X)
+#   y      = next stage up, also translates parallel to the base-mount plane
+#            (SXA0530-R01-BM -> PV suffix Y)
+#   swivel = the stack's single Z-axis rotation stage, kohzu_ra04a_w01
+#            (RA04A-W01-BM -> PV suffix ROT)
+#   pivot  = the stack's single tip/tilt stage, offset from its pivot point,
+#            kohzu_sa04b_rt02*_bm (SA04B-RT02*-BM -> PV suffix SWI)
+#
+# NOTE: the mirrored/non-mirrored (R-BM vs BM) SA04B variant per stack does
+# not line up with which stack has the mirrored SXA0750 variant (e.g. North
+# has the mirrored SXA0750 but the non-mirrored SA04B). That's expected -
+# each stage's handedness is an independent build choice - and doesn't affect
+# this mapping, which only depends on stack letter + model family, both
+# unambiguous per row.
+#
+# Detector and Polycap `ref` values use the compound-chain "stage_ref:axis"
+# form (e.g. "A067:x") to match stage_cad_viewer.py's joint["key"] for
+# compound_motion_chains joints; crystal/Detector joints are simple
+# motion_chains, so their `ref` is just the bare stage ref.
+# Refs were remapped to the 2026-09-24 STEP (sha256 948f9e9f88...). The pre-refresh
+# refs are not just stale, they are dangerous: old Middle-Crystal x "A043" now
+# identifies the liquid-jet camera stage in this revision.
+# Recordings store the Twin-Lab ref, not the PV, so a CAD refresh would otherwise
+# orphan every historical session. These are the pre-2026-09-24 refs, kept so
+# recordings/session-real.json (2026-08-26) still replays.
+legacy_refs:
+  A050: A216
+  A049: A215
+  A048: A214
+  A047: A213
+  A043: A209
+  A042: A208
+  A045: A211
+  A044: A210
+  A055: A221
+  A054: A220
+  A053: A219
+  A052: A218
+  A040: A204
+  "A065:z": "A231:z"
+  "A067:x": "A233:x"
+  "A063:z": "A229:z"
+  "A061:x": "A227:x"
+  "A059:z": "A225:z"
+  "A058:x": "A224:x"
+
+joints:
+  North Crystal:
+    x:      {ref: A216, joint_type: prismatic, command_pv: "POLYCAP:CRY:N:X"}
+    y:      {ref: A215, joint_type: prismatic, command_pv: "POLYCAP:CRY:N:Y"}
+    swivel: {ref: A214, joint_type: revolute,  command_pv: "POLYCAP:CRY:N:ROT"}
+    pivot:  {ref: A213, joint_type: revolute,  command_pv: "POLYCAP:CRY:N:SWI"}
+  Middle Crystal:
+    x:      {ref: A209, joint_type: prismatic, command_pv: "POLYCAP:CRY:M:X"}
+    y:      {ref: A208, joint_type: prismatic, command_pv: "POLYCAP:CRY:M:Y"}
+    swivel: {ref: A211, joint_type: revolute,  command_pv: "POLYCAP:CRY:M:ROT"}
+    pivot:  {ref: A210, joint_type: revolute,  command_pv: "POLYCAP:CRY:M:SWI"}
+  South Crystal:
+    x:      {ref: A221, joint_type: prismatic, command_pv: "POLYCAP:CRY:S:X"}
+    y:      {ref: A220, joint_type: prismatic, command_pv: "POLYCAP:CRY:S:Y"}
+    swivel: {ref: A219, joint_type: revolute,  command_pv: "POLYCAP:CRY:S:ROT"}
+    pivot:  {ref: A218, joint_type: revolute,  command_pv: "POLYCAP:CRY:S:SWI"}
+  Detector:
+    z: {ref: A204, joint_type: prismatic, command_pv: "POLYCAP:DET:Z"}
+  North Polycap:
+    z: {ref: "A231:z", joint_type: prismatic, command_pv: "POLYCAP:PC:N:Z"}
+    x: {ref: "A233:x", joint_type: prismatic, command_pv: "POLYCAP:PC:N:X"}
+    # y (A233:y) has no PV in the supplied PV table - the YA04A-R102 stage is
+    # a two-axis unit, so this joint can't be replayed until that PV shows up.
+  Middle Polycap:
+    z: {ref: "A229:z", joint_type: prismatic, command_pv: "POLYCAP:PC:M:Z"}
+    x: {ref: "A227:x", joint_type: prismatic, command_pv: "POLYCAP:PC:M:X"}
+    # y (A227:y): same gap as North Polycap above.
+  South Polycap:
+    z: {ref: "A225:z", joint_type: prismatic, command_pv: "POLYCAP:PC:S:Z"}
+    x: {ref: "A224:x", joint_type: prismatic, command_pv: "POLYCAP:PC:S:X"}
+    # y (A224:y): same gap as North Polycap above.
+
