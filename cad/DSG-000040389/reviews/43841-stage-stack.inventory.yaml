@@ -209,7 +209,10 @@ joint_limit_overrides:
   # pose. Home is the bottom of that travel, which is the CAD pose itself.
   A005: {unit: meter, limits: [0.0, 0.008], home: 0.0, cad_position: 0.0}
   A210: {unit: degree, limits: [-10, 10]}
-  A211: {unit: degree, limits: [-30, 30]}
+  # Middle Crystal's RA04A swivel aims the beam at the EPIX. The review found
+  # that 155 degrees is the viable orientation; cad_position makes this move
+  # the geometry rather than only relabeling the slider's home.
+  A211: {unit: degree, limits: [125, 185], home: 155, cad_position: 0}
   A213: {unit: degree, limits: [-10, 10]}
   A214: {unit: degree, limits: [150, 210], home: 180}
   A218: {unit: degree, limits: [-10, 10]}
