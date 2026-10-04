@@ -272,7 +272,7 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
     }
 
 
-def test_current_43841_inventory_has_32_reviewed_joints_and_collision_cover() -> None:
+def test_current_43841_inventory_has_31_reviewed_joints_and_collision_cover() -> None:
     inventory = yaml.safe_load(
         Path("cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml").read_text()
     )
@@ -283,25 +283,29 @@ def test_current_43841_inventory_has_32_reviewed_joints_and_collision_cover() ->
     assert inventory["motion_chains"]["Detector"] == ["A206", "A204", "A205"]
     assert inventory["motion_chains"]["LJ Detector 1"] == ["A024", "A026"]
     assert inventory["motion_chains"]["LJ Detector 2"] == ["A030", "A032"]
-    assert [joint["key"] for joint in inventory["compound_motion_chains"]["LJ Camera"]] == [
-        "A043:rotation",
-    ]
+    assert "LJ Camera" not in inventory["compound_motion_chains"]
+    assert all("A043" not in refs for refs in inventory["motion_chains"].values())
+    assert all(
+        joint["stage_ref"] != "A043"
+        for chain in inventory["compound_motion_chains"].values()
+        for joint in chain
+    )
     assert set(inventory["hidden_occurrences"]) >= {"P492", "P493", "P494"}
     assert inventory["hidden_stage_geometry"] == ["A043"]
-    assert {"P642", "P649"} <= set(inventory["attachment_overrides"]["fixed"])
     assert {
-        "P643", "P644", "P647", "P648", "P654", "P659", "P665"
-    } <= set(inventory["attachment_overrides"]["moving"]["A043"])
+        "P642", "P649", "P643", "P644", "P647", "P648", "P654", "P659", "P665"
+    } <= set(inventory["attachment_overrides"]["fixed"])
+    assert "A043" not in inventory["attachment_overrides"]["moving"]
     camera_envelope = next(
         attachment
         for attachment in inventory["supplemental_attachments"]
         if attachment["name"] == "LIB-000000728-envelope"
     )
-    assert camera_envelope["parent_joint_key"] == "A043:rotation"
-    assert camera_envelope["parent_stage_ref"] == "A043"
+    assert camera_envelope.get("parent_joint_key") is None
+    assert camera_envelope["parent_stage_ref"] is None
     assert sum(map(len, inventory["motion_chains"].values())) + sum(
         map(len, inventory["compound_motion_chains"].values())
-    ) == 32
+    ) == 31
     lx10_catalogs = [
         item["catalog"] for item in inventory["stage_instances"]
         if item["ref"] in ("A205", "A206")

@@ -426,7 +426,10 @@ def prepare_stage_cad(
         mesh_path = resolve_repo_path(attachment["mesh"], relative_to=inventory_file.parent)
         attachments.append(
             {
-                "parent_stage_ref": str(attachment["parent_stage_ref"]),
+                "parent_stage_ref": (
+                    str(attachment["parent_stage_ref"])
+                    if attachment["parent_stage_ref"] is not None else None
+                ),
                 "parent_joint_key": attachment.get("parent_joint_key"),
                 "mesh": mesh_path.as_posix(),
                 "part_count": int(attachment.get("part_count", 1)),
