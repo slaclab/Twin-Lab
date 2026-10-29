@@ -121,6 +121,43 @@ def test_collision_only_cover_highlight_is_translucent() -> None:
     assert meshcat.rgba.a() == pytest.approx(0.42)
 
 
+def test_highlight_falls_back_to_hulls_without_a_cad_mesh() -> None:
+    calls = []
+    meshcat = SimpleNamespace(
+        SetObject=lambda path, shape, rgba: calls.append(("object", path, shape, rgba)),
+        SetTransform=lambda path, pose: calls.append(("transform", path, pose)),
+        SetProperty=lambda path, name, value: calls.append(("property", path, name, value)),
+    )
+    highlighter = _Highlighter.__new__(_Highlighter)
+    highlighter._meshcat = meshcat
+    highlighter._refiner = None
+    highlighter._collision_only_parts = frozenset()
+    part_key = "lift/P920"
+    highlighter._parts = {part_key: ("/lift/P920", "P920", object())}
+    highlighter._part_meshes = {}
+    highlighter._hulls = {part_key: [("hull 0", "pose 0"), ("hull 1", "pose 1")]}
+    highlighter._geometry_parts = {"lift::p920_000": part_key, "lift::p920_001": part_key}
+    highlighter._uploaded = {}
+    highlighter._shown = {}
+    report = SimpleNamespace(geometry_states=lambda: {"lift::p920_001": "interference"})
+
+    highlighter.update(report)
+
+    objects = [call for call in calls if call[0] == "object"]
+    assert [(path, shape) for _, path, shape, _ in objects] == [
+        ("/lift/P920/0", "hull 0"),
+        ("/lift/P920/1", "hull 1"),
+    ]
+    assert all(rgba.r() > 0.9 and rgba.a() == 1.0 for *_, rgba in objects)
+    assert ("transform", "/lift/P920/1", "pose 1") in calls
+    assert ("property", "/lift/P920", "visible", True) in calls
+    assert highlighter._shown == {part_key: "interference"}
+
+    highlighter.clear()
+
+    assert calls[-1] == ("property", "/lift/P920", "visible", False)
+
+
 def test_read_obj_parts_splits_on_group_markers_and_rebases_indices(tmp_path):
     path = tmp_path / "merged.obj"
     path.write_text(SPLIT_OBJ, encoding="utf-8")

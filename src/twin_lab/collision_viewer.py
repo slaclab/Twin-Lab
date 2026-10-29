@@ -653,12 +653,16 @@ class _Highlighter:
         self._geometry_parts: dict[str, str] = {}
         self._parts: dict[str, tuple[str, str, object]] = {}
         self._part_meshes: dict[str, tuple[np.ndarray, np.ndarray] | None] = {}
+        self._hulls: dict[str, list[tuple[object, object]]] = {}
         for geometry_id in inspector.GetAllGeometryIds(Role.kProximity):
             frame_path = inspector.GetName(inspector.GetFrameId(geometry_id)).replace("::", "/")
             geometry_name = model.scene.geometry_name(inspector, geometry_id)
             reference = part_of(geometry_name)
             part_key = f"{frame_path}/{reference}"
             self._geometry_parts[geometry_name] = part_key
+            self._hulls.setdefault(part_key, []).append(
+                (inspector.GetShape(geometry_id), inspector.GetPoseInFrame(geometry_id))
+            )
             self._parts.setdefault(
                 part_key,
                 (
@@ -677,8 +681,8 @@ class _Highlighter:
         self._uploaded: dict[str, str] = {}
         self._hidden: frozenset[str] = frozenset()
 
-    def _paint(self, part_key: str, state: str) -> str | None:
-        """Upload the source tessellation only when its highlight colour changes."""
+    def _paint(self, part_key: str, state: str) -> str:
+        """Upload the source tessellation, or the hulls without one, when the colour changes."""
 
         from pydrake.geometry import Rgba
 
@@ -688,23 +692,27 @@ class _Highlighter:
                 None if self._refiner is None else self._refiner.part_mesh(reference)
             )
         mesh = self._part_meshes[part_key]
-        if mesh is None:
-            return None
         if self._uploaded.get(part_key) != state:
-            vertices, faces = mesh
             rgba = HIGHLIGHT_RGBA[state]
             if reference in self._collision_only_parts:
                 rgba = (*rgba[:3], 0.42)
-            self._meshcat.SetTriangleMesh(
-                path,
-                np.asfortranarray(vertices.T.astype(np.float64)),
-                np.asfortranarray(faces.T.astype(np.int32)),
-                Rgba(*rgba),
-            )
-            self._meshcat.SetTransform(path, pose)
-            self._meshcat.SetProperty(f"{path}/<object>", "material.polygonOffset", True)
-            self._meshcat.SetProperty(f"{path}/<object>", "material.polygonOffsetFactor", -1)
-            self._meshcat.SetProperty(f"{path}/<object>", "material.polygonOffsetUnits", -1)
+            if mesh is None:
+                # No CAD tessellation (e.g. no refiner), so mark the part by its hulls instead.
+                for index, (shape, hull_pose) in enumerate(self._hulls[part_key]):
+                    self._meshcat.SetObject(f"{path}/{index}", shape, Rgba(*rgba))
+                    self._meshcat.SetTransform(f"{path}/{index}", hull_pose)
+            else:
+                vertices, faces = mesh
+                self._meshcat.SetTriangleMesh(
+                    path,
+                    np.asfortranarray(vertices.T.astype(np.float64)),
+                    np.asfortranarray(faces.T.astype(np.int32)),
+                    Rgba(*rgba),
+                )
+                self._meshcat.SetTransform(path, pose)
+                self._meshcat.SetProperty(f"{path}/<object>", "material.polygonOffset", True)
+                self._meshcat.SetProperty(f"{path}/<object>", "material.polygonOffsetFactor", -1)
+                self._meshcat.SetProperty(f"{path}/<object>", "material.polygonOffsetUnits", -1)
             self._uploaded[part_key] = state
         return path
 
@@ -726,8 +734,6 @@ class _Highlighter:
         shown = {}
         for part_key, state in wanted.items():
             path = self._paint(part_key, state)
-            if path is None:
-                continue
             if part_key not in self._shown:
                 self._meshcat.SetProperty(path, "visible", True)
             shown[part_key] = state
