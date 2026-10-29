@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
 import re
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -22,15 +24,73 @@ from OCP.TopoDS import TopoDS
 
 from .cad_geometry import leaf_occurrences, placed_shape, write_group_obj
 from .constraints_wizard import _occurrence_shape_by_ref, _read_step_document
+from .epics_playback import PlaybackSource
 from .paths import CACHE_ROOT, resolve_repo_path, review_artifact_stem
+from .static_review import collision_only_refs, normalized_name, review_selection
 
 AUTO_MOTION_LABEL = "Animation"
 AUTO_RANGE_LABEL = "Auto motion range (% of travel)"
 AUTO_PERIOD_LABEL = "Auto motion period (s)"
+PLAYBACK_SPEED_LABEL = "Playback speed (x)"
+PLAYBACK_PAUSED_LABEL = "Playback: paused"
+TRAVEL_SPEED_LABEL = "Travel speed (% of max)"
+SCRUB_LABEL = "Playback position (% of completion)"
+MANUAL_STAGE_PREFIX = "Manual stage"
+CONTINUOUS_STOP_LABEL = "Stop continuous playback"
+CONTINUOUS_RESUME_LABEL = "Resume continuous playback"
+ONGOING_PLAYBACK_ENDS = {"ongoing", "continuous"}
+ONGOING_PLAYBACK_RESUME_STARTS = {"resume", "previous", "last"}
+DEFAULT_ONGOING_RESUME_PATH = Path("recordings/ongoing-playback-resume.json")
 # While animating, the sliders report the pose rather than drive it, so they only have to
 # keep up with the eye. Pushing all of them every frame costs a dat.GUI redraw each, which
 # is far more work than the browser can absorb at the frame rate.
 SLIDER_PUSH_HZ = 5.0
+# A joint holding between commands publishes nothing, so motion is reported for this long
+# after the last change to keep the readout from flickering during slow moves.
+MOTION_HOLD_S = 0.5
+# The browser readout only repaints twice a second, so pushing the clock faster than that
+# would just queue updates the viewer never shows.
+TIME_PUSH_S = 0.5
+
+
+def _safe_write_group_obj(
+    occurrences: list[Any],
+    mesh_path: Path,
+    *,
+    linear_deflection_mm: float,
+) -> bool:
+    """Write a rigid-group mesh when it tessellates; otherwise skip it."""
+
+    try:
+        write_group_obj(
+            occurrences,
+            mesh_path,
+            linear_deflection_mm=linear_deflection_mm,
+        )
+    except ValueError:
+        if mesh_path.exists():
+            mesh_path.unlink(missing_ok=True)
+        return False
+    return True
+
+
+def _leaf_descendants_by_ref(
+    manifest_items: list[dict[str, Any]],
+    occurrence_ref: str,
+) -> list[str]:
+    """Expand a stage or assembly occurrence reference to all non-assembly leaf refs below it."""
+
+    item = next((entry for entry in manifest_items if str(entry["ref"]) == str(occurrence_ref)), None)
+    if item is None:
+        return [str(occurrence_ref)]
+    if not item["is_assembly"]:
+        return [str(occurrence_ref)]
+    return [
+        str(descendant["ref"])
+        for descendant in manifest_items
+        if not descendant["is_assembly"]
+        and str(descendant["id"]).startswith(f"{str(item['id'])}/")
+    ]
 
 
 def prepare_stage_cad(
@@ -52,6 +112,32 @@ def prepare_stage_cad(
     output_dir = CACHE_ROOT / "stage-cad" / review_artifact_stem(inventory_file)
     scene_path = output_dir / "scene.yaml"
     sources = [inventory_file, step_path, catalog_path, manifest_path]
+    supplemental_attachments = inventory.get("supplemental_attachments", [])
+    for attachment in supplemental_attachments:
+        sources.append(resolve_repo_path(attachment["mesh"], relative_to=inventory_file.parent))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest_items = manifest["occurrences"]
+    by_ref = {item["ref"]: item for item in manifest_items}
+    reviewed_root = by_ref[inventory["subassembly"]["ref"]]
+    if normalized_name(str(reviewed_root["name"])) != normalized_name(
+        str(inventory["subassembly"]["name"])
+    ):
+        raise ValueError("Reviewed subassembly ref does not match the STEP manifest")
+    for instance in inventory["stage_instances"]:
+        if not str(by_ref[str(instance["ref"])]["name"]).startswith("LIB-"):
+            raise ValueError(f"Stage {instance['ref']} no longer identifies a library stage")
+    selected_omissions: set[str] = set()
+    collision_only: set[str] = set()
+    if "selection_review" in inventory:
+        review_path = resolve_repo_path(
+            inventory["selection_review"], relative_to=inventory_file.parent
+        )
+        sources.append(review_path)
+        review = yaml.safe_load(review_path.read_text(encoding="utf-8"))
+        if hashlib.sha256(step_path.read_bytes()).hexdigest() != review["source_sha256"]:
+            raise ValueError("Selection review does not match the inventory STEP revision")
+        selected_omissions, _, _ = review_selection(manifest, review)
+        collision_only = collision_only_refs(manifest, review)
     if not rebuild and scene_path.exists():
         cached_scene = yaml.safe_load(scene_path.read_text(encoding="utf-8"))
         cached_meshes = {Path(item["mesh"]) for item in cached_scene.get("instances", [])}
@@ -61,6 +147,9 @@ def prepare_stage_cad(
             cached_meshes.update(Path(item["mesh"]) for item in cached_scene["attachments"])
             cached_meshes.update(
                 Path(item["mesh"]) for item in cached_scene.get("static_geometry", [])
+            )
+            cached_meshes.update(
+                Path(item["mesh"]) for item in cached_scene.get("collision_only_geometry", [])
             )
             for stage_meshes in cached_scene.get("motion_stage_meshes", {}).values():
                 cached_meshes.update(Path(path) for path in stage_meshes.values())
@@ -104,12 +193,9 @@ def prepare_stage_cad(
         for _, shape, mesh_path in model_geometries:
             _write_shape_obj(shape, mesh_path, linear_deflection_mm)
 
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest_items = manifest["occurrences"]
-    by_ref = {item["ref"]: item for item in manifest_items}
     root_id = by_ref[inventory["subassembly"]["ref"]]["id"]
     stage_ids = [by_ref[str(item["ref"])]["id"] for item in inventory["stage_instances"]]
-    hidden_refs = {str(ref) for ref in inventory.get("hidden_occurrences", [])}
+    hidden_refs = {str(ref) for ref in inventory.get("hidden_occurrences", [])} | selected_omissions
     overrides = inventory.get("attachment_overrides", {})
     forced_fixed = {str(ref) for ref in overrides.get("fixed", [])}
     forced_parent = {
@@ -120,16 +206,38 @@ def prepare_stage_cad(
     # A reviewed attachment may name a part outside the focused subassembly, because a
     # stack elsewhere in the STEP can still carry payload that has to move with it.
     reviewed_refs = forced_fixed | set(forced_parent)
+    motion_root_ids = {
+        os.path.commonpath([by_ref[str(ref)]["id"] for ref in refs])
+        for refs in inventory.get("motion_chains", {}).values()
+    }
     attached_refs = [
         item["ref"]
         for item in manifest_items
         if not item["is_assembly"]
-        and (item["id"].startswith(f"{root_id}/") or item["ref"] in reviewed_refs)
+        and (
+            item["id"].startswith(f"{root_id}/")
+            or any(item["id"].startswith(f"{motion_root_id}/") for motion_root_id in motion_root_ids)
+            or item["ref"] in reviewed_refs
+        )
         and not any(item["id"].startswith(f"{stage_id}/") for stage_id in stage_ids)
         and not _is_fastener_name(str(item["name"]))
         and item["ref"] not in hidden_refs
     ]
     leaves = leaf_occurrences(roots)
+
+    collision_only_geometry = []
+    if collision_only:
+        mesh_path = output_dir / "collision_only_cover.obj"
+        if not _safe_write_group_obj(
+            [leaves[ref] for ref in sorted(collision_only)],
+            mesh_path,
+            linear_deflection_mm=linear_deflection_mm,
+        ):
+            raise ValueError("Collision-only cover contains no tessellated parts")
+        collision_only_geometry.append({
+            "name": "clamped_cover", "mesh": mesh_path.as_posix(),
+            "part_refs": sorted(collision_only),
+        })
 
     static_geometry = []
     used_static_refs: set[str] = set()
@@ -152,14 +260,22 @@ def prepare_stage_cad(
                 f"{sorted(duplicate_refs)}"
             )
         if not references:
+            if "selection_review" in inventory and all(
+                item["ref"] in hidden_refs
+                for item in manifest_items
+                if not item["is_assembly"]
+                and (item["id"] == source_id or item["id"].startswith(f"{source_id}/"))
+            ):
+                continue
             raise ValueError(f"Static geometry {source_ref} contains no non-fastener parts")
         used_static_refs.update(references)
         mesh_path = output_dir / f"static_{source_ref}.obj"
-        write_group_obj(
+        if not _safe_write_group_obj(
             [leaves[ref] for ref in references],
             mesh_path,
             linear_deflection_mm=linear_deflection_mm,
-        )
+        ):
+            continue
         static_geometry.append(
             {
                 "source_ref": source_ref,
@@ -189,14 +305,36 @@ def prepare_stage_cad(
         children = [item for item in manifest_items if item["parent_id"] == by_ref[stage_ref]["id"]]
         role_meshes = {}
         for role in sorted(requested_roles):
-            references = [children[index - 1]["ref"] for index in roles[role]]
-            mesh_path = output_dir / f"{stage_ref}_{role}.obj"
-            write_group_obj(
-                [leaves[ref] for ref in references],
-                mesh_path,
-                linear_deflection_mm=linear_deflection_mm,
-            )
-            role_meshes[role] = mesh_path.as_posix()
+            references = []
+            for index in roles[role]:
+                if index - 1 < len(children):
+                    child_ref = children[index - 1]["ref"]
+                    references.extend(_leaf_descendants_by_ref(manifest_items, child_ref))
+            references = list(dict.fromkeys(references))
+            resolved = False
+            if references:
+                mesh_path = output_dir / f"{stage_ref}_{role}.obj"
+                if _safe_write_group_obj(
+                    [leaves[ref] for ref in references],
+                    mesh_path,
+                    linear_deflection_mm=linear_deflection_mm,
+                ):
+                    role_meshes[role] = mesh_path.as_posix()
+                    resolved = True
+            # The catalog's component_roles indices assume a stable child order per
+            # occurrence; a CAD revision that inserts/reorders children (or leaves a
+            # datum/mate placeholder with no solid) can point a role at empty geometry.
+            # Fall back to the whole instance so a moving role - required downstream by
+            # _build_tree - is never left unresolved; fixed stays optional either way.
+            if not resolved and role != "fixed":
+                instance_mesh = Path(str(instance_by_ref[stage_ref]["mesh"]))
+                if instance_mesh.exists():
+                    role_meshes[role] = instance_mesh.as_posix()
+                else:
+                    shape, _ = _occurrence_shape_by_ref(roots, stage_ref)
+                    mesh_path = output_dir / f"{stage_ref}_{role}.obj"
+                    _write_shape_obj(shape, mesh_path, linear_deflection_mm)
+                    role_meshes[role] = mesh_path.as_posix()
         motion_stage_meshes[stage_ref] = role_meshes
 
     attachment_styles = visual_styles.get("attachment_groups", {})
@@ -211,11 +349,26 @@ def prepare_stage_cad(
             attachment_style_by_ref[reference] = str(style)
 
     attachment_groups: dict[tuple[str | None, str], list[str]] = {}
+    # Compound chains have to be here too: a polycap part that is not named in
+    # attachment_overrides would otherwise fall through to world-fixed instead of
+    # riding the stack it sits on.
+    chain_reference_sets = [
+        [str(ref) for ref in refs] for refs in inventory.get("motion_chains", {}).values()
+    ]
+    chain_reference_sets.extend(
+        list(dict.fromkeys(str(spec["stage_ref"]) for spec in specs))
+        for specs in inventory.get("compound_motion_chains", {}).values()
+    )
     chain_root_by_id = {
-        os.path.commonpath([by_ref[str(ref)]["id"] for ref in refs]): refs
-        for refs in inventory.get("motion_chains", {}).values()
+        os.path.commonpath([by_ref[ref]["id"] for ref in refs]): refs
+        for refs in chain_reference_sets
     }
+    skipped_empty_refs: list[str] = []
     for reference in attached_refs:
+        center_m = _shape_center_m(placed_shape(leaves[reference]))
+        if center_m is None:
+            skipped_empty_refs.append(reference)
+            continue
         if reference in forced_fixed:
             style = attachment_style_by_ref.get(reference, "default")
             attachment_groups.setdefault((None, style), []).append(reference)
@@ -237,7 +390,6 @@ def prepare_stage_cad(
             style = attachment_style_by_ref.get(reference, "default")
             attachment_groups.setdefault((None, style), []).append(reference)
             continue
-        center_m = _shape_center_m(placed_shape(leaves[reference]))
         parent_ref = min(
             chain_refs,
             key=lambda ref: math.dist(center_m, instance_by_ref[ref]["translation_m"]),
@@ -251,11 +403,12 @@ def prepare_stage_cad(
             continue
         name = "fixed" if parent_ref is None else parent_ref
         mesh_path = output_dir / f"attached_{name}_{style}.obj"
-        write_group_obj(
+        if not _safe_write_group_obj(
             [leaves[ref] for ref in references],
             mesh_path,
             linear_deflection_mm=linear_deflection_mm,
-        )
+        ):
+            continue
         attachments.append(
             {
                 "parent_stage_ref": parent_ref,
@@ -266,6 +419,26 @@ def prepare_stage_cad(
                     style,
                     [0.45, 0.68, 0.78, 1.0] if parent_ref is not None else [0.68, 0.68, 0.70, 1.0],
                 ),
+            }
+        )
+
+    for attachment in supplemental_attachments:
+        mesh_path = resolve_repo_path(attachment["mesh"], relative_to=inventory_file.parent)
+        attachments.append(
+            {
+                "parent_stage_ref": (
+                    str(attachment["parent_stage_ref"])
+                    if attachment["parent_stage_ref"] is not None else None
+                ),
+                "parent_joint_key": attachment.get("parent_joint_key"),
+                "mesh": mesh_path.as_posix(),
+                "part_count": int(attachment.get("part_count", 1)),
+                "style": str(attachment.get("style", "default")),
+                "rgba": [
+                    float(value)
+                    for value in attachment.get("rgba", [0.45, 0.68, 0.78, 1.0])
+                ],
+                "name": str(attachment.get("name", mesh_path.stem)),
             }
         )
 
@@ -312,11 +485,15 @@ def prepare_stage_cad(
                     "stack": str(chain_name),
                     "name": str(spec["name"]),
                     "model": item["model"],
-                    "joint_type": "prismatic",
+                    "joint_type": str(spec.get("joint_type", "prismatic")),
                     "fixed_role": spec.get("fixed_role"),
                     "moving_role": str(spec["moving_role"]),
-                    "axis_world": _rotate_vector(item["rotation"], spec["axis_local"]),
-                    "origin_m": item["translation_m"],
+                    "axis_world": [float(value) for value in spec["axis_world"]]
+                    if "axis_world" in spec
+                    else _rotate_vector(item["rotation"], spec["axis_local"]),
+                    "origin_m": [
+                        float(value) for value in spec.get("origin_m", item["translation_m"])
+                    ],
                     "limits": _reviewed_limits(inventory, key, item["ref"], spec["limits"]),
                     "home": _reviewed_home(inventory, key, item["ref"]),
                     "cad_position": float(spec.get("cad_position", 0.0)),
@@ -330,33 +507,75 @@ def prepare_stage_cad(
         "linear_deflection_mm": linear_deflection_mm,
         "instances": instances,
         "static_geometry": static_geometry,
+        "collision_only_geometry": collision_only_geometry,
         "attached_part_count": len(attached_refs),
+        "skipped_empty_refs": skipped_empty_refs,
         "attachments": attachments,
         "motion_stage_meshes": motion_stage_meshes,
+        "hidden_stage_geometry": [
+            str(ref) for ref in inventory.get("hidden_stage_geometry", [])
+        ],
         "motion_chains": motion_chains,
     }
     scene_path.write_text(yaml.safe_dump(scene, sort_keys=False), encoding="utf-8")
     return scene_path
 
 
-def view_stage_cad(scene_path: str | Path, *, fps: float = 30.0) -> None:
-    """Show reusable real-CAD meshes with one transform per occurrence."""
+def view_stage_cad(
+    scene_path: str | Path,
+    *,
+    fps: float = 30.0,
+    playback: PlaybackSource | None = None,
+    joint_labels: dict[str, str] | None = None,
+    port: int | None = None,
+    open_browser: bool = True,
+) -> None:
+    """Show reusable real-CAD meshes with one transform per occurrence.
+
+    `joint_labels` (joint key -> display label) is only used in the playback
+    terminal readout, e.g. to show EPICS PV names instead of joint refs.
+
+    If `playback` is given, every joint it has a track for is driven from the
+    recorded session instead of its slider/animation value each frame; other
+    joints keep the existing manual/auto-motion behavior.
+    """
 
     from pydrake.geometry import Mesh, Meshcat, Rgba
     from pydrake.math import RigidTransform, RotationMatrix
 
     from .meshcat_ui import (
+        MODE_CONTINUOUS_PLAYBACK,
+        MODE_ARCHIVE,
+        MODE_LIVE,
+        MODE_NONE,
+        STATUS_COMPLETE,
+        STATUS_NONE,
+        STATUS_STANDBY,
         announce_viewer,
         patch_meshcat_page,
         print_view_help,
+        set_motors_moving,
+        set_playback_time,
+        set_viewer_mode,
+        set_viewer_status,
+        should_open_browser,
         viewer_params,
     )
 
     scene = yaml.safe_load(Path(scene_path).read_text(encoding="utf-8"))
     instances = scene["instances"]
+    hidden_stage_geometry = set(scene.get("hidden_stage_geometry", []))
     # Nothing here publishes a realtime rate, so the stats plot only ever covers the view.
     patch_meshcat_page()
-    meshcat = Meshcat(viewer_params())
+    try:
+        meshcat = Meshcat(viewer_params(port=port))
+    except RuntimeError:
+        # Another viewer already holds the fixed port; taking any free one beats refusing
+        # to start, but say so, because the URL to refresh is now a different one.
+        print(f"Port {port} is already in use, so this viewer took another one.")
+        meshcat = Meshcat(viewer_params())
+    # Streaming this much CAD takes a while, so the readout says so before it starts.
+    set_viewer_status(meshcat, STATUS_STANDBY)
     role_paths: dict[tuple[str, str], str] = {}
     joint_paths: dict[str, str] = {}
     last_joint_path_by_stage: dict[str, str] = {}
@@ -379,6 +598,8 @@ def view_stage_cad(scene_path: str | Path, *, fps: float = 30.0) -> None:
     for item in instances:
         if item["ref"] in scene["motion_stage_meshes"]:
             meshes = scene["motion_stage_meshes"][item["ref"]]
+            if item["ref"] in hidden_stage_geometry:
+                continue
             for role, mesh_path in meshes.items():
                 meshcat.SetObject(
                     role_paths[(item["ref"], role)],
@@ -400,7 +621,10 @@ def view_stage_cad(scene_path: str | Path, *, fps: float = 30.0) -> None:
     for attachment in scene["attachments"]:
         parent_ref = attachment["parent_stage_ref"]
         style = attachment.get("style", "default")
-        if parent_ref in last_joint_path_by_stage:
+        parent_joint_key = attachment.get("parent_joint_key")
+        if parent_joint_key in joint_paths:
+            path = f"{joint_paths[parent_joint_key]}/{style} geometry"
+        elif parent_ref in last_joint_path_by_stage:
             path = f"{last_joint_path_by_stage[parent_ref]}/{style} geometry"
         elif parent_ref is not None:
             path = f"/pending motion/{parent_ref}/{style} geometry"
@@ -422,20 +646,52 @@ def view_stage_cad(scene_path: str | Path, *, fps: float = 30.0) -> None:
         )
 
     joints = [joint for chain in scene.get("motion_chains", []) for joint in chain["joints"]]
-    for joint in joints:
-        scale, unit = _slider_scale(joint)
-        meshcat.AddSlider(
-            _slider_label(joint, unit),
-            joint["limits"][0] * scale,
-            joint["limits"][1] * scale,
-            0.1,
-            joint["home"] * scale,
-        )
-    # Drake can publish a slider but not a checkbox, so this steps 0 to 1 and
-    # meshcat_ui.TOGGLE_JS swaps a real checkbox into its row.
-    meshcat.AddSlider(AUTO_MOTION_LABEL, 0.0, 1.0, 1.0, 0.0)
-    meshcat.AddSlider(AUTO_RANGE_LABEL, 0.0, 100.0, 1.0, 25.0)
-    meshcat.AddSlider(AUTO_PERIOD_LABEL, 2.0, 60.0, 0.5, 12.0)
+    playback_keys = {joint["key"] for joint in joints if playback and joint["key"] in playback.joint_names}
+    manual_keys = manual_playback_keys(joints, instances) if playback is not None else set()
+    # Playback/live modes are view-only: the recording (or the real hardware) is the only
+    # thing allowed to move a joint, so the manual sliders and cyclic-animation controls
+    # that would otherwise fight it are left off entirely.
+    has_playback_controls = playback is not None and hasattr(playback, "set_speed")
+    has_travel_control = playback is not None and hasattr(playback, "set_travel_fraction")
+    has_ongoing_controls = playback is not None and hasattr(playback, "stop_feed")
+    if playback is None:
+        for joint in joints:
+            scale, unit = _slider_scale(joint)
+            meshcat.AddSlider(
+                _slider_label(joint, unit),
+                joint["limits"][0] * scale,
+                joint["limits"][1] * scale,
+                0.1,
+                joint["home"] * scale,
+            )
+        # Drake can publish a slider but not a checkbox, so this steps 0 to 1 and
+        # meshcat_ui.TOGGLE_JS swaps a real checkbox into its row.
+        meshcat.AddSlider(AUTO_MOTION_LABEL, 0.0, 1.0, 1.0, 0.0)
+        meshcat.AddSlider(AUTO_RANGE_LABEL, 0.0, 100.0, 1.0, 25.0)
+        meshcat.AddSlider(AUTO_PERIOD_LABEL, 2.0, 60.0, 0.5, 12.0)
+    if has_playback_controls:
+        for joint in joints:
+            if joint["key"] not in manual_keys:
+                continue
+            scale, unit = _slider_scale(joint)
+            meshcat.AddSlider(
+                f"{MANUAL_STAGE_PREFIX} {joint['key']} ({unit})",
+                joint["limits"][0] * scale,
+                joint["limits"][1] * scale,
+                0.1,
+                joint["home"] * scale,
+            )
+        meshcat.AddSlider(PLAYBACK_SPEED_LABEL, 0.1, 8.0, 0.05, playback.speed)
+        meshcat.AddSlider(PLAYBACK_PAUSED_LABEL, 0.0, 1.0, 1.0, 1.0 if playback.is_paused else 0.0)
+        meshcat.AddButton("Restart playback")
+    if has_travel_control:
+        meshcat.AddSlider(TRAVEL_SPEED_LABEL, 0.0, 100.0, 1.0, playback.travel_fraction * 100.0)
+    if has_ongoing_controls:
+        meshcat.AddButton(CONTINUOUS_STOP_LABEL)
+        meshcat.AddButton(CONTINUOUS_RESUME_LABEL)
+    can_scrub = playback is not None and getattr(playback, "record_end", None) is not None
+    if can_scrub:
+        meshcat.AddSlider(SCRUB_LABEL, 0.0, 100.0, 0.1, 0.0)
 
     center = [
         sum(item["translation_m"][axis] for item in instances) / len(instances) for axis in range(3)
@@ -443,20 +699,44 @@ def view_stage_cad(scene_path: str | Path, *, fps: float = 30.0) -> None:
     eye = [center[0] + 0.8, center[1] + 0.8, center[2] + 0.8]
     # pydrake's stub gives SetCameraPose a malformed Eigen shape; lists convert at runtime.
     meshcat.SetCameraPose(eye, center)  # pyright: ignore[reportArgumentType]
-    meshcat.AddButton("Reset to home")
-    meshcat.AddButton("Stop viewer", "Escape")
-    announce_viewer("Reusable stage CAD", meshcat)
+    if playback is None:
+        meshcat.AddButton("Reset to home")
+    stop_label = "Stop live feed" if playback is not None and not (has_playback_controls or has_ongoing_controls) else "Stop viewer"
+    meshcat.AddButton(stop_label, "Escape")
+    announce_viewer("Reusable stage CAD", meshcat, open_browser=should_open_browser(open_browser))
     print(
         f"Showing {len(instances)} real stages and {scene['attached_part_count']} attached "
         "non-fastener parts."
     )
-    print(f"Motion sliders: {len(joints)}")
-    print("Tick 'Animation' to start and stop cyclic motion.")
+    if playback is None:
+        print(f"Motion sliders: {len(joints)}")
+        print("Tick 'Animation' to start and stop cyclic motion.")
+    elif playback_keys:
+        label = "Continuous playback" if has_ongoing_controls else "Live EPICS feed" if not has_playback_controls else "Playback"
+        if getattr(playback, "has_commands", True):
+            if has_ongoing_controls:
+                print(
+                    f"{label}: replaying archived EPICS commands for {len(playback_keys)} "
+                    "joint(s) at 1x. Use the Meshcat stop/resume buttons to control the feed."
+                )
+            else:
+                print(
+                    f"{label}: recreating recorded EPICS commands for {len(playback_keys)} joint(s). "
+                    "This is view-only - use the Meshcat panel controls to pause/speed/restart it."
+                )
+        else:
+            print(
+                f"{label}: no commands in this window, so nothing will move. Showing the "
+                "assembly at its reviewed home - check the time window if that's unexpected."
+            )
     print_view_help()
     print("Press Escape in Meshcat or Ctrl-C here to stop.")
     frame_period = 1.0 / max(fps, 1.0)
     slider_period = 1.0 / SLIDER_PUSH_HZ
     reset_clicks = 0
+    restart_clicks = 0
+    continuous_stop_clicks = 0
+    continuous_resume_clicks = 0
     phase = 0.0
     previous_tick = time.monotonic()
     last_slider_push = 0.0
@@ -466,44 +746,134 @@ def view_stage_cad(scene_path: str | Path, *, fps: float = 30.0) -> None:
     homes = [joint["home"] * scale for joint, scale in zip(joints, scales, strict=True)]
     values = list(homes)
     published: list[float | None] = [None] * len(joints)
-    while meshcat.GetButtonClicks("Stop viewer") == 0:
+    last_speed_value = playback.speed if has_playback_controls else None
+    last_paused_value = playback.is_paused if has_playback_controls else None
+    last_travel_value = playback.travel_fraction * 100.0 if has_travel_control else None
+    last_readout = 0.0
+    last_motion_tick = float("-inf")
+    reported_moving: bool | None = None
+    last_time_push = 0.0
+    last_scrub_value = 0.0
+    reported_status = STATUS_STANDBY
+    set_motors_moving(meshcat, False)
+    set_viewer_status(meshcat, STATUS_NONE)
+    if playback is None:
+        set_viewer_mode(meshcat, MODE_NONE)
+    elif getattr(playback, "is_ongoing_playback", False):
+        set_viewer_mode(meshcat, MODE_CONTINUOUS_PLAYBACK)
+    else:
+        set_viewer_mode(meshcat, MODE_ARCHIVE if has_playback_controls else MODE_LIVE)
+    while meshcat.GetButtonClicks(stop_label) == 0:
         tick = time.monotonic()
         elapsed = tick - previous_tick
         previous_tick = tick
-        automatic = meshcat.GetSliderValue(AUTO_MOTION_LABEL) >= 0.5
-        new_reset_clicks = meshcat.GetButtonClicks("Reset to home")
-        if new_reset_clicks != reset_clicks:
-            reset_clicks = new_reset_clicks
-            phase = 0.0
-            automatic = False
-            meshcat.SetSliderValue(AUTO_MOTION_LABEL, 0.0)
-            values = list(homes)
-            _push_sliders(meshcat, labels, values)
-        if automatic:
-            period = max(meshcat.GetSliderValue(AUTO_PERIOD_LABEL), 0.1)
-            span_fraction = meshcat.GetSliderValue(AUTO_RANGE_LABEL) / 100.0
-            phase = math.fmod(phase + 2.0 * math.pi * elapsed / period, 2.0 * math.pi)
-            values = []
+        if playback is not None:
+            if has_travel_control:
+                travel_value = meshcat.GetSliderValue(TRAVEL_SPEED_LABEL)
+                if travel_value != last_travel_value:
+                    playback.set_travel_fraction(travel_value / 100.0)
+                    last_travel_value = travel_value
+            if has_playback_controls:
+                speed_value = meshcat.GetSliderValue(PLAYBACK_SPEED_LABEL)
+                if speed_value != last_speed_value:
+                    playback.set_speed(max(speed_value, 0.05))
+                    last_speed_value = speed_value
+                paused_value = meshcat.GetSliderValue(PLAYBACK_PAUSED_LABEL) >= 0.5
+                if paused_value != last_paused_value:
+                    (playback.pause if paused_value else playback.resume)()
+                    last_paused_value = paused_value
+                new_restart_clicks = meshcat.GetButtonClicks("Restart playback")
+                if new_restart_clicks != restart_clicks:
+                    restart_clicks = new_restart_clicks
+                    playback.restart()
+            if has_ongoing_controls:
+                new_stop_clicks = meshcat.GetButtonClicks(CONTINUOUS_STOP_LABEL)
+                if new_stop_clicks != continuous_stop_clicks:
+                    continuous_stop_clicks = new_stop_clicks
+                    playback.stop_feed(tick)
+                new_resume_clicks = meshcat.GetButtonClicks(CONTINUOUS_RESUME_LABEL)
+                if new_resume_clicks != continuous_resume_clicks:
+                    continuous_resume_clicks = new_resume_clicks
+                    playback.resume_feed(tick)
+            if can_scrub:
+                scrub_value = meshcat.GetSliderValue(SCRUB_LABEL)
+                # Only a viewer-side move counts as a seek; the loop writes this slider
+                # back every frame to track progress, which must not seek onto itself.
+                if abs(scrub_value - last_scrub_value) > 1e-9:
+                    playback.seek_fraction(scrub_value / 100.0)
+                    last_scrub_value = scrub_value
+            positions = playback.positions()
             for index, joint in enumerate(joints):
-                offset = 2.0 * math.pi * index / max(len(joints), 1)
-                target = joint["home"] + _auto_amplitude(joint, span_fraction) * math.sin(
-                    phase + offset
+                if joint["key"] in manual_keys:
+                    label = f"{MANUAL_STAGE_PREFIX} {joint['key']} ({_slider_scale(joint)[1]})"
+                    values[index] = meshcat.GetSliderValue(label)
+            moment = playback.current_moment()
+            if tick - last_time_push >= TIME_PUSH_S:
+                last_time_push = tick
+                set_playback_time(meshcat, moment.timestamp())
+                if can_scrub:
+                    progress = playback.progress_fraction() * 100.0
+                    last_scrub_value = round(progress, 1)
+                    meshcat.SetSliderValue(SCRUB_LABEL, last_scrub_value)
+                status = (
+                    STATUS_COMPLETE
+                    if getattr(playback, "is_complete", None) and playback.is_complete()
+                    else STATUS_NONE
                 )
-                values.append(target * scales[index])
-            if tick - last_slider_push >= slider_period:
-                last_slider_push = tick
-                _push_sliders(meshcat, labels, values)
+                if status != reported_status:
+                    reported_status = status
+                    set_viewer_status(meshcat, status)
+            for index, joint in enumerate(joints):
+                if joint["key"] in playback_keys and joint["key"] not in manual_keys:
+                    values[index] = positions[joint["key"]] * scales[index]
+            # With no manual sliders in this mode, this is the only numeric feedback that
+            # values are actually changing (vs. just holding steady between commands).
+            if playback_keys and tick - last_readout >= 1.0:
+                last_readout = tick
+                sample = ", ".join(
+                    f"{(joint_labels or {}).get(joint['key'], joint['key'])}="
+                    f"{values[index]:+.3f}{_slider_scale(joint)[1]}"
+                    for index, joint in enumerate(joints)
+                    if joint["key"] in playback_keys
+                )
+                stamp = moment.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+                print(f"[playback {stamp}] {sample}")
         else:
-            if was_automatic:
-                # The sliders only catch up a few times a second while animating, so hand
-                # them the pose that is actually on screen before they become the input.
+            automatic = meshcat.GetSliderValue(AUTO_MOTION_LABEL) >= 0.5
+            new_reset_clicks = meshcat.GetButtonClicks("Reset to home")
+            if new_reset_clicks != reset_clicks:
+                reset_clicks = new_reset_clicks
+                phase = 0.0
+                automatic = False
+                meshcat.SetSliderValue(AUTO_MOTION_LABEL, 0.0)
+                values = list(homes)
                 _push_sliders(meshcat, labels, values)
-            values = [meshcat.GetSliderValue(label) for label in labels]
-        was_automatic = automatic
+            if automatic:
+                period = max(meshcat.GetSliderValue(AUTO_PERIOD_LABEL), 0.1)
+                span_fraction = meshcat.GetSliderValue(AUTO_RANGE_LABEL) / 100.0
+                phase = math.fmod(phase + 2.0 * math.pi * elapsed / period, 2.0 * math.pi)
+                values = []
+                for index, joint in enumerate(joints):
+                    offset = 2.0 * math.pi * index / max(len(joints), 1)
+                    target = joint["home"] + _auto_amplitude(joint, span_fraction) * math.sin(
+                        phase + offset
+                    )
+                    values.append(target * scales[index])
+                if tick - last_slider_push >= slider_period:
+                    last_slider_push = tick
+                    _push_sliders(meshcat, labels, values)
+            else:
+                if was_automatic:
+                    # The sliders only catch up a few times a second while animating, so hand
+                    # them the pose that is actually on screen before they become the input.
+                    _push_sliders(meshcat, labels, values)
+                values = [meshcat.GetSliderValue(label) for label in labels]
+            was_automatic = automatic
         for index, joint in enumerate(joints):
             if published[index] == values[index]:
                 continue
             published[index] = values[index]
+            last_motion_tick = tick
             value = _joint_displacement(joint, values[index] / scales[index])
             if joint["joint_type"] == "prismatic":
                 offset = [component * value for component in joint["axis_world"]]
@@ -514,6 +884,12 @@ def view_stage_cad(scene_path: str | Path, *, fps: float = 30.0) -> None:
                     joint["axis_world"], joint["origin_m"], value, RigidTransform, RotationMatrix
                 )
             meshcat.SetTransform(joint_paths[joint["key"]], transform)
+        # Held between commands a joint publishes nothing, so a short tail keeps the
+        # readout from flickering to "no motors moving" during slow continuous motion.
+        moving = (tick - last_motion_tick) < MOTION_HOLD_S
+        if moving != reported_moving:
+            reported_moving = moving
+            set_motors_moving(meshcat, moving)
         # Backpressure. Meshcat buffers without limit, so a loop that publishes faster than
         # the browser can draw builds a queue that never drains, and a stop request cannot
         # be seen until the browser has chewed through it.
@@ -639,6 +1015,19 @@ def _slider_scale(joint: dict[str, Any]) -> tuple[float, str]:
     return 180.0 / math.pi, "deg"
 
 
+def manual_playback_keys(
+    joints: list[dict[str, Any]], instances: list[dict[str, Any]]
+) -> set[str]:
+    """Return unpowered stage joints that need manual positions during replay."""
+
+    unpowered_refs = {
+        str(instance["ref"])
+        for instance in instances
+        if instance.get("catalog") == "thorlabs_lx10"
+    }
+    return {str(joint["key"]) for joint in joints if str(joint["ref"]) in unpowered_refs}
+
+
 def _auto_amplitude(joint: dict[str, Any], span_fraction: float) -> float:
     """Largest symmetric excursion about home that stays inside the reviewed limits."""
 
@@ -651,9 +1040,11 @@ def _joint_displacement(joint: dict[str, Any], slider_value: float) -> float:
     return slider_value - float(joint.get("cad_position", joint["home"]))
 
 
-def _shape_center_m(shape: Any) -> list[float]:
+def _shape_center_m(shape: Any) -> list[float] | None:
     bounds = Bnd_Box()
     BRepBndLib.Add_s(shape, bounds, False)
+    if bounds.IsVoid():
+        return None
     x_min, y_min, z_min, x_max, y_max, z_max = bounds.Get()
     return [(x_min + x_max) * 0.0005, (y_min + y_max) * 0.0005, (z_min + z_max) * 0.0005]
 
@@ -682,6 +1073,60 @@ def _is_current(outputs: list[Path], sources: list[Path]) -> bool:
     return all(source.exists() and source.stat().st_mtime_ns <= oldest_output for source in sources)
 
 
+def _pv_name_labels(command_map_path: str | Path) -> dict[str, str]:
+    """joint key -> EPICS PV name, for the playback readout's `--pv-names` toggle."""
+
+    from .epics_playback import load_command_map
+
+    mappings, _ = load_command_map(command_map_path)
+    return {key: mapping.command_pv for key, mapping in mappings.items()}
+
+
+def _is_ongoing_playback_end(value: str) -> bool:
+    return value.casefold() in ONGOING_PLAYBACK_ENDS
+
+
+def _is_ongoing_playback_resume_start(value: str) -> bool:
+    return value.casefold() in ONGOING_PLAYBACK_RESUME_STARTS
+
+
+def _load_ongoing_resume_start(path: str | Path) -> datetime:
+    resume_path = resolve_repo_path(path)
+    if not resume_path.exists():
+        raise SystemExit(
+            f"No ongoing playback resume file found at {resume_path}. Start with an ISO "
+            "--playback-start first."
+        )
+    timestamp = json.loads(resume_path.read_text(encoding="utf-8"))["timestamp"]
+    moment = datetime.fromisoformat(timestamp)
+    if moment.tzinfo is None:
+        raise SystemExit(f"Ongoing playback resume timestamp must include a timezone: {timestamp}")
+    return moment
+
+
+def _write_ongoing_resume(path: str | Path, moment: datetime) -> Path:
+    resume_path = Path(path)
+    resume_path.parent.mkdir(parents=True, exist_ok=True)
+    resume_path.write_text(json.dumps({"timestamp": moment.isoformat()}, indent=2) + "\n")
+    return resume_path
+
+
+def _add_viewer_args(parser) -> None:  # noqa: ANN001
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=7000,
+        help="Port to serve the viewer on. Keeping it fixed means an already-open tab can "
+        "just be refreshed instead of a second one being opened (default: 7000)",
+    )
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Print the URL instead of opening a tab, for when the viewer is restarted "
+        "repeatedly. TWIN_LAB_NO_BROWSER=1 does the same for every command",
+    )
+
+
 def main() -> None:
     import argparse
 
@@ -696,6 +1141,56 @@ def main() -> None:
         default=30.0,
         help="Animation frame rate; raise for smoother motion (e.g. 120)",
     )
+    parser.add_argument(
+        "--playback-recording",
+        help="JSON file of recorded EPICS commands to recreate (see epics_playback.load_recorded_commands)",
+    )
+    parser.add_argument(
+        "--playback-start",
+        help="ISO-8601 start of an archiver time window to replay, e.g. 2026-08-26T15:52:00-07:00 "
+        "(needs PCDS network access; alternative to --playback-recording)",
+    )
+    parser.add_argument(
+        "--playback-end",
+        help="ISO-8601 end of the archiver time window given by --playback-start, or "
+        "'ongoing'/'continuous' to replay forward at 1x until stopped",
+    )
+    parser.add_argument(
+        "--playback-command-map",
+        default="config/crystal-stack-command-map.yaml",
+        help="Joint-to-PV map used to interpret --playback-recording/--playback-start",
+    )
+    parser.add_argument(
+        "--playback-speed",
+        type=float,
+        default=1.0,
+        help="Playback rate relative to real time, up to the panel slider's 8x (e.g. 0.25 to 8)",
+    )
+    parser.add_argument(
+        "--playback-poll-period-s",
+        type=float,
+        default=2.0,
+        help="How often --playback-end ongoing/continuous extends its archive query",
+    )
+    parser.add_argument(
+        "--playback-lookahead-s",
+        type=float,
+        default=8.0,
+        help="How far ahead of the continuous playback clock to buffer archived commands",
+    )
+    parser.add_argument(
+        "--playback-resume-file",
+        default=str(DEFAULT_ONGOING_RESUME_PATH),
+        help="Where ongoing playback saves its last archive timestamp; use "
+        "--playback-start resume to restart from it",
+    )
+    parser.add_argument(
+        "--pv-names",
+        action="store_true",
+        help="Label joints by their EPICS PV in the playback readout instead of this repo's "
+        "chain/axis naming (e.g. 'POLYCAP:CRY:N:X' instead of 'A050')",
+    )
+    _add_viewer_args(parser)
     args = parser.parse_args()
 
     scene = prepare_stage_cad(
@@ -705,10 +1200,165 @@ def main() -> None:
     )
     print(f"Stage CAD cache: {scene.parent}")
     if not args.prepare_only:
+        playback = None
+        joint_labels = None
+        ongoing_playback = False
+        if args.playback_recording:
+            from .epics_playback import build_playback_from_recording
+
+            playback = build_playback_from_recording(
+                args.playback_recording,
+                args.playback_command_map,
+                args.stage_inventory,
+                speed=args.playback_speed,
+            )
+        elif args.playback_start or args.playback_end:
+            if not (args.playback_start and args.playback_end):
+                raise SystemExit("--playback-start and --playback-end must be given together")
+            if _is_ongoing_playback_end(args.playback_end):
+                if args.playback_speed != 1.0:
+                    raise SystemExit(
+                        "--playback-speed is only for finite playback; ongoing playback always "
+                        "runs at 1x"
+                    )
+                from .epics_playback import build_ongoing_playback_from_archive
+
+                ongoing_playback = True
+                start = (
+                    _load_ongoing_resume_start(args.playback_resume_file)
+                    if _is_ongoing_playback_resume_start(args.playback_start)
+                    else datetime.fromisoformat(args.playback_start)
+                )
+                playback = build_ongoing_playback_from_archive(
+                    start,
+                    args.playback_command_map,
+                    args.stage_inventory,
+                    poll_period_s=args.playback_poll_period_s,
+                    lookahead_s=args.playback_lookahead_s,
+                )
+            else:
+                from .epics_playback import build_playback_from_archive
+
+                start = datetime.fromisoformat(args.playback_start)
+                playback = build_playback_from_archive(
+                    start,
+                    datetime.fromisoformat(args.playback_end),
+                    args.playback_command_map,
+                    args.stage_inventory,
+                    speed=args.playback_speed,
+                )
+        if playback is not None and args.pv_names:
+            joint_labels = _pv_name_labels(args.playback_command_map)
         try:
-            view_stage_cad(scene, fps=args.fps)
+            view_stage_cad(
+                scene,
+                fps=args.fps,
+                playback=playback,
+                joint_labels=joint_labels,
+                port=args.port,
+                open_browser=not args.no_browser,
+            )
         except KeyboardInterrupt:
             print("\nStage CAD viewer stopped.")
+        finally:
+            if ongoing_playback and playback is not None:
+                current_moment = playback.current_moment()
+                if hasattr(playback, "close"):
+                    playback.close()
+                resume_path = _write_ongoing_resume(
+                    args.playback_resume_file, current_moment
+                )
+                print(
+                    "Ongoing playback resume saved. To restart this viewer from that point, run:\n"
+                    f"  uv run slac-stage-cad {args.stage_inventory} "
+                    "--playback-start resume --playback-end ongoing "
+                    f"--playback-resume-file {resume_path}"
+                )
+
+
+def main_live() -> None:
+    """Entry point for `slac-live-feed`: view-only, mirrors real EPICS commands.
+
+    Two mutually exclusive sources:
+    - Direct archiver polling (`--lookback-s`/`--poll-period-s`, default): needs
+      `archapp` + PCDS network access.
+    - `--live-file PATH`: watches a recording JSON file that something else
+      (running wherever archapp *is* available) keeps overwriting - the
+      workaround for environments that cannot reach the archiver directly.
+    """
+
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Mirror real EPICS motor commands live during an experiment run"
+    )
+    parser.add_argument("stage_inventory")
+    parser.add_argument("--rebuild", action="store_true")
+    parser.add_argument("--deflection-mm", type=float, default=2.0)
+    parser.add_argument("--fps", type=float, default=30.0)
+    parser.add_argument("--command-map", default="config/crystal-stack-command-map.yaml")
+    parser.add_argument(
+        "--live-file",
+        help="Watch this recording JSON file instead of polling the archiver directly "
+        "(for environments without archapp/PCDS network access - see "
+        "epics_playback.LiveFileSource)",
+    )
+    parser.add_argument(
+        "--lookback-s",
+        type=float,
+        default=30.0,
+        help="How far back each archiver poll looks for the latest command per joint "
+        "(ignored with --live-file)",
+    )
+    parser.add_argument(
+        "--poll-period-s",
+        type=float,
+        default=2.0,
+        help="How often to re-poll the archiver, or re-check --live-file's mtime (the "
+        "archiver itself trails real hardware by roughly this much already, so shorter "
+        "than ~1-2s buys little)",
+    )
+    parser.add_argument(
+        "--pv-names",
+        action="store_true",
+        help="Label joints by their EPICS PV in the playback readout instead of this repo's "
+        "chain/axis naming (e.g. 'POLYCAP:CRY:N:X' instead of 'A050')",
+    )
+    _add_viewer_args(parser)
+    args = parser.parse_args()
+
+    scene = prepare_stage_cad(
+        args.stage_inventory, rebuild=args.rebuild, linear_deflection_mm=args.deflection_mm
+    )
+    print(f"Stage CAD cache: {scene.parent}")
+    if args.live_file:
+        from .epics_playback import build_live_file_source
+
+        live = build_live_file_source(
+            args.live_file, args.command_map, args.stage_inventory, poll_period_s=args.poll_period_s
+        )
+        print(f"Watching {args.live_file} for updates every {args.poll_period_s}s.")
+    else:
+        from .epics_playback import build_live_source
+
+        live = build_live_source(
+            args.command_map,
+            args.stage_inventory,
+            lookback_s=args.lookback_s,
+            poll_period_s=args.poll_period_s,
+        )
+    joint_labels = _pv_name_labels(args.command_map) if args.pv_names else None
+    try:
+        view_stage_cad(
+            scene,
+            fps=args.fps,
+            playback=live,
+            joint_labels=joint_labels,
+            port=args.port,
+            open_browser=not args.no_browser,
+        )
+    except KeyboardInterrupt:
+        print("\nLive feed viewer stopped.")
 
 
 if __name__ == "__main__":

@@ -6,6 +6,15 @@ units:
 # These are reusable mechanism facts. Joint frames, positive directions, home
 # positions, and payload attachment groups remain assembly-specific review data.
 stages:
+  thorlabs_lx10:
+    manufacturer: THORLABS
+    model: LX10
+    joint_type: prismatic
+    axis_local: [1.0, 0.0, 0.0]
+    component_roles: {fixed: [1], moving: [2]}
+    travel: 0.025
+    limits: [-0.0125, 0.0125]
+
   micronix_vt_50l_c0014:
     manufacturer: MICRONIX USA
     model: VT-50L-C0014
@@ -14,6 +23,8 @@ stages:
     component_roles: {fixed: [2], moving: [1]}
     travel: 0.400
     limits: [-0.200, 0.200]
+    max_speed: 0.01  # 10 mm/sec datasheet rating (VT-50L series), converted to m/s
+    source: https://micronixusa.com/product/7XReVO/linear-motion/translation-stage-vt-50l
     notes:
       - The STEP occurrence is SLAC library part LIB-000032416.
       - The moving component is REF-000225050, the 430250 carriage.
@@ -28,6 +39,7 @@ stages:
     component_roles: {fixed: [3], moving: [1], reference: [2]}
     limits: [-0.1745329252, 0.1745329252]
     work_distance: 0.040
+    max_speed: 0.2338741  # 13.4 deg/sec datasheet rating, converted to rad/s
     source: https://www.kohzu.co.jp/products/positioning-stages/item/sa04b-rt02/
 
   kohzu_sa04b_rt02_r_bm:
@@ -40,6 +52,7 @@ stages:
     limits: [-0.1745329252, 0.1745329252]
     work_distance: 0.040
     mirrored: true
+    max_speed: 0.2338741  # 13.4 deg/sec datasheet rating, converted to rad/s
     source: https://www.kohzu.co.jp/products/positioning-stages/item/sa04b-rt02/
 
   kohzu_ra04a_w01:
@@ -49,6 +62,7 @@ stages:
     axis_local: [0.0, 0.0, 1.0]
     component_roles: {fixed: [1], moving: [2]}
     limits: [-3.089232776, 3.089232776]
+    max_speed: 0.3490659  # 20 deg/sec datasheet rating, converted to rad/s
     source: https://www.kohzu.co.jp/products/positioning-stages/item/ra04a-w01/
 
   kohzu_sxa0530_r01_bm:
@@ -58,7 +72,8 @@ stages:
     axis_local: [1.0, 0.0, 0.0]
     component_roles: {fixed: [2], moving: [1]}
     limits: [-0.015, 0.015]
-    source: https://www.kohzu.co.jp/products/positioning-stages/category/auto-x-xy-stage/
+    max_speed: 0.01  # 10 mm/sec datasheet rating, converted to m/s
+    source: https://www.kohzu.co.jp/products/positioning-stages/item/sxa0530-r01/
 
   kohzu_sxa0750_r01_bm:
     manufacturer: KOHZU
@@ -67,6 +82,7 @@ stages:
     axis_local: [1.0, 0.0, 0.0]
     component_roles: {fixed: [1], moving: [2]}
     limits: [-0.025, 0.025]
+    max_speed: 0.01  # 10 mm/sec datasheet rating, converted to m/s
     source: https://www.kohzu.co.jp/products/positioning-stages/item/sxa0750-r01/
 
   kohzu_sxa0750_r01_r_bm:
@@ -77,6 +93,7 @@ stages:
     component_roles: {fixed: [2], moving: [1]}
     limits: [-0.025, 0.025]
     mirrored: true
+    max_speed: 0.01  # 10 mm/sec datasheet rating, converted to m/s
     source: https://www.kohzu.co.jp/products/positioning-stages/item/sxa0750-r01/
 
   kohzu_ya04a_r102_nnr_bm:
@@ -87,6 +104,8 @@ stages:
     limits:
       x: [-0.005, 0.005]
       y: [-0.005, 0.005]
+    max_speed: 0.005  # 5 mm/sec datasheet rating (both axes), converted to m/s
+    source: https://www.kohzu.co.jp/products/positioning-stages/item/ya04a-r102/
 
   kohzu_ya04a_r102_rrn_bm:
     manufacturer: KOHZU
@@ -98,6 +117,8 @@ stages:
     limits:
       x: [-0.005, 0.005]
       y: [-0.005, 0.005]
+    max_speed: 0.005  # 5 mm/sec datasheet rating (both axes), converted to m/s
+    source: https://www.kohzu.co.jp/products/positioning-stages/item/ya04a-r102/
 
   kohzu_za05a_w101_bm:
     manufacturer: KOHZU
@@ -106,6 +127,7 @@ stages:
     axis_local: [0.0, 0.0, 1.0]
     component_roles: {fixed: [1], moving: [2]}
     limits: [-0.004, 0.004]
+    max_speed: 0.0025  # 2.5 mm/sec datasheet rating, converted to m/s
     source: https://www.kohzu.co.jp/products/positioning-stages/item/za05a-w101/
 
   kohzu_xa05a_l202_r:
@@ -134,3 +156,24 @@ stages:
       - The STEP occurrence is SLAC library part LIB-000032478.
       - Cross-roller X stage; the short stroke is why it carries the transverse axis.
     source: https://www.kohzu.co.jp/products/positioning-stages/item/xa05a-r202/
+
+  lj_detector_vertical:
+    manufacturer: KOHZU
+    model: LIB-000032451
+    joint_type: prismatic
+    axis_local: [0.0, 0.0, 1.0]
+    component_roles: {fixed: [2], moving: [1]}
+    limits: [-0.004, 0.004]
+    notes:
+      - The STEP occurrences are A024 and A030 in the liquid-jet detector tower.
+
+  lj_camera_xy:
+    manufacturer: UNKNOWN
+    model: LIB-000013709
+    joint_type: planar_xy
+    component_roles: {fixed: [1], y: [2], x: [3]}
+    limits:
+      x: [-0.005, 0.005]
+      y: [-0.005, 0.005]
+    notes:
+      - The STEP occurrence is A043 in the liquid-jet camera stack.

@@ -100,6 +100,9 @@ def cad_model(monkeypatch):
     monkeypatch.setattr(
         module.AssemblyCollisionModel, "_reopen_joint_adjacent_pairs", lambda self: 0
     )
+    monkeypatch.setattr(
+        module.AssemblyCollisionModel, "_configure_stack_interference_filters", lambda self: None
+    )
     pose = np.eye(4)
     clearance = Clearance(
         "vh::support::vh::p001_collision",
