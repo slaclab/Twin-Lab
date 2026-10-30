@@ -1,6 +1,6 @@
 schema: twin-lab-local-assembly/v1
 model_name: DSG-000095835
-source_step: cad/DSG-000095835.stp
+source_step: cad/DSG-000095835/source.stp
 source_sha256: c5b3819764247d666a3d5de9fb308ba6bdc76a5c988c6fe92b3c59c3a37c92db
 cad_manifest: cad/DSG-000095835/manifest.json
 linear_deflection_mm: 0.5

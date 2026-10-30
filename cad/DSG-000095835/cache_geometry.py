@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE = ROOT / "cad/DSG-000095835.stp"
+SOURCE = Path(__file__).with_name("source.stp")
 MANIFEST = Path(__file__).with_name("manifest.json")
 CACHE = ROOT / ".cache/twin_lab/95835-inspect"
 SCHEMA = 1

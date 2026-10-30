@@ -15,7 +15,7 @@ Increase the clearance warning band to enable yellow near-clearance highlights. 
 and reset to the CAD pose remain available. The first collision build is slow;
 subsequent builds reuse the cached decompositions.
 
-The source STEP remains at `cad/DSG-000095835.stp` and is ignored for now. The
+The source STEP lives at `cad/DSG-000095835/source.stp` and is ignored for now. The
 assembly scripts, manifest, and reviews are intended for version control;
 no shared source files or stage catalog were changed.
 Generated geometry lives in `.cache/twin_lab/`; SDF and MATLAB exports live in

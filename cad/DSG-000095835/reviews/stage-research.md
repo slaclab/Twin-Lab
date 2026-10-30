@@ -1,6 +1,6 @@
 # DSG-000095835 stage research
 
-Research date: 2026-09-08. Product names below come directly from `PRODUCT` records in `cad/DSG-000095835.stp`. Published component travel describes the stage; it does not establish collision-free travel of the assembled instrument or the physical hardware's current zero and controller limits.
+Research date: 2026-09-08. Product names below come directly from `PRODUCT` records in `cad/DSG-000095835/source.stp`. Published component travel describes the stage; it does not establish collision-free travel of the assembled instrument or the physical hardware's current zero and controller limits.
 
 ## Identified stages
 
