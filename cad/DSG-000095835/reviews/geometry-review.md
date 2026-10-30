@@ -3,16 +3,16 @@
 The original STEP is preserved. Source reference assignments come from its
 generated `manifest.json`; every leaf is explicitly retained or omitted.
 
-The lower upright Parker is `A077` (`P938` fixed, `P939` moving). Its carriage
-carries adapter `P955`, bracket `P920`, and the horizontal Parker `A074`.
-The latter has `P906` fixed and `P907` moving. Its moving bracket is
-`P952/P953/P954`, which carries the Huber fixed body and motor. Both Parker
+The lower upright Parker is `A073` (`P849` fixed, `P850` moving). Its carriage
+carries adapter `P866`, bracket `P831`, and the horizontal Parker `A070`.
+The latter has `P817` fixed and `P818` moving. Its moving bracket is
+`P863/P864/P865`, which carries the Huber fixed body and motor. Both Parker
 travel axes are local +Z in this particular vendor CAD, established by the
 long slide-base direction. Both imported carriages are provisionally treated
 as centered in their 100 mm travel.
 
-The Huber rotates around local +Y. Its top carries `P1180`, the three long
-posts `P1185/P1186/P1191`, and front plate `P1045`. The three crystal stacks
+The Huber rotates around local +Y. Its top carries `P1058`, the three long
+posts `P1063/P1064/P1069`, and front plate `P923`. The three crystal stacks
 branch from that plate. Each chain is XA07A translation → RA04A rotation →
 SA04B tilt → crystal adapter and payload. The touching mounting planes, from
 the front plate toward the crystals, establish this order.
@@ -44,7 +44,7 @@ original CAD millimetres. Occurrence transforms place each selected region
 back into the original assembly pose before meshing; a shared parent then
 moves all descendants together.
 
-The outer structural cage `A047` is retained as 68 separate non-fastener
+The outer structural cage `A047` is retained as 52 separate non-fastener
 occurrences on `assembly_base`. Its open interior is preserved by decomposing
 each member separately. It stays fixed when either Parker slide or the inner
 analyzer frame moves. The former auxiliary/LJ carriages are now fixed CAD

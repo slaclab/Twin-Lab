@@ -1,5 +1,8 @@
 # Refined Candidate Validation (2026-09-11)
 
+These results were measured on the previous STEP revision (SHA-256 `c5b38197…`).
+Part references below use that revision's manifest, not the current one.
+
 The separate package at `exports/DSG-000095835.candidate/` passed the existing
 assembly validator alongside the active baseline. No candidates were promoted.
 

@@ -31,53 +31,53 @@ convention; it is not a motor/controller polarity claim.
 
 | Chain | Fixed mount | Z stage | X stage | Moving payload |
 | --- | --- | --- | --- | --- |
-| Lower | `P429`, top Z = −165.354 | `A024`, top Z = −109.354 | `A026`, top Z = −89.354 | `A022`: `P336`, `P337`, `P340` |
-| Upper | `P331`, top Z = −63.754 | `A030`, top Z = −7.754 | `A032`, top Z = 12.246 | `A028`: `P385`, `P386` |
+| Lower | `P336`, top Z = −165.354 | `A024`, top Z = −109.354 | `A026`, top Z = −89.354 | `A022`: `P243`, `P244`, `P247` |
+| Upper | `P238`, top Z = −63.754 | `A030`, top Z = −7.754 | `A032`, top Z = 12.246 | `A028`: `P292`, `P293` |
 
 The exact matching horizontal mating planes establish the order **fixed mount
-→ Z lift → X translation → payload**, independently for each chain. `P331`,
-`P429`, the pedestal posts, and `P439` remain fixed to the assembly.
+→ Z lift → X translation → payload**, independently for each chain. `P238`,
+`P336`, the pedestal posts, and `P346` remain fixed to the assembly.
 
 The following lists exclude explicitly named screws. Any part subsequently
 pruned by the assembly recipe should simply be removed from these lists.
 
 | Body | Occurrences |
 | --- | --- |
-| Lower fixed | `P349 P350 P351 P357 P362 P363 P364` |
-| Lower Z carriage, child of fixed | `P348 P354 P360 P366 P369 P370 P373` |
-| Lower X carriage, child of lower Z | `P367 P368 P374 P336 P337 P340` |
-| Upper fixed | `P398 P399 P400 P406 P411 P412 P413` |
-| Upper Z carriage, child of fixed | `P397 P403 P409 P415 P418 P419 P422` |
-| Upper X carriage, child of upper Z | `P416 P417 P423 P385 P386` |
+| Lower fixed | `P256 P257 P258 P264 P269 P270 P271` |
+| Lower Z carriage, child of fixed | `P255 P261 P267 P273 P276 P277 P280` |
+| Lower X carriage, child of lower Z | `P274 P275 P281 P243 P244 P247` |
+| Upper fixed | `P305 P306 P307 P313 P318 P319 P320` |
+| Upper Z carriage, child of fixed | `P304 P310 P316 P322 P325 P326 P329` |
+| Upper X carriage, child of upper Z | `P323 P324 P330 P292 P293` |
 
 The sensor bodies stay on the fixed side of their own stage. In particular,
-minimum BREP distance is zero for `P357`–`P351` and `P370`–`P369`; the former is
-2.506 mm from the moving bracket `P354`, and the latter 2.515 mm from moving
-bracket `P368`. `P373` touches `P369` and is assigned to that fixed X-stage
-support. `P354` touches the Z carriage `P348`. Thin pieces `P360/P374` (repeated
-as `P409/P423`) follow the respective moving bracket and appear to be encoder
+minimum BREP distance is zero for `P264`–`P258` and `P277`–`P276`; the former is
+2.506 mm from the moving bracket `P261`, and the latter 2.515 mm from moving
+bracket `P275`. `P280` touches `P276` and is assigned to that fixed X-stage
+support. `P261` touches the Z carriage `P255`. Thin pieces `P267/P281` (repeated
+as `P316/P330`) follow the respective moving bracket and appear to be encoder
 targets/shims. Exact sensor model names are not claimed.
 
-`P363/P364` and their upper copies `P412/P413` are small pin-shaped
+`P270/P271` and their upper copies `P319/P320` are small pin-shaped
 `LIB-000027156` hardware and may be pruned. The thin encoder targets may also be
 pruned for a simpler display. Keep the substantial moving brackets and payload.
 
 ## Other manual adjustments and datum geometry
 
-`P636` explicitly names Kohzu RM07A-C1. It is a manual rotary stage; retaining
-the complete leaf as fixed geometry preserves the imported setting. Its
-published manual adjustment is coarse 360° and fine ±3°; see the separately
-recorded source in `stage-research.md`.
+The previous STEP revision included a Kohzu RM07A-C1 manual rotary stage; the
+2026-10-29 revision no longer contains it. Its published manual adjustment is
+coarse 360° and fine ±3°; see the separately recorded source in
+`stage-research.md`.
 
 `A043` / `LIB-000013709` is a manual swivel stage, not an XY translation stage.
-Rendered `P588` has curved guideways and a handwheel; `P590` is its matching
-curved-underside top plate. `P589` is a separate 10 mm sphere with volume
+Rendered `P495` has curved guideways and a handwheel; `P497` is its matching
+curved-underside top plate. `P496` is a separate 10 mm sphere with volume
 523.5988 mm³. Its center lies on the stage normal, 86 mm above the base and
 68 mm above the top mounting plane; it is a remote-center datum marker.
 
 The 50 mm table, 18 mm height, 68 mm work distance, and handwheel strongly
 match [Kohzu SH05B-RM](https://www.kohzuprecision.com/products/positioning-stages/item/sh05b-rm/),
 whose manufacturer specifies manual ±10° adjustment. This is a geometry-based
-identification, not an established mapping from `LIB-000013709`. Keep `P588`
-and `P590` fixed at the imported pose and prune `P589` as a nonphysical datum.
+identification, not an established mapping from `LIB-000013709`. Keep `P495`
+and `P497` fixed at the imported pose and prune `P496` as a nonphysical datum.
 No automated joint or controller mapping is justified for this adjustment.

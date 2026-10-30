@@ -12,10 +12,11 @@ import yaml
 from twin_lab.collision import Clearance
 
 ASSEMBLY = Path(__file__).resolve().parents[1] / "cad" / "DSG-000095835"
-ELECTRONICS = {"P1209", "P1210", "P1211", "P1213", "P1214", "P1218", "P1220", "P1221"}
+# Lift plate P831, its controls envelope P867 and support posts P922/P1087/P1089/P1093.
+LIFT_CONTROLS = {"P867", "P922", "P1087", "P1089", "P1093"}
 
 
-def test_top_electronics_ride_the_lift_and_are_not_omitted():
+def test_controls_envelope_and_posts_ride_the_lift_and_are_not_omitted():
     review = yaml.safe_load((ASSEMBLY / "reviews" / "assembly.yaml").read_text())
     owners = {
         part if isinstance(part, str) else part["ref"]: body
@@ -24,21 +25,19 @@ def test_top_electronics_ride_the_lift_and_are_not_omitted():
     }
     omitted = {ref for refs in review["omitted_occurrences"].values() for ref in refs}
 
-    assert all(owners[ref] == owners["P920"] == "parker_lift" for ref in ELECTRONICS)
-    assert ELECTRONICS.isdisjoint(omitted)
+    assert all(owners[ref] == owners["P831"] == "parker_lift" for ref in LIFT_CONTROLS)
+    assert LIFT_CONTROLS.isdisjoint(omitted)
 
 
-def test_complete_von_hamos_controls_assembly_is_retained_on_its_mounts():
+def test_user_supplied_controls_envelope_is_retained_on_the_lift():
     review = yaml.safe_load((ASSEMBLY / "reviews" / "assembly.yaml").read_text())
     entries = json.loads((ASSEMBLY / "manifest.json").read_text())["occurrences"]
-    assembly = next(entry for entry in entries if entry["name"] == "DSG-000108873")
     controls = {
         entry["ref"] for entry in entries
-        if entry["id"].startswith(assembly["id"] + "/") and not entry["is_assembly"]
+        if entry["name"].startswith("REF__mo39154780-_UserSuppliedControls")
     }
-    assert len(controls) == 33
-    required = controls | {"P1043", "P1044"}
-    for ref in required:
+    assert controls == {"P867"}
+    for ref in controls:
         owners = [
             body for body, spec in review["bodies"].items()
             for part in spec["parts"]
@@ -46,7 +45,7 @@ def test_complete_von_hamos_controls_assembly_is_retained_on_its_mounts():
         ]
         assert owners == ["parker_lift"], ref
     omitted = {ref for refs in review["omitted_occurrences"].values() for ref in refs}
-    assert required.isdisjoint(omitted)
+    assert controls.isdisjoint(omitted)
 
 
 def test_local_viewer_defaults_to_contact_only_coloring(monkeypatch, tmp_path):
@@ -245,10 +244,10 @@ def test_targeted_refinement_selects_overshoot_gaps_and_home_contacts(monkeypatc
     monkeypatch.syspath_prepend(str(ASSEMBLY))
     module = import_module("refine_hulls")
     baseline = [
-        {"source": "cage", "part_ref": "P750", "max_bulge_mm": 11.0, "max_gap_mm": 0.0},
+        {"source": "cage", "part_ref": "P691", "max_bulge_mm": 11.0, "max_gap_mm": 0.0},
         {"source": "good", "part_ref": "P001", "max_bulge_mm": 0.1, "max_gap_mm": 0.0},
-        {"source": "home", "part_ref": "P1180", "max_bulge_mm": 0.4, "max_gap_mm": 0.0},
-        {"source": "gap", "part_ref": "P953", "max_bulge_mm": 0.2, "max_gap_mm": 0.4},
+        {"source": "home", "part_ref": "P1058", "max_bulge_mm": 0.4, "max_gap_mm": 0.0},
+        {"source": "gap", "part_ref": "P864", "max_bulge_mm": 0.2, "max_gap_mm": 0.4},
     ]
 
     assert [item["source"] for item in module.select_targets(baseline)] == ["cage", "home", "gap"]

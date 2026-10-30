@@ -60,7 +60,7 @@ Use the stage-CAD viewer for a fast geometry and motion check without collision
 queries:
 
 ```bash
-uv run slac-stage-cad cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
+uv run slac-run 43841 --motion-only
 ```
 
 Manual sliders drive all 27 joints. This is the right mode for checking joint
@@ -72,7 +72,7 @@ correct. It does not require CoACD.
 Use the Drake collision viewer when the question is clearance or interference:
 
 ```bash
-uv run slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
+uv run slac-run 43841
 ```
 
 The viewer drives the same reviewed joints while querying the convex geometry.
@@ -107,7 +107,7 @@ candidate pose or motion sweep is clear, close, or interfering before anyone
 trusts a playback trace or a manually adjusted pose.
 
 ```bash
-uv run slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
+uv run slac-run 43841
 ```
 
 The viewer opens the reviewed `43841` assembly with collision checking on. Move
@@ -593,6 +593,10 @@ recognise is forwarded to that command, for example
 | `43841` | `slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml` | `slac-stage-cad cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml` |
 | `95835` | `python cad/DSG-000095835/build.py --view` | `python cad/DSG-000095835/build.py --collision none --view` |
 
+Use `slac-run` for every model. `slac-collision` and `slac-stage-cad` are the
+general-purpose viewers behind the 43841 entry; call them directly only for an
+inventory YAML that is not in the model list yet.
+
 ## Collision reference and rechecking
 
 This is the deeper collision-reference material behind the quick workflow near
@@ -750,8 +754,7 @@ machine.
 **Optional**, only if you want the machine back while the build runs:
 
 ```bash
-uv run slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
-  --decomposition-workers 2
+uv run slac-run 43841 --decomposition-workers 2
 ```
 
 Interrupting a build is safe. Every finished sub-part writes a marker, so a
@@ -777,7 +780,7 @@ viewer cache alone does not force a re-decomposition.
 
 The compiled package under `exports/` carries a build stamp recording the scene
 meshes, the collision mode, and the inventory `decomposition` block it was built
-from. `slac-collision` recompiles whenever that stamp no longer matches, so
+from. The collision viewer recompiles whenever that stamp no longer matches, so
 editing a per-part override reaches the viewer without `--rebuild`.
 
 ### How wrong are the hulls? (`slac-hull-audit`)

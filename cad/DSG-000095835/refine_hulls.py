@@ -22,7 +22,7 @@ HERE = Path(__file__).resolve().parent
 ACTIVE_CACHE = CACHE_ROOT / "convex-collision" / "reviews"
 DEFAULT_OUTPUT = CACHE_ROOT / "95835-redecomposition"
 HOME_CONTACT_REFS = {
-    "P1177", "P1180", "P906", "P952", "P1098", "P1097", "P1141", "P1140", "P1054", "P1053",
+    "P1055", "P1058", "P817", "P863", "P976", "P975", "P1019", "P1018", "P932", "P931",
 }
 
 

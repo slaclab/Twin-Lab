@@ -3,8 +3,10 @@
 Run from the repository root:
 
 ```bash
-uv run python cad/DSG-000095835/build.py --view
+uv run slac-run 95835
 ```
+
+which runs `python cad/DSG-000095835/build.py --view`.
 
 This builds the model and its convex collision meshes, then opens the interference
 viewer. Collision checking starts enabled with neutral CAD colors and a zero
@@ -31,28 +33,31 @@ The model has 13 rigid bodies and 12 active joints:
 - Each crystal stack has a 70 mm Kohzu XA07A-L201 translation, RA04A-W rotation
   (±177°), and SA04B-RM01 tilt (±10°). Each tilt rotates about its remote center
   74 mm above its local mounting plane.
-- The supplied STEP contains three `mo39154771` crystal stacks (`A081/A082/A083`).
+- The supplied STEP contains three `mo39154771` crystal stacks (`A076/A077/A078`).
   All three stage chains and crystal payloads are retained at their CAD placements;
   an additional stack would require an updated source assembly.
-- The outer structural cage (`A047`, 68 non-fastener members) is fixed geometry
+- The outer structural cage (`A047`, 52 non-fastener members) is fixed geometry
   included in interference checks. The inner analyzer cage rotates with the Huber.
 - LJ stages remain fixed. Their four former auxiliary controls are disabled.
-- The top electronics (`P1221`) and seven rigid support parts ride the Parker
-  vertical lift plate (`P920`) and participate in interference checks.
-- The complete `DSG-000108873` XCS Von Hamos Controls assembly (`A079`, 33 parts)
-  and mounting parts `P1043/P1044` also ride the lift. These were previously
-  misidentified as a flexible cable carrier; all are retained as rigid geometry.
+- The user-supplied controls envelope (`P867`) and its four support posts ride the
+  Parker vertical lift plate (`P831`) and participate in interference checks. This
+  STEP revision replaces the earlier `DSG-000108873` XCS Von Hamos Controls
+  assembly with that single envelope.
+- The ePix10k detector assembly `LCL5005-008450`, including its two Newport
+  IMS300 slides, is fixed obstacle geometry. Its 45 parts at least 100 mm across
+  are retained; smaller parts and electronics are omitted. The slides are not
+  modelled as joints.
 
-The retained model uses 391 of the original 1,259 leaf occurrences, with fused
-stage geometry split into fixed and moving regions. The 868 omitted occurrences
+The retained model uses 380 of the 1,948 leaf occurrences, with fused
+stage geometry split into fixed and moving regions. The 1,568 omitted occurrences
 are listed by reason in [assembly.yaml](reviews/assembly.yaml). This removes
-fasteners, detector internals, construction geometry, floor
-anchors, and the diffractometer. The structural cage is retained. Mounts, outer detector
-geometry, and analyzer payloads remain. The diffractometer's empty STEP leaves
-are counted with other empty source geometry.
+fasteners, detector internals, construction geometry, the table assembly
+`DSG-000008836` with its floor anchors, and the diffractometer. The structural
+cage is retained. Mounts, outer detector geometry, and analyzer payloads remain.
+Parts with no solid geometry in the STEP, including the base detector's front
+and rear covers, are counted as empty source geometry.
 
-The three jet stages (`P018`, `P019`, `P020`) contain **no geometry** in the
-supplied STEP. The available jet parts stay fixed; these missing stages are not
+The three jet stages now contain geometry and stay fixed; they are not
 represented as working axes. Manual rotary/tilt adjustments also remain fixed.
 There is no XCS connection, PV mapping, or beam configuration.
 
@@ -133,7 +138,7 @@ pending until paused. These are discrete pose checks, not swept-motion collision
 detection, so fast motion between checked poses can cross an obstacle.
 
 The collision validator uses CAD verification to exercise a known cage contact at vertical lift -50 mm
-(`P750` against `P1035/P1040`), and checks that returning home clears it:
+(`P691` against the controls envelope `P867`), and checks that returning home clears it:
 
 ```bash
 uv run python cad/DSG-000095835/validate.py exports/DSG-000095835.collision --collision
