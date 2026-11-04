@@ -63,6 +63,7 @@ def compile_sdf_package(
     collision_mode: str = "hull",
     neutral_visuals: bool = False,
     decomposition_workers: int | None = None,
+    decomposition_dir: str | Path | None = None,
     archive: bool = True,
 ) -> tuple[Path, Path | None]:
     """Compile one cached stage-CAD scene into SDF, binary STL, and MATLAB helpers."""
@@ -114,6 +115,7 @@ def compile_sdf_package(
         include_collision_obj=include_collisions,
         collision_mode=collision_mode,
         decomposition_workers=decomposition_workers,
+        decomposition_dir=Path(decomposition_dir) if decomposition_dir is not None else None,
         decomposition_settings=part_settings_from_config(_read_decomposition_config(scene)),
     )
     sdf_path = package_dir / f"{resolved_model_name}.sdf"
@@ -370,6 +372,7 @@ def _convert_meshes(
     collision_mode: str = "hull",
     decomposition_workers: int | None = None,
     decomposition_settings: PartSettings | None = None,
+    decomposition_dir: Path | None = None,
 ) -> tuple[dict[Path, str], dict[Path, str], dict[Path, list[tuple[str, str]]]]:
     sources = {source for link in links for _, source, _ in link.meshes}
     sources.update(source for link in links for _, source in link.collision_only_meshes)
@@ -381,7 +384,7 @@ def _convert_meshes(
     if include_collision_obj and collision_mode == "convex":
         decomposed = decompose_sources(
             sources,
-            CACHE_ROOT / "convex-collision" / scene_file.parent.name,
+            decomposition_dir or CACHE_ROOT / "convex-collision" / scene_file.parent.name,
             decomposition_settings or PartSettings(),
             workers=decomposition_workers,
             progress=True,
@@ -429,6 +432,8 @@ def _write_sdf(
     declare_convex: bool,
 ) -> None:
     sdf = ET.Element("sdf", {"version": "1.6"})
+    if declare_convex:
+        sdf.set("xmlns:drake", "http://drake.mit.edu")
     model = ET.SubElement(sdf, "model", {"name": model_name})
     ET.SubElement(model, "static").text = "false"
 

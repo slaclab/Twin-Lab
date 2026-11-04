@@ -98,8 +98,11 @@ def prepare_stage_cad(
     *,
     rebuild: bool = False,
     linear_deflection_mm: float = 2.0,
+    cache_root: str | Path | None = None,
 ) -> Path:
     """Cache one real CAD mesh per reusable model plus occurrence transforms."""
+
+    from .collision_artifacts import inventory_inputs
 
     inventory_file = resolve_repo_path(inventory_path).resolve()
     inventory = yaml.safe_load(inventory_file.read_text(encoding="utf-8"))
@@ -109,7 +112,7 @@ def prepare_stage_cad(
     visual_styles = inventory.get("visual_styles", {})
     stage_colors = visual_styles.get("stage_models", {})
     manifest_path = resolve_repo_path(inventory["cad_manifest"], relative_to=inventory_file.parent)
-    output_dir = CACHE_ROOT / "stage-cad" / review_artifact_stem(inventory_file)
+    output_dir = Path(cache_root or CACHE_ROOT) / "stage-cad" / review_artifact_stem(inventory_file)
     scene_path = output_dir / "scene.yaml"
     sources = [inventory_file, step_path, catalog_path, manifest_path]
     supplemental_attachments = inventory.get("supplemental_attachments", [])
@@ -506,6 +509,7 @@ def prepare_stage_cad(
         "source_inventory": inventory_file.as_posix(),
         "linear_deflection_mm": linear_deflection_mm,
         "instances": instances,
+        "source_fingerprints": inventory_inputs(inventory_file, "convex")["files"],
         "static_geometry": static_geometry,
         "collision_only_geometry": collision_only_geometry,
         "attached_part_count": len(attached_refs),

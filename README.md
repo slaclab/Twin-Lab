@@ -21,6 +21,18 @@ Collision review:
 uv run slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
 ```
 
+Collision startup now uses a pinned, verified geometry bundle and never builds
+meshes or hulls implicitly. If this review has no published artifact reference,
+first [capture a validated existing cache or build a new bundle](docs/artifact-bundles.md).
+That guide also covers publication, offline preflight, CAD revisions, and running
+old/new revisions side by side with `--port 7000` and `--port 7001`.
+
+Use `uv run slac-cad-catalog list --json` to discover registered assemblies,
+timestamped STEP revisions, and their exact bundle associations. A registered
+model can be opened with `uv run slac-collision --revision REVISION_ID`; there
+is no need to locate its dependent files manually. Use the catalog's `ingest`
+command to preserve a new STEP alongside the old one before reviewing it.
+
 Pseudo-live archive playback from a known start time:
 
 ```bash
@@ -70,7 +82,8 @@ uv run slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
 The viewer drives the same reviewed joints while querying the convex geometry.
 The clamped cover is hidden from the normal illustration but remains in the
 collision model; its reported hulls appear translucent yellow in the warning
-band and red on contact. The first convex build is expensive but cached.
+band and red on contact. Published convex hulls are downloaded and reused;
+expensive geometry generation is an explicit authoring step.
 
 ### 3. Live feed or replay mode
 
@@ -568,9 +581,9 @@ uv run slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
 The command opens a `http://localhost:7000` Meshcat page in your normal browser,
 and prints the URL too in case it needs reopening. First load takes about 20
 seconds, and the window stays blank until the console says the geometry is
-loaded. Note that the very first run also has to build the collision hulls,
-which takes far longer; see
-[what the first build costs](#what-the-first-build-costs). Drag any joint slider
+loaded. The first run downloads the pinned artifact if it is not installed;
+it never builds collision hulls. Building a new published artifact is explicit;
+see [artifact bundles](docs/artifact-bundles.md). Drag any joint slider
 and the background colour tells you the state of the pose immediately.
 
 The collision viewer drives a Drake plant compiled from the same reviewed
@@ -705,8 +718,8 @@ machine.
 **Optional**, only if you want the machine back while the build runs:
 
 ```bash
-uv run slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
-  --decomposition-workers 2
+uv run slac-artifacts build cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml \
+  --archive exports/artifacts/43841-new-revision.tar.gz --workers 2
 ```
 
 Interrupting a build is safe. Every finished sub-part writes a marker, so a
@@ -726,10 +739,11 @@ re-tessellated, or when `--threshold` or `--max-hulls` changes. A re-tessellatio
 that produces byte-identical output is recognised by hash, so rebuilding the
 viewer cache alone does not force a re-decomposition.
 
-The compiled package under `exports/` carries a build stamp recording the scene
-meshes, the collision mode, and the inventory `decomposition` block it was built
-from. `slac-collision` recompiles whenever that stamp no longer matches, so
-editing a per-part override reaches the viewer without `--rebuild`.
+Working packages under `exports/` carry build stamps, but they are authoring
+outputs, not the collision viewer's mutable startup cache. `slac-collision`
+loads only the immutable bundle selected by the inventory's committed artifact
+reference. Changing decomposition overrides requires an explicit new artifact
+build and reference update; an older bundle is never silently replaced.
 
 ### How wrong are the hulls? (`slac-hull-audit`)
 
@@ -1190,6 +1204,7 @@ entry points, all installed with the package. Prefix each with `uv run`:
 | `slac-export-session` | `archive_export` | Guided one-time export of a fixed past EPICS window to a replayable JSON file |
 | `slac-export-live` | `archive_export` | Guided continuous export of a trailing EPICS window, for `slac-live-feed --live-file` to tail |
 | `slac-collision` | `collision_viewer` | Drake viewer with live clearance reporting |
+| `slac-artifacts` | `collision_artifacts` | Build, capture, fetch, verify, and publish immutable collision bundles |
 | `slac-compile-sdf` | `sdf_compiler` | Portable SDF share package |
 | `slac-decompose` | `convex_collision` | Convex-decompose cached meshes ahead of time |
 | `slac-hull-audit` | `hull_audit` | Measure how far the collision hulls overshoot the CAD |

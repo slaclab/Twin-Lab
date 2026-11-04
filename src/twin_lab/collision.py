@@ -540,7 +540,9 @@ def read_part_labels(inventory_path: str | Path) -> dict[str, str]:
     manifest_ref = inventory.get("cad_manifest")
     if not manifest_ref:
         return {}
-    manifest_path = resolve_repo_path(manifest_ref, relative_to=inventory_file.parent)
+    manifest_path = inventory_file.parent / manifest_ref
+    if not manifest_path.exists():
+        manifest_path = resolve_repo_path(manifest_ref, relative_to=inventory_file.parent)
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
