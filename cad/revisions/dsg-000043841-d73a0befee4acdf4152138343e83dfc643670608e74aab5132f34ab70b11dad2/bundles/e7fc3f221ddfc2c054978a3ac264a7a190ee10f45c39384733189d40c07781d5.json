@@ -33,7 +33,7 @@
     },
     "schema": "twin-lab-artifact-reference/v1",
     "sha256": "99f8c1ebf59431732a7664cd511a45c9e84981cedbd58c8dfbbc1fcc7d275b40",
-    "url": "file:///home/koashen/src/Twin-Lab-review-new/exports/artifacts/43841-2026-11-03-complete-beams.tar.gz"
+    "url": "https://github.com/slaclab/Twin-Lab/releases/download/geometry-43841-20261103/43841-2026-11-03-complete-beams.tar.gz"
   },
   "schema": "twin-lab-cad-bundle-binding/v1",
   "simulation": {
@@ -49,5 +49,6 @@
     "stage_catalog_sha256": "4a2ca9cf5d30f745182a726d8992e56f38bca93c026978311718b7ebe580c641",
     "step_path": "cad/source.stp"
   },
-  "step_sha256": "d73a0befee4acdf4152138343e83dfc643670608e74aab5132f34ab70b11dad2"
+  "step_sha256": "d73a0befee4acdf4152138343e83dfc643670608e74aab5132f34ab70b11dad2",
+  "updated_at": "2026-11-04T10:36:30.960736Z"
 }
