@@ -24,7 +24,7 @@ from .collision import (
     read_home_ignored_pairs,
 )
 from .meshcat_ui import FRAMING_DISTANCE, ISOMETRIC_DIRECTION
-from .paths import CACHE_ROOT, EXPORT_ROOT, resolve_repo_path, review_artifact_stem
+from .paths import resolve_repo_path
 
 WARN_LABEL = "Clearance warning band (mm)"
 AUTO_RANGE_LABEL = "Auto motion range (% of travel)"
@@ -171,6 +171,7 @@ def run_collision_viewer(
     beam_cache_dir: str | Path | None = None,
     beam_manifest: str | Path | None = None,
     fps: float = 30.0,
+    port: int | None = None,
 ) -> None:
     """Drive the compiled assembly from sliders and report clearance at every pose."""
 
@@ -192,7 +193,7 @@ def run_collision_viewer(
 
     # Nothing here publishes a realtime rate, so the stats plot only ever covers the view.
     patch_meshcat_page()
-    meshcat = Meshcat(viewer_params())
+    meshcat = Meshcat(viewer_params(port=port))
 
     announce_viewer("Collision viewer", meshcat)
     print(f"Model: {sdf_path}")
@@ -908,12 +909,16 @@ def _print_refinements(refinements) -> None:
 def main() -> None:
     import argparse
 
-    from .sdf_compiler import compile_sdf_package
-    from .stage_cad_viewer import prepare_stage_cad
+    from .collision_artifacts import resolve_runtime
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("stage_inventory")
     parser.add_argument("--package-dir", type=Path)
+    parser.add_argument("--artifact-ref", type=Path, help="Override the committed bundle reference")
+    parser.add_argument(
+        "--offline", action="store_true", help="Require an installed verified bundle"
+    )
+    parser.add_argument("--port", type=int, help="Pin the browser port for side-by-side reviews")
     parser.add_argument("--warn-mm", type=float, default=5.0)
     parser.add_argument(
         "--ignore-file",
@@ -923,8 +928,8 @@ def main() -> None:
     parser.add_argument(
         "--collision-mode",
         choices=("hull", "convex"),
-        default="convex",
-        help="convex runs CoACD once and caches it; hull is fast but overestimates volume",
+        default=None,
+        help="Require this collision mode in the selected bundle; never rebuilds geometry",
     )
     parser.add_argument("--rebuild", action="store_true")
     parser.add_argument(
@@ -941,35 +946,33 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if args.rebuild or args.package_dir is not None or args.decomposition_workers is not None:
+        parser.error(
+            "Geometry building is explicit: use slac-artifacts build or slac-artifacts capture. "
+            "The viewer never overwrites cached geometry."
+        )
+    if args.port is not None and not 1 <= args.port <= 65535:
+        parser.error("--port must be between 1 and 65535")
     inventory = resolve_repo_path(args.stage_inventory).resolve()
-    scene_path = prepare_stage_cad(inventory, rebuild=args.rebuild)
-    package_dir = args.package_dir or EXPORT_ROOT / f"{review_artifact_stem(inventory)}.collision"
-    if args.rebuild or _needs_recompile(package_dir, scene_path, args.collision_mode):
-        print(f"Compiling collision package into {package_dir}")
-        compile_sdf_package(
-            scene_path,
-            package_dir,
-            include_collisions=True,
-            collision_mode=args.collision_mode,
-            neutral_visuals=True,
-            decomposition_workers=args.decomposition_workers,
-            archive=False,
-        )
-    # Same directory sdf_compiler decomposed into, so the re-check reads the very hulls
-    # that produced the contact rather than a re-run of CoACD.
-    decomposition_dir = CACHE_ROOT / "convex-collision" / scene_path.parent.name
     try:
+        root = resolve_runtime(inventory, reference=args.artifact_ref, offline=args.offline)
+        runtime = json.loads((root / "runtime.json").read_text(encoding="utf-8"))
+        if args.collision_mode is not None and args.collision_mode != runtime["collision_mode"]:
+            parser.error("Selected bundle has a different collision mode; select another reference")
+        print(f"Verified immutable geometry: {root.name}")
+        decomposition_dir = root / "decomposition"
         run_collision_viewer(
-            package_dir,
-            warn_mm=args.warn_mm,
-            ignore_file=args.ignore_file or inventory,
-            label_source=inventory,
+            root / "package", warn_mm=args.warn_mm,
+            ignore_file=args.ignore_file or root / "review" / "inventory.yaml",
+            label_source=root / "review" / "inventory.yaml",
             decomposition_dir=decomposition_dir if decomposition_dir.is_dir() else None,
-            beam_inventory=inventory,
-            beam_cache_dir=scene_path.parent,
-            beam_manifest=inventory.parent.parent / "manifest.json",
-            fps=args.fps,
+            beam_inventory=root / "review" / "inventory.yaml",
+            beam_cache_dir=root / "tessellations",
+            beam_manifest=root / "review" / "manifest.json",
+            fps=args.fps, port=args.port,
         )
+    except (OSError, ValueError) as error:
+        parser.exit(2, f"Collision viewer: {error}\n")
     except KeyboardInterrupt:
         print("\nCollision viewer stopped.")
 
