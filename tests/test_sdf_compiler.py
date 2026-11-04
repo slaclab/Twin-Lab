@@ -181,6 +181,38 @@ def test_default_package_is_a_visual_only_drake_and_matlab_pair(tmp_path: Path) 
     assert matlab_path.name in loader
 
 
+def test_hidden_static_stage_is_excluded_from_visuals_and_collisions(tmp_path: Path) -> None:
+    mesh = tmp_path / "stage.obj"
+    _write_triangle_obj(mesh)
+    scene_path = tmp_path / "scene.yaml"
+    scene_path.write_text(
+        yaml.safe_dump(
+            {
+                "schema": "slac-stage-cad-scene/v8",
+                "instances": [
+                    {"ref": "A043", "model": "hidden_stage", "mesh": str(mesh)},
+                    {"ref": "A001", "model": "visible_stage", "mesh": str(mesh)},
+                ],
+                "hidden_stage_geometry": ["A043"],
+                "motion_stage_meshes": {},
+                "attachments": [],
+                "motion_chains": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    sdf_path, _ = compile_sdf_package(
+        scene_path, tmp_path / "package", include_collisions=True, archive=False
+    )
+    for model_path in (sdf_path, sdf_path.with_name(f"{sdf_path.stem}_matlab.sdf")):
+        root = ET.parse(model_path).getroot()
+        for geometry_type in ("visual", "collision"):
+            names = [item.attrib["name"] for item in root.findall(f".//{geometry_type}")]
+            assert names
+            assert all("a043" not in name.lower() for name in names)
+            assert any("a001" in name.lower() for name in names)
+
+
 def test_refuses_to_replace_an_unmanaged_output_directory(tmp_path: Path) -> None:
     scene_path = tmp_path / "scene.yaml"
     scene_path.write_text(
