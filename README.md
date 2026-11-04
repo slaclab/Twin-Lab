@@ -6,9 +6,97 @@ motion, visualization, and collision queries.
 
 The current reviewed model is subassembly `*43841` from drawing
 `DSG-000040389`. It contains an EPIX detector stage, three crystal stacks, and
-three polycapillary stacks with 27 controllable joints. The two Thorlabs LX10
+three polycapillary stacks with 31 controllable joints. The two Thorlabs LX10
 detector stages are manual-only because they are not powered and have no EPICS
 archive data.
+
+## Collision Viewer Quick Start: Published Geometry
+
+**You do not need to mesh the CAD or compute convex hulls to run the published
+simulation.** The repository pins a pre-built geometry bundle hosted in
+[GitHub Releases](https://github.com/slaclab/Twin-Lab/releases/tag/geometry-43841-baseline).
+The viewer downloads it automatically on first use and reuses it afterward.
+
+### 1. Clone and install
+
+With Git, Git LFS, and `uv` installed, run the following in a Linux/WSL shell.
+See [Setup](#setup) for environment prerequisites and VS Code configuration.
+Skipping LFS downloads here is intentional: the viewer can verify the STEP's
+LFS object ID and use the published bundle without downloading raw CAD first.
+
+```bash
+GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/slaclab/Twin-Lab.git
+cd Twin-Lab
+uv sync --all-extras
+```
+
+Dependency installation may take a few minutes. It is separate from geometry
+generation; none of the commands in this quick-start tessellate STEP or run CoACD.
+
+### 2. Open the collision viewer
+
+Run from the repository root:
+
+```bash
+inventory=cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
+uv run slac-collision "$inventory" --port 7000
+```
+
+The inventory's committed `43841-stage-stack.artifacts.json` reference selects
+the exact bundle and its download URL. Startup downloads missing files, checks
+their SHA-256 hashes, and loads the saved SDF, meshes, hulls, stage catalog,
+reviewed joint definitions, and STEP snapshot. No manual cache-file selection is
+needed. Installed bundles live under `.cache/twin_lab/artifacts/<bundle-id>/`
+and are read-only; another revision does not overwrite them.
+
+The browser opens at **http://localhost:7000**. Allow roughly 60-90 seconds for
+Drake to load the geometry after downloading; the canvas can be blank until the
+terminal reports `Loaded ... collision geometries`. This is model loading, not
+meshing. Move the joint sliders to check clearance. Use **Isometric view** to
+frame the assembly and **Reset to home** to restore the reviewed pose.
+
+If port 7000 is already occupied, use `--port 7001`. In a remote VS Code window,
+forward the selected port in the **Ports** panel and use its forwarded URL.
+
+### 3. Prepare for an offline demonstration
+
+Fetch once while online, then verify and launch without any downloads:
+
+```bash
+uv run slac-artifacts fetch "$inventory"
+uv run slac-artifacts verify "$inventory"
+uv run slac-collision "$inventory" --offline --port 7000
+```
+
+`verify` checks the saved bundle offline. If files are absent or damaged, startup
+stops with an error rather than silently rebuilding geometry. Keep the downloaded
+bundle available before a meeting; do not delete the local artifact store.
+
+### Select another saved CAD revision
+
+```bash
+uv run slac-cad-catalog list --json
+```
+
+The catalog lists assembly names, revision timestamps, STEP hashes, bundle IDs,
+and saved DOFs. Use the exact revision and bundle from that metadata:
+
+```bash
+uv run slac-collision --revision REVISION_ID --bundle BUNDLE_ID --port 7001
+```
+
+Omit `--offline` for the first download; add it once that bundle is installed.
+Use a branch or tag containing the chosen revision's catalog metadata. A revision
+with multiple bundles requires `--bundle`; the viewer does not guess which one
+you intended. Separate worktrees and ports let old and new revisions run side by
+side, subject to available RAM. Each full model uses several GiB of memory.
+
+**Running a published model and ingesting new CAD are different workflows.**
+Only an explicit `slac-artifacts build` generates new tessellations and hulls.
+For safe STEP ingestion, review, publication, and branch/worktree isolation, see
+[Published Collision Geometry](docs/artifact-bundles.md). The workstation-specific
+meeting Run buttons documented there are optional; other users can use the
+commands above without recreating our sibling folders.
 
 ## For returning users
 
@@ -21,11 +109,11 @@ Collision review:
 uv run slac-collision cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
 ```
 
-Collision startup now uses a pinned, verified geometry bundle and never builds
-meshes or hulls implicitly. If this review has no published artifact reference,
-first [capture a validated existing cache or build a new bundle](docs/artifact-bundles.md).
-That guide also covers publication, offline preflight, CAD revisions, and running
-old/new revisions side by side with `--port 7000` and `--port 7001`.
+Collision startup uses the saved bundle, not a mutable meshing cache. See
+[Collision Viewer Quick Start](#collision-viewer-quick-start-published-geometry)
+for the first download and offline preflight. Reviews without a published
+reference must first be built and published by their author; they cannot use a
+different CAD revision's bundle as a substitute.
 
 Use `uv run slac-cad-catalog list --json` to discover registered assemblies,
 timestamped STEP revisions, and their exact bundle associations. A registered
@@ -67,7 +155,7 @@ queries:
 uv run slac-stage-cad cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml
 ```
 
-Manual sliders drive all 27 joints. This is the right mode for checking joint
+Manual sliders drive all 31 joints. This is the right mode for checking joint
 order, axes, home pose, travel limits, and whether the reviewed CAD looks
 correct. It does not require CoACD.
 
