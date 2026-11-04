@@ -24,8 +24,10 @@ Use ±0.0075 m for this local simulation; the physical controller zero and limit
 have not been established.
 
 Both Z stages travel along local +Z, which is world +Z. Both X stages travel
-along local +X, which is world +X. The sign establishes a convenient simulation
-convention; it is not a motor/controller polarity claim.
+along local +X, which is world +X. These two towers are the bottom and top
+slits; their joints are named in beamline axes (y = world +Z, x = world −X), so a
+positive slit x moves along world −X. This is a simulation convention, not a
+motor/controller polarity claim.
 
 ## Physical chain and retained ownership
 

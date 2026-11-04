@@ -207,3 +207,11 @@ P1177:
     - 0
     radius_mm: 69
     length_mm: 18.3
+# Newport IMS300CC: local Z is travel; the carriage top plate spans Z -100..82 above Y 76.
+IMS300CC:
+  source_solids:
+  - 1
+  moving_mask:
+    kind: box
+    min_mm: [-100, 76, -100]
+    max_mm: [100, 95, 82]

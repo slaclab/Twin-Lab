@@ -17,6 +17,15 @@ class AssemblySliderJoint(SliderJoint):
             "parker_lift_joint": "Spectrometer vertical",
             "parker_cross_joint": "Spectrometer horizontal",
             "analyzer_rotation_joint": "Analyzer rotation",
+            "lj_x_joint": "LJ x",
+            "lj_y_joint": "LJ y",
+            "lj_z_joint": "LJ z",
+            "bottom_slit_x_joint": "Bottom slit x",
+            "bottom_slit_y_joint": "Bottom slit y",
+            "top_slit_x_joint": "Top slit x",
+            "top_slit_y_joint": "Top slit y",
+            "detector_x_joint": "ePix10k x",
+            "detector_z_joint": "ePix10k z",
         }
         for number in range(1, 4):
             for axis in ("translation", "rotation", "tilt"):

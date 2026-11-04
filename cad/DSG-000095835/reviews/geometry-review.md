@@ -47,5 +47,6 @@ moves all descendants together.
 The outer structural cage `A047` is retained as 52 separate non-fastener
 occurrences on `assembly_base`. Its open interior is preserved by decomposing
 each member separately. It stays fixed when either Parker slide or the inner
-analyzer frame moves. The former auxiliary/LJ carriages are now fixed CAD
-obstacles; their motor controls are disabled.
+analyzer frame moves. The two slit towers described in auxiliary-stages.md
+are driven again (bottom and top slit y/x), alongside the liquid-jet and
+ePix10k stages.

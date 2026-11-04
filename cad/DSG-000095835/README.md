@@ -25,7 +25,7 @@ Generated geometry lives in `.cache/twin_lab/`; SDF and MATLAB exports live in
 
 ## Included motion
 
-The model has 13 rigid bodies and 12 active joints:
+The model has 22 rigid bodies and 21 active joints:
 
 - **Spectrometer vertical** and **Spectrometer horizontal** control the two
   large 100 mm Parker/Daedal slides. Both sliders run from −50 to +50 mm.
@@ -38,28 +38,39 @@ The model has 13 rigid bodies and 12 active joints:
   an additional stack would require an updated source assembly.
 - The outer structural cage (`A047`, 52 non-fastener members) is fixed geometry
   included in interference checks. The inner analyzer cage rotates with the Huber.
-- LJ stages remain fixed. Their four former auxiliary controls are disabled.
+- **LJ x/z/y** drive the liquid jet `DSG-000007948`: Kohzu XA05A-L202-R along the
+  jet (x, ±25 mm), XA05A-R202 (z, ±7.5 mm), then the ZA05A lift (y, 0 to +8 mm,
+  assembled fully down). The jet adapter and long jet ride the lift.
+- **Bottom slit y/x** and **Top slit y/x** drive the two slit towers (`A021`,
+  `A027`): a LIB-000032451 vertical lift (±4 mm) carrying an XA05A-R202 (±7.5 mm)
+  that holds the blade rod.
 - The user-supplied controls envelope (`P867`) and its four support posts ride the
   Parker vertical lift plate (`P831`) and participate in interference checks. This
   STEP revision replaces the earlier `DSG-000108873` XCS Von Hamos Controls
   assembly with that single envelope.
-- The ePix10k detector assembly `LCL5005-008450`, including its two Newport
-  IMS300 slides, is fixed obstacle geometry. Its 45 parts at least 100 mm across
-  are retained; smaller parts and electronics are omitted. The slides are not
-  modelled as joints.
+- **ePix10k z/x** drive the detector assembly `LCL5005-008450` on its two Newport
+  IMS300CC slides (±150 mm each, assumed centred at the CAD pose). Each fused slide
+  is split at its carriage plate. Its 45 parts at least 100 mm across are retained;
+  smaller parts and electronics are omitted.
 
-The retained model uses 380 of the 1,948 leaf occurrences, with fused
-stage geometry split into fixed and moving regions. The 1,568 omitted occurrences
+LJ, slit and detector joints use beamline axes: y is up (world +Z) and the beam
+travels along −z (world −Y), so z is world +Y and x is world −X. The beam direction
+is inferred from the slits sitting upstream at world +Y and the ePix10k centred on
+world Y downstream. Positive slider values move along the positive beamline axis.
+
+The retained model uses 378 of the 1,948 leaf occurrences, with fused
+stage geometry split into fixed and moving regions. The 1,570 omitted occurrences
 are listed by reason in [assembly.yaml](reviews/assembly.yaml). This removes
 fasteners, detector internals, construction geometry, the table assembly
-`DSG-000008836` with its floor anchors, and the diffractometer. The structural
+`DSG-000008836` with its floor anchors, the diffractometer, and the two flexible
+chamber boots around the slit blade rods. The structural
 cage is retained. Mounts, outer detector geometry, and analyzer payloads remain.
 Parts with no solid geometry in the STEP, including the base detector's front
 and rear covers, are counted as empty source geometry.
 
-The three jet stages now contain geometry and stay fixed; they are not
-represented as working axes. Manual rotary/tilt adjustments also remain fixed.
-There is no XCS connection, PV mapping, or beam configuration.
+The camera's two stages (`LIB-000032933`, `LIB-000032929`) have no geometry in
+this STEP, so the camera stays fixed. Manual rotary/tilt adjustments also remain
+fixed. There is no XCS connection, PV mapping, or beam configuration.
 
 ## Mounting configurations
 
@@ -138,7 +149,20 @@ pending until paused. These are discrete pose checks, not swept-motion collision
 detection, so fast motion between checked poses can cross an obstacle.
 
 The collision validator uses CAD verification to exercise a known cage contact at vertical lift -50 mm
-(`P691` against the controls envelope `P867`), and checks that returning home clears it:
+(`P691` against the controls envelope `P867`), and checks that returning home clears it.
+At home the STEP itself overlaps the jet adapter `P011` about 1.1 mm into the chamber
+`P679`; the home checks allow that one pair through `allowed_pairs`.
+
+CAD-verified checks at each new joint limit found these contacts, which are real
+findings rather than model errors:
+
+- Both slit lifts reach their fixed limit-switch brackets after about 1.5 mm of
+  downward travel, so the CAD pose is near the bottom of their ±4 mm range.
+- At −7.5 mm the slit blade rods touch fixed `DSG-000000720` parts (`P669`, `P364`).
+- LJ x at +25 mm and LJ z at −7.5 mm bring the jet adapter and tube into the
+  chamber walls and port.
+- ePix10k z at +150 mm drives the detector into the chamber; its forward travel
+  is not usable in this layout.
 
 ```bash
 uv run python cad/DSG-000095835/validate.py exports/DSG-000095835.collision --collision

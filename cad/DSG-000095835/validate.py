@@ -281,9 +281,13 @@ def validate(sdf: Path, recipe_path: Path, *, collision: bool = False) -> None:
             model.set_positions({name: 0.0 for name in model.joint_names()})
             model.set_positions(case["positions"])
             result, _ = model.verify(model.report(warn_m=0.0))
-            if case.get("expect_clear", False):
-                require(not result.interference, f"{case['name']}: unexpected contact")
             detected = {frozenset(pair) for pair in result.touching_pairs}
+            if case.get("expect_clear", False):
+                unexpected = detected - {frozenset(pair) for pair in case.get("allowed_pairs", [])}
+                require(
+                    not unexpected,
+                    f"{case['name']}: unexpected contact {sorted(map(sorted, unexpected))}",
+                )
             for pair in case.get("touching_pairs", []):
                 require(frozenset(pair) in detected, f"{case['name']}: missed contact {pair}")
             print(f"{case['name']}: {result.summary()}")

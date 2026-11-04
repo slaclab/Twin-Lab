@@ -87,6 +87,36 @@ def test_all_imported_crystal_stacks_have_reviewed_payloads():
     assert review["visual_rgba"] == [0.7, 0.7, 0.7, 1.0]
 
 
+def test_jet_slit_and_detector_stages_are_driven_in_beamline_axes():
+    review = yaml.safe_load((ASSEMBLY / "reviews" / "assembly.yaml").read_text())
+    joints = {joint["name"]: joint for joint in review["joints"]}
+    # Beamline x/y/z in world coordinates: y up, beam along -z (world -Y).
+    beamline = {"x": [-1.0, 0.0, 0.0], "y": [0.0, 0.0, 1.0], "z": [0.0, 1.0, 0.0]}
+    chains = {
+        "lj": ["x", "z", "y"],
+        "bottom_slit": ["y", "x"],
+        "top_slit": ["y", "x"],
+        "detector": ["z", "x"],
+    }
+    for prefix, axes in chains.items():
+        parent = "assembly_base"
+        for axis in axes:
+            joint = joints[f"{prefix}_{axis}_joint"]
+            assert (joint["parent"], joint["child"]) == (parent, f"{prefix}_{axis}")
+            assert joint["type"] == "prismatic"
+            assert joint["axis_xyz"] == beamline[axis]
+            fixed, moving = joint["bearing_parts"]
+            owned = {
+                body: {part if isinstance(part, str) else part["ref"]
+                       for part in review["bodies"][body]["parts"]}
+                for body in (joint["parent"], joint["child"])
+            }
+            assert set(fixed) <= owned[joint["parent"]]
+            assert set(moving) <= owned[joint["child"]]
+            parent = joint["child"]
+    assert "lj" not in review["fixed_subsystems"]
+
+
 @pytest.fixture
 def cad_model(monkeypatch):
     pytest.importorskip("OCP")

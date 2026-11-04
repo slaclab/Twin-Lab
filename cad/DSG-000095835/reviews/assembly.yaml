@@ -10,6 +10,9 @@ collision_regressions:
 - name: CAD home is clear
   positions: {}
   expect_clear: true
+  # The STEP itself overlaps the jet adapter 1.1 mm into the chamber wall.
+  allowed_pairs:
+  - [P011, P679]
 - name: Vertical lift contacts the outer cage
   positions:
     parker_lift_joint: -0.05
@@ -18,6 +21,8 @@ collision_regressions:
 - name: Return from cage contact to home
   positions: {}
   expect_clear: true
+  allowed_pairs:
+  - [P011, P679]
 notes:
 - Offline provisional kinematic model; CAD pose is q=0 for every joint.
 - Axes and attachment order inferred from bearing geometry and coincident mounting planes.
@@ -25,12 +30,23 @@ notes:
   uncalibrated.
 - Kohzu RA/SA and Huber fused solids are partitioned at visible moving interfaces; internal
   bearings simplified.
-- Jet stage parts are present in this STEP revision and remain fixed.
+- Jet stage parts are present in this STEP revision.
 - Manual stages remain fixed. Diffractometer, beam construction geometry and communication
   configuration omitted.
 - Split outputs discard inverted and disconnected solids below 100 cubic millimetres; external
   stage bodies and carriage interfaces retained.
-- LJ auxiliary motors disabled at user request; their parts remain fixed obstacles.
+- Beamline axes, used to name the LJ, slit and detector joints, are y up (world +Z) and beam
+  travelling along -z (world -Y), so z is world +Y and x is world -X. The beam direction is
+  inferred from the slits upstream at world +Y and the ePix10k centred on world Y downstream.
+- Liquid jet DSG-000007948 is a three-axis chain, as in the 43841 review. Kohzu XA05A-L202-R
+  A007 runs along the jet (x, 50 mm), XA05A-R202 A006 carries z (15 mm), then the ZA05A lift
+  A005 carries y (8 mm, assembled fully down). The adapter and long jet DSG-000022427 ride the
+  lift.
+- Bottom and top slits A021/A027 each stack a LIB-000032451 vertical lift (y, 8 mm) under an
+  XA05A-R202 (x, 15 mm); the blade rods ride the X stage. See auxiliary-stages.md.
+- The ePix10k detector rides two Newport IMS300CC slides, the lower P1920 along z and the
+  upper P1852 along x. Each fused slide is split at its carriage. 300 mm travel is assumed to
+  be centred on the CAD pose.
 - Outer cage A047 is fixed collision geometry. Large spectrometer controls are the two 100
   mm Parker slides.
 - The user-supplied controls envelope P867 and its support posts ride the Parker lift plate
@@ -38,10 +54,11 @@ notes:
   with that single envelope.
 - The supplied STEP is the 10 degree mounting configuration of DSG-000095826 on DSG-000097481.
   The 0 and 5 degree mounting placements are not yet verified.
-- Detector assembly LCL5005-008450 (ePix10k on two Newport IMS300 slides) is fixed obstacle
-  geometry; its 45 parts at least 100 mm across are retained and smaller parts and electronics
-  are omitted. Its slides are not modelled as joints.
+- Detector assembly LCL5005-008450 (ePix10k on two Newport IMS300 slides) keeps its 45 parts
+  at least 100 mm across; smaller parts and electronics are omitted.
 - Table assembly DSG-000008836 (understructure, floor anchors, diffractometer) stays omitted.
+- Camera stages LIB-000032933/LIB-000032929 have no geometry in this STEP; the camera stays
+  fixed.
 stage_splits:
   P1055: P1177
   P925: P1047
@@ -53,6 +70,8 @@ stage_splits:
   P1012: P1047
   P1019: P1054
   P1017: P1052
+  P1920: IMS300CC
+  P1852: IMS300CC
 bodies:
   assembly_base:
     rgba: [0.6, 0.64, 0.69, 1.0]
@@ -65,41 +84,15 @@ bodies:
     - P001
     - P002
     - P003
-    - P011
     - P013
     - P030
     - P032
     - P034
     - P036
     - P037
-    - P040
-    - P042
-    - P044
-    - P046
-    - P048
     - P051
     - P053
     - P055
-    - P057
-    - P063
-    - P065
-    - P066
-    - P067
-    - P068
-    - P069
-    - P070
-    - P071
-    - P072
-    - P073
-    - P074
-    - P075
-    - P076
-    - P077
-    - P078
-    - P079
-    - P083
-    - P086
-    - P087
     - P089
     - P091
     - P093
@@ -124,7 +117,6 @@ bodies:
     - P508
     - P511
     - P514
-    - P515
     - P516
     - P517
     - P518
@@ -133,7 +125,6 @@ bodies:
     - P523
     - P524
     - P525
-    - P528
     - P531
     - P533
     - P534
@@ -243,31 +234,6 @@ bodies:
     - P1210
     - P1211
     - P1218
-    - P255
-    - P261
-    - P267
-    - P273
-    - P276
-    - P277
-    - P280
-    - P274
-    - P275
-    - P281
-    - P243
-    - P244
-    - P247
-    - P304
-    - P310
-    - P316
-    - P322
-    - P325
-    - P326
-    - P329
-    - P323
-    - P324
-    - P330
-    - P292
-    - P293
     - P680
     - P681
     - P682
@@ -319,12 +285,7 @@ bodies:
     - P766
     - P767
     - P010
-    - P019
-    - P020
-    - P021
-    - P022
     - P023
-    - P024
     - P375
     - P376
     - P379
@@ -339,51 +300,10 @@ bodies:
     - P679
     - P711
     - P715
-    - P1236
-    - P1244
-    - P1253
-    - P1266
-    - P1279
-    - P1294
-    - P1300
-    - P1313
-    - P1324
-    - P1340
-    - P1348
-    - P1419
-    - P1420
-    - P1423
-    - P1424
-    - P1425
-    - P1429
-    - P1436
-    - P1437
-    - P1438
-    - P1445
-    - P1463
-    - P1472
-    - P1570
-    - P1572
-    - P1573
-    - P1574
-    - P1575
-    - P1848
-    - P1852
-    - P1856
-    - P1866
-    - P1876
-    - P1886
-    - P1887
-    - P1888
-    - P1889
-    - P1893
     - P1894
-    - P1897
-    - P1899
-    - P1915
     - P1917
-    - P1920
     - P1922
+    - {ref: P1920, region: fixed}
     part_colors:
       P680: &id001 [0.43, 0.49, 0.56, 1.0]
       P681: [0.43, 0.49, 0.56, 1.0]
@@ -564,6 +484,77 @@ bodies:
     - P1052
     - P1053
     - P1054
+  lj_x:
+    rgba: [0.16, 0.52, 0.44, 1.0]
+    parts: [P024, P021]
+  lj_z:
+    rgba: [0.32, 0.74, 0.62, 1.0]
+    parts: [P022, P019]
+  lj_y:
+    rgba: [0.10, 0.58, 0.95, 1.0]
+    parts: [P020, P011, P040, P042, P044, P046, P048, P057, P063, P065, P066, P067, P068,
+      P069, P070, P071, P072, P073, P074, P075, P076, P077, P078, P079, P083, P086, P087]
+  bottom_slit_y:
+    rgba: [0.82, 0.34, 0.48, 1.0]
+    parts: [P255, P261, P267, P273, P276, P277, P280]
+  bottom_slit_x:
+    rgba: [0.32, 0.74, 0.62, 1.0]
+    parts: [P274, P275, P281, P243, P244, P247]
+  top_slit_y:
+    rgba: [0.82, 0.34, 0.48, 1.0]
+    parts: [P304, P310, P316, P322, P325, P326, P329]
+  top_slit_x:
+    rgba: [0.32, 0.74, 0.62, 1.0]
+    parts: [P323, P324, P330, P292, P293]
+  detector_z:
+    rgba: [0.20, 0.58, 0.68, 1.0]
+    parts:
+    - {ref: P1920, region: moving}
+    - {ref: P1852, region: fixed}
+    - P1887
+    - P1915
+  detector_x:
+    rgba: [0.18, 0.72, 0.62, 1.0]
+    parts:
+    - {ref: P1852, region: moving}
+    - P1899
+    - P1236
+    - P1848
+    - P1856
+    - P1866
+    - P1876
+    - P1886
+    - P1888
+    - P1889
+    - P1893
+    - P1897
+    - P1244
+    - P1253
+    - P1266
+    - P1279
+    - P1294
+    - P1300
+    - P1313
+    - P1324
+    - P1340
+    - P1348
+    - P1419
+    - P1420
+    - P1423
+    - P1424
+    - P1425
+    - P1429
+    - P1436
+    - P1437
+    - P1438
+    - P1445
+    - P1463
+    - P1472
+    - P1570
+    - P1572
+    - P1573
+    - P1574
+    - P1575
 joints:
 - name: parker_lift_joint
   stack: Spectrometer / large vertical slide (100 mm travel)
@@ -727,6 +718,105 @@ joints:
   bearing_parts:
   - - P1017
   - - P1017
+- name: lj_x_joint
+  stack: Liquid jet x (Kohzu XA05A-L202-R, 50 mm)
+  stage_ref: P023
+  type: prismatic
+  parent: assembly_base
+  child: lj_x
+  axis_xyz: [-1.0, 0.0, 0.0]
+  origin_m: [0.1396517, 0.0, -0.225979]
+  limits: [-0.025, 0.025]
+  home: 0.0
+  bearing_parts: [[P023], [P024]]
+- name: lj_z_joint
+  stack: Liquid jet z (Kohzu XA05A-R202, 15 mm)
+  stage_ref: P021
+  type: prismatic
+  parent: lj_x
+  child: lj_z
+  axis_xyz: [0.0, 1.0, 0.0]
+  origin_m: [0.1396517, 0.0, -0.185979]
+  limits: [-0.0075, 0.0075]
+  home: 0.0
+  bearing_parts: [[P021], [P022]]
+- name: lj_y_joint
+  stack: Liquid jet y (Kohzu ZA05A-W101-BM, 8 mm, CAD pose fully down)
+  stage_ref: P019
+  type: prismatic
+  parent: lj_z
+  child: lj_y
+  axis_xyz: [0.0, 0.0, 1.0]
+  origin_m: [0.1396517, 0.0, -0.165979]
+  limits: [0.0, 0.008]
+  home: 0.0
+  bearing_parts: [[P019], [P020]]
+- name: bottom_slit_y_joint
+  stack: Bottom slit y (LIB-000032451 lift, 8 mm)
+  stage_ref: P256
+  type: prismatic
+  parent: assembly_base
+  child: bottom_slit_y
+  axis_xyz: [0.0, 0.0, 1.0]
+  origin_m: [-0.1445352, 0.1290124, -0.165354]
+  limits: [-0.004, 0.004]
+  home: 0.0
+  bearing_parts: [[P256], [P255]]
+- name: bottom_slit_x_joint
+  stack: Bottom slit x (Kohzu XA05A-R202, 15 mm)
+  stage_ref: P273
+  type: prismatic
+  parent: bottom_slit_y
+  child: bottom_slit_x
+  axis_xyz: [-1.0, 0.0, 0.0]
+  origin_m: [-0.1445352, 0.1290124, -0.109354]
+  limits: [-0.0075, 0.0075]
+  home: 0.0
+  bearing_parts: [[P273], [P274]]
+- name: top_slit_y_joint
+  stack: Top slit y (LIB-000032451 lift, 8 mm)
+  stage_ref: P305
+  type: prismatic
+  parent: assembly_base
+  child: top_slit_y
+  axis_xyz: [0.0, 0.0, 1.0]
+  origin_m: [-0.1805574, 0.1294136, -0.063754]
+  limits: [-0.004, 0.004]
+  home: 0.0
+  bearing_parts: [[P305], [P304]]
+- name: top_slit_x_joint
+  stack: Top slit x (Kohzu XA05A-R202, 15 mm)
+  stage_ref: P322
+  type: prismatic
+  parent: top_slit_y
+  child: top_slit_x
+  axis_xyz: [-1.0, 0.0, 0.0]
+  origin_m: [-0.1805574, 0.1294136, -0.007754]
+  limits: [-0.0075, 0.0075]
+  home: 0.0
+  bearing_parts: [[P322], [P323]]
+- name: detector_z_joint
+  stack: ePix10k z (Newport IMS300CC, 300 mm)
+  stage_ref: P1920
+  type: prismatic
+  parent: assembly_base
+  child: detector_z
+  axis_xyz: [0.0, 1.0, 0.0]
+  origin_m: [0.0088, -0.4741, -0.4482]
+  limits: [-0.15, 0.15]
+  home: 0.0
+  bearing_parts: [[P1920], [P1920, P1852]]
+- name: detector_x_joint
+  stack: ePix10k x (Newport IMS300CC, 300 mm)
+  stage_ref: P1852
+  type: prismatic
+  parent: detector_z
+  child: detector_x
+  axis_xyz: [-1.0, 0.0, 0.0]
+  origin_m: [0.0, -0.394, -0.3706]
+  limits: [-0.15, 0.15]
+  home: 0.0
+  bearing_parts: [[P1852], [P1852, P1899]]
 omitted_occurrences:
   Fasteners and small retention hardware:
   - P004
@@ -2301,39 +2391,10 @@ omitted_occurrences:
   - P857
   Diffractometer omitted by request:
   - P1095
+  Flexible chamber boots around the slit blade rods; not rigid collision geometry:
+  - P515
+  - P528
 fixed_subsystems:
-  lj:
-    reason: LJ motors disabled at user request; retain CAD as stationary collision geometry.
-    former_carriages:
-      lower_z:
-      - P255
-      - P261
-      - P267
-      - P273
-      - P276
-      - P277
-      - P280
-      lower_x:
-      - P274
-      - P275
-      - P281
-      - P243
-      - P244
-      - P247
-      upper_z:
-      - P304
-      - P310
-      - P316
-      - P322
-      - P325
-      - P326
-      - P329
-      upper_x:
-      - P323
-      - P324
-      - P330
-      - P292
-      - P293
   cage:
     assembly_ref: A047
     parts:
