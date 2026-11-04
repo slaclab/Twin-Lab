@@ -1,0 +1,16 @@
+{
+  "assembly": "DSG-000043841",
+  "assembly_name": "43841 stage stack (DSG-000040389), 2026-11-03 CAD",
+  "ingested_at": "2026-11-04T07:18:53.522661Z",
+  "original_filename": "DSG-000040389 11-3-26.stp",
+  "parent_revision": "dsg-000043841-948f9e9f88204dd7a830cc5660375761bfe9807de72a8d18f8ac879abc2e86c8",
+  "revision_id": "dsg-000043841-d73a0befee4acdf4152138343e83dfc643670608e74aab5132f34ab70b11dad2",
+  "schema": "twin-lab-cad-revision/v1",
+  "step": {
+    "path": "cad/revisions/dsg-000043841-d73a0befee4acdf4152138343e83dfc643670608e74aab5132f34ab70b11dad2/source.stp",
+    "sha256": "d73a0befee4acdf4152138343e83dfc643670608e74aab5132f34ab70b11dad2",
+    "size_bytes": 160612652
+  },
+  "timestamp_basis": "repository_import",
+  "uploaded_at": "2026-11-04T07:18:53.522661Z"
+}

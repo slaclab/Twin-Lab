@@ -1,0 +1,33 @@
+{
+  "bundle_id": "e7fc3f221ddfc2c054978a3ac264a7a190ee10f45c39384733189d40c07781d5",
+  "cad": {
+    "assembly": "DSG-000043841",
+    "assembly_name": "43841 stage stack (DSG-000040389), 2026-11-03 CAD",
+    "ingested_at": "2026-11-04T07:18:53.522661Z",
+    "original_filename": "DSG-000040389 11-3-26.stp",
+    "parent_revision": "dsg-000043841-948f9e9f88204dd7a830cc5660375761bfe9807de72a8d18f8ac879abc2e86c8",
+    "revision_id": "dsg-000043841-d73a0befee4acdf4152138343e83dfc643670608e74aab5132f34ab70b11dad2",
+    "step": {
+      "path": "cad/revisions/dsg-000043841-d73a0befee4acdf4152138343e83dfc643670608e74aab5132f34ab70b11dad2/source.stp",
+      "sha256": "d73a0befee4acdf4152138343e83dfc643670608e74aab5132f34ab70b11dad2",
+      "size_bytes": 160612652
+    },
+    "timestamp_basis": "repository_import",
+    "uploaded_at": "2026-11-04T07:18:53.522661Z"
+  },
+  "inputs": {
+    "collision_mode": "convex",
+    "files": {
+      "cad_manifest": "79315b21b25f87e2ea6d742c10f43aa64af04a38ddb9def13ec8cc4d0f4236ca",
+      "inventory": "02ce222ea7e6ddf1f7e902af50adc5ea8d295fc2ed5b96dc71582269bac1d6cd",
+      "selection_review": "cf88b51e4600a11460c02f5135d395d3188575e576cfd016a36aff30b23ec8f5",
+      "source_step": "d73a0befee4acdf4152138343e83dfc643670608e74aab5132f34ab70b11dad2",
+      "stage_catalog": "4a2ca9cf5d30f745182a726d8992e56f38bca93c026978311718b7ebe580c641",
+      "supplement:0": "e02113f01b7decb82e275d6380c27603389d222ad1d004ab5b4be484c2e34c01"
+    },
+    "runtime": "twin-lab-collision-runtime/v2"
+  },
+  "schema": "twin-lab-artifact-reference/v1",
+  "sha256": "99f8c1ebf59431732a7664cd511a45c9e84981cedbd58c8dfbbc1fcc7d275b40",
+  "url": "file:///home/koashen/src/Twin-Lab-review-new/exports/artifacts/43841-2026-11-03-complete-beams.tar.gz"
+}

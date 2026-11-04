@@ -1,0 +1,358 @@
+{
+  "baseline": "13e023b:cad/DSG-000095835/reviews/assembly.yaml",
+  "collision_only_assemblies": [
+    "DSG-000042408"
+  ],
+  "configuration": "beamline",
+  "omit_fasteners": true,
+  "omitted_assemblies": [
+    "DSG-000042902",
+    "mo39152640",
+    "DSG-000043457",
+    "DSG-000112246",
+    "DSG-000042534",
+    "DSG-000081358",
+    "DSG-000023730"
+  ],
+  "omitted_components": [
+    "5091A15_NO THREADS_Low-Profile Hold-Down Toggle Clamp",
+    "Jergens__HoistRing_550lbs_.250-20__23404",
+    "REF-000423786",
+    "DSG-000110575",
+    "210-HD26-K40",
+    "REF-000220280X",
+    "L-000001944",
+    "4406T779_NO THREADS_Stainless Steel High-Pressure Barbed Tube Fitting",
+    "MDC__BulkHeadClamp_NW16__716000",
+    "MDC__CtrgRng_NW16_Al_Viton__710013",
+    "REF-00021979922",
+    "DSG-000099332",
+    "DSG-000005121",
+    "DSG-000042821",
+    "DSG-000042972",
+    "DSG-000042976",
+    "REF-000168820",
+    "DSG-000048666",
+    "MDC__CenteringRing_NW100_AlumViton__810001",
+    "MDC__NW40CtrgRng__710012",
+    "MDC__ClawClampSgl_NW63-100Flg__801000",
+    "LIB-000032722",
+    "LIB-000032723",
+    "DSG-000111835",
+    "LIB-000027025",
+    "DSG-000111952",
+    "LIB-000032732",
+    "LIB-000032670",
+    "LIB-000018446",
+    "LIB-000016968",
+    "DSG-000040767",
+    "DSG-000040909",
+    "DSG-000111956"
+  ],
+  "omitted_names": {
+    "0-80x.12 set scr, cup pt": [
+      "Fasteners and small retention hardware"
+    ],
+    "0.25 washer, flat reg, sst316": [
+      "Fasteners and small retention hardware"
+    ],
+    "0.25-20 unc-2a x 0.5 screw, hex sch cap, sst316": [
+      "Fasteners and small retention hardware"
+    ],
+    "0.25-20 unc-2a x 0.75 bolt, hex, sst316": [
+      "Fasteners and small retention hardware"
+    ],
+    "0.25-20 unc-2a x 0.75 screw, hex sch cap, sst316": [
+      "Fasteners and small retention hardware"
+    ],
+    "0.25-20 unc-2b nut, hex, sst316": [
+      "Fasteners and small retention hardware"
+    ],
+    "0.25-20 unc-3a x 0.75 screw, hex sch cap sst18-8": [
+      "Fasteners and small retention hardware",
+      "Floor anchoring and table understructure omitted"
+    ],
+    "0.25-20 unc-3a x 1.0 screw, hex sch cap sst18-8": [
+      "Fasteners and small retention hardware"
+    ],
+    "10-32 unf-2a x 0.375 screw, hex sch cap, sst316": [
+      "Fasteners and small retention hardware"
+    ],
+    "10-32 unf-2a x 0.75 screw, hex sch cap, sst316": [
+      "Fasteners and small retention hardware"
+    ],
+    "2 washer, flat nar, sst316": [
+      "Fasteners and small retention hardware"
+    ],
+    "4-40 unc-2a x 0.25 screw, hex sch cap, sst316": [
+      "Fasteners and small retention hardware"
+    ],
+    "4-40 unc-2a x 0.25 screw, hex skt flat cskh cap, sst316": [
+      "Fasteners and small retention hardware"
+    ],
+    "4-40 unc-2a x 0.38 screw, hex sch cap, sst316": [
+      "Fasteners and small retention hardware"
+    ],
+    "4-40 unc-2a x 0.625 screw, hex sch cap, sst316": [
+      "Fasteners and small retention hardware"
+    ],
+    "5-40 unc-2a x 1.5 screw, hex sch cap, sst316": [
+      "Fasteners and small retention hardware"
+    ],
+    "8-32 unc-2a x 0.25 screw, hex sch cap, sst316": [
+      "Fasteners and small retention hardware"
+    ],
+    "8-32 unc-2a x 0.375 screw, hex sch cap, sst316": [
+      "Fasteners and small retention hardware"
+    ],
+    "8-32 unc-2a x 0.5 screw, hex sch cap": [
+      "Fasteners and small retention hardware"
+    ],
+    "8-32 unc-2a x 0.625 screw, hex sch cap, sst316": [
+      "Fasteners and small retention hardware"
+    ],
+    "8-32 unc-2b nut, hex, sst316": [
+      "Fasteners and small retention hardware"
+    ],
+    "8-32 unc-3a x 0.25 screw, hex sch cap sst18-8": [
+      "Fasteners and small retention hardware"
+    ],
+    "8-32 unc-3a x 0.375 screw, hex sch cap sst18-8": [
+      "Fasteners and small retention hardware"
+    ],
+    "beswickengineering__fittingorifice_microdrilled_m3thdx.125tubeid__m3h-1332-010": [
+      "Detector internals; retain housing and sensor envelope"
+    ],
+    "customthermoelectric__bellevillewasher_no4_sst__fst-bw-04": [
+      "Fasteners and small retention hardware"
+    ],
+    "helicoil__thrdinsert_8-32x.164l_nitronic60__1185-2en164": [
+      "Fasteners and small retention hardware"
+    ],
+    "helicoil__thrdinsert_8-32x.246l_nitronic60__1185-2en246": [
+      "Fasteners and small retention hardware"
+    ],
+    "lib-000000663": [
+      "Empty geometry in source STEP"
+    ],
+    "lib-000005438": [
+      "Empty geometry in source STEP"
+    ],
+    "lib-000013711": [
+      "Construction or optical reference geometry"
+    ],
+    "mcmastercarr__dowelpin_.1251diax.25lg_18-8sst__90145a469": [
+      "Fasteners and small retention hardware"
+    ],
+    "mcmastercarr__setscr_hexsktcuppt_8-32x.375l_316sst__92313a192": [
+      "Fasteners and small retention hardware"
+    ],
+    "mcmastercarr__setscrew_cuppt_.25-20x.19l__92311a532": [
+      "Fasteners and small retention hardware"
+    ],
+    "mcmastercarr__setscrew_cuppt_4-40x.63l_sst__92311a112": [
+      "Fasteners and small retention hardware"
+    ],
+    "mo39154208": [
+      "Detector internals; retain housing and sensor envelope"
+    ],
+    "mo39154257": [
+      "Detector internals; retain housing and sensor envelope"
+    ],
+    "mo39154264": [
+      "Detector internals; retain housing and sensor envelope"
+    ],
+    "mo39154267": [
+      "Detector internals; retain housing and sensor envelope"
+    ],
+    "mo39165725": [
+      "Detector internals; retain housing and sensor envelope"
+    ],
+    "mo39165726": [
+      "Detector internals; retain housing and sensor envelope"
+    ],
+    "ref__asic__sa39154207": [
+      "Detector internals; retain housing and sensor envelope"
+    ],
+    "ref__avago_digitalopticaltransceiver_4.25gbd__afbr-59r5lz": [
+      "Detector internals; retain housing and sensor envelope"
+    ],
+    "ref__carrier__sa39154207": [
+      "Detector internals; retain housing and sensor envelope"
+    ],
+    "ref__mo39154250__ribboncable-0": [
+      "Detector internals; retain housing and sensor envelope"
+    ],
+    "ref__mo39154251__base_tflex500-0": [
+      "Detector internals; retain housing and sensor envelope"
+    ],
+    "ref__mo39154251__tflex500-0": [
+      "Detector internals; retain housing and sensor envelope"
+    ],
+    "ref__sa39154223_40mmsq_peltier-0": [
+      "Detector internals; retain housing and sensor envelope"
+    ],
+    "ref__sa39154223__base_tflex500-0": [
+      "Detector internals; retain housing and sensor envelope"
+    ],
+    "ref__sa39154223__ribboncable-0": [
+      "Detector internals; retain housing and sensor envelope"
+    ],
+    "ref__sa39154223__ribboncable2-0": [
+      "Detector internals; retain housing and sensor envelope"
+    ],
+    "samtec__connector_pinfieldarray20posnassy__seam-20-11.0-l-08-02-a-k": [
+      "Detector internals; retain housing and sensor envelope"
+    ],
+    "samtec__connector_pinfieldarray30posn__seaf-30-06.5-l-06-02-a-k": [
+      "Detector internals; retain housing and sensor envelope"
+    ],
+    "samtec__connector_pinfieldarry30posnassy__seam-30-11.0-l-06-02-a-k": [
+      "Detector internals; retain housing and sensor envelope"
+    ],
+    "samtec__connector_socketarray20posn8row__seaf-20-05_0-l-08-2-a-a-tr": [
+      "Detector internals; retain housing and sensor envelope"
+    ],
+    "screw_bhcs_m3-0.5x8_sst18-8": [
+      "Fasteners and small retention hardware"
+    ],
+    "screw_shcs_m2-0.4x10_sst18-8": [
+      "Fasteners and small retention hardware"
+    ],
+    "screw_shcs_m2-0.4x4_sst18-8": [
+      "Fasteners and small retention hardware"
+    ],
+    "screw_shcs_m2-0.4x6_sst18-8": [
+      "Fasteners and small retention hardware"
+    ],
+    "screw_shcs_m2.5-0.45x4_sst18-8": [
+      "Fasteners and small retention hardware"
+    ],
+    "screw_shcs_m2.5-0.45x6_sst18-8": [
+      "Fasteners and small retention hardware"
+    ],
+    "screw_shcs_m3-0.5x10_sst18-8": [
+      "Fasteners and small retention hardware"
+    ],
+    "screw_shcs_m3-0.5x10_sst316": [
+      "Fasteners and small retention hardware"
+    ],
+    "screw_shcs_m3-0.5x18_sst18-8": [
+      "Fasteners and small retention hardware"
+    ],
+    "screw_shcs_m3-0.5x6_sst18-8": [
+      "Fasteners and small retention hardware"
+    ],
+    "screw_shcs_m3-0.5x6_sst316": [
+      "Fasteners and small retention hardware"
+    ],
+    "screw_shcs_m3-0.5x8_sst316": [
+      "Fasteners and small retention hardware"
+    ],
+    "screw_shcs_m4-0.7x10_sst18-8": [
+      "Fasteners and small retention hardware"
+    ],
+    "screw_shcs_m4-0.7x10_sst316": [
+      "Fasteners and small retention hardware"
+    ],
+    "screw_shcs_m4-0.7x14_sst18-8": [
+      "Fasteners and small retention hardware"
+    ],
+    "screw_shcs_m4-0.7x6_sst316": [
+      "Fasteners and small retention hardware"
+    ],
+    "screw_shcs_m4-0.7x8_sst316": [
+      "Fasteners and small retention hardware"
+    ],
+    "screw_shcs_m6-1.0x8_sst18-8": [
+      "Fasteners and small retention hardware"
+    ],
+    "swagelok__fitting_shortsktwld__ss-4-vcr-3-.50lg": [
+      "Detector internals; retain housing and sensor envelope"
+    ],
+    "swagelok__ftg_nutvcr.25male__ss-4-hvcr-4sr": [
+      "Detector internals; retain housing and sensor envelope"
+    ],
+    "teconnectivity_conn_dsubminrtang_26pin__5748481-5": [
+      "Detector internals; retain housing and sensor envelope"
+    ],
+    "uccomp__fhcs_2-56x.25_316sst__fa316-204-sv": [
+      "Fasteners and small retention hardware"
+    ],
+    "uccomp__shcs_2-56x.18l_18-8sst_svent__c-203-sv": [
+      "Fasteners and small retention hardware"
+    ],
+    "uccomp__shcs_2-56x.38l_agpltvent__c206a": [
+      "Fasteners and small retention hardware"
+    ],
+    "uccomp__shcs_4-40x.625_svent_316sst__c316-410-sv": [
+      "Fasteners and small retention hardware"
+    ]
+  },
+  "omitted_placed_components": [
+    {
+      "name": "LIB-000027467",
+      "parent": "DSG-000110737",
+      "tolerance_mm": 5,
+      "translation_mm": [
+        -30.194,
+        51.896,
+        69.831
+      ]
+    },
+    {
+      "name": "ThorLabs__PostHolderUniv_.50Diax2.0L__UPH2",
+      "parent": "DSG-000102548",
+      "tolerance_mm": 5,
+      "translation_mm": [
+        -183.511,
+        152.934,
+        -102.513
+      ]
+    },
+    {
+      "name": "L-000001884",
+      "parent": "DSG-000102548",
+      "tolerance_mm": 5,
+      "translation_mm": [
+        -184.467,
+        154.786,
+        -4.986
+      ]
+    },
+    {
+      "name": "Thorlabs__PostHolderBase__BA2",
+      "parent": "DSG-000102548",
+      "tolerance_mm": 5,
+      "translation_mm": [
+        -194.079,
+        185.339,
+        -17.287
+      ]
+    }
+  ],
+  "omitted_under_assemblies": {
+    "DSG-000110737": [
+      "DSG-000111515",
+      "DSG-000111522"
+    ]
+  },
+  "schema": "twin-lab-static-review/v1",
+  "source_sha256": "d73a0befee4acdf4152138343e83dfc643670608e74aab5132f34ab70b11dad2",
+  "translucent_assemblies": [
+    "DSG-000043161"
+  ],
+  "translucent_components": [
+    "LCL5005-009564",
+    "LCL5005-009567",
+    "LCL5005-009565",
+    "LCL5010-010063",
+    "DSG-000053596",
+    "LCL5005-009569",
+    "DSG-000052395",
+    "DSG-000042977",
+    "DSG-000042978",
+    "DSG-000042981",
+    "DSG-000042982"
+  ]
+}

@@ -1,0 +1,412 @@
+schema: slac-stage-inventory/v1
+source_step: cad/revisions/dsg-000043841-d73a0befee4acdf4152138343e83dfc643670608e74aab5132f34ab70b11dad2/source.stp
+cad_manifest: cad/revisions/dsg-000043841-d73a0befee4acdf4152138343e83dfc643670608e74aab5132f34ab70b11dad2/manifest.json
+selection_review: cad/revisions/dsg-000043841-d73a0befee4acdf4152138343e83dfc643670608e74aab5132f34ab70b11dad2/static-review.json
+stage_catalog: config/stage-catalog.yaml
+revision_review:
+  predecessor_step_sha256: 948f9e9f88204dd7a830cc5660375761bfe9807de72a8d18f8ac879abc2e86c8
+  approval_source: interactive_user_confirmation
+  approved_adapter_role_transfers:
+    - {previous: DSG-000041329, current: DSG-000112665, moving_stage: A210}
+    - {previous: DSG-000034586, current: DSG-000112666, moving_stage: A211}
+    - {previous: DSG-000042294, current: DSG-000113027, moving_stage: A212}
+  camera_stage_motion: fixed_for_baseline_comparison
+  fixed_camera_stages: [A049, A050]
+  fixed_camera_stage_parts: [P645, P646, P647, P648]
+  removed_camera_envelope: LIB-000000728-envelope
+  inherited_motion_dof_count: 31
+subassembly:
+  ref: A203
+  name: DSG-000043841
+  occurrence_count: 513
+  assembly_count: 33
+  leaf_part_count: 480
+
+# World-fixed geometry outside the focused stage-stack subtree. Keep these as
+# separate named groups so they can become independently reviewed collision
+# groups later. Fasteners are omitted by default.
+# A004 (jet stage stack) and A008 (long jet) used to sit here. They are a driven
+# three-axis chain now, so their parts arrive through motion_chains and
+# attachment_overrides instead.
+static_geometry:
+  - {ref: A202, name: Enclosure assembly, cad_id: DSG-000043161, rgba: [0.95, 0.78, 0.12, 0.28]}
+  - {ref: A194, name: Camera assembly 1, cad_id: DSG-000042902}
+  - {ref: A193, name: Camera assembly 2, cad_id: DSG-000042902}
+  - {ref: P3089, name: Shield cone, cad_id: REF-000226146, rgba: [0.20, 0.65, 0.95, 0.35]}
+  - {ref: A045, name: Chamber, cad_id: DSG-000044253}
+  - {ref: P2035, name: 8020 base rail, cad_id: DSG-000048647}
+  - {ref: P2036, name: 8020 base support, cad_id: DSG-000105928}
+  - {ref: P2037, name: Breadboard, cad_id: Thorlabs__Breadboard_18x36x.50_AlAly__MB1836}
+  - {ref: A236, name: 8020 support frame, cad_id: DSG-000110674}
+
+# Semantic colors are assembly-review data: catalog stages are colored by model,
+# while attached geometry is split into separately colored rigid meshes.
+visual_styles:
+  stage_models:
+    thorlabs_lx10: [0.20, 0.58, 0.68, 1.0]
+    micronix_vt_50l_c0014: [0.55, 0.24, 0.22, 1.0]
+    kohzu_sa04b_rt02_bm: [0.95, 0.58, 0.16, 1.0]
+    kohzu_sa04b_rt02_r_bm: [0.96, 0.72, 0.20, 1.0]
+    kohzu_ra04a_w01: [0.56, 0.35, 0.78, 1.0]
+    kohzu_sxa0530_r01_bm: [0.18, 0.48, 0.82, 1.0]
+    kohzu_sxa0750_r01_bm: [0.12, 0.34, 0.68, 1.0]
+    kohzu_sxa0750_r01_r_bm: [0.28, 0.58, 0.88, 1.0]
+    kohzu_ya04a_r102_nnr_bm: [0.24, 0.68, 0.38, 1.0]
+    kohzu_ya04a_r102_rrn_bm: [0.34, 0.78, 0.52, 1.0]
+    kohzu_za05a_w101_bm: [0.82, 0.34, 0.48, 1.0]
+    kohzu_xa05a_l202_r: [0.16, 0.52, 0.44, 1.0]
+    kohzu_xa05a_r202: [0.32, 0.74, 0.62, 1.0]
+    lj_detector_vertical: [0.20, 0.62, 0.72, 1.0]
+    lj_camera_xy: [0.88, 0.48, 0.18, 1.0]
+  attachment_groups:
+    adapter:
+      rgba: [0.92, 0.42, 0.10, 1.0]
+      refs: [P2468, P2536, P2538, P2652, P2653,
+             P2492, P2463, P2462, P2533, P2530, P2527,
+             P2635, P2616, P2606,
+             P2670, P2727, P2798, P2671, P2726, P2799]
+    crystal_and_holder:
+      rgba: [0.78, 0.22, 0.82, 1.0]
+      refs: [P2515, P2518, P2519, P2514,
+             P2521, P2522, P2523, P2537,
+             P2587, P2588, P2589, P2648]
+    polycap_and_holder:
+      rgba: [0.05, 0.78, 0.76, 1.0]
+      refs: [P2664, P2665, P2679, P2700, P2706,
+             P2731, P2732, P2735, P2736, P2737,
+             P2792, P2793, P2815, P2817, P2828]
+    detector_adapter:
+      # RE-REVIEW: the true 41969 adapter ref is unresolved after the Sep 2026 CAD
+      # refresh (see attachment_overrides.moving.A206 comment); this now colors the
+      # two Newport locating pegs that used to share this group instead.
+      rgba: [0.92, 0.42, 0.10, 1.0]
+      refs: [P2404, P2407]
+    detector:
+      rgba: [0.18, 0.72, 0.62, 1.0]
+      refs: [P2398]
+    jet_stage_mount:
+      rgba: [0.58, 0.60, 0.64, 1.0]
+      refs: [P035, P011, P028, P030, P032, P034, P049, P051, P053]
+    jet_adapter:
+      rgba: [0.92, 0.42, 0.10, 1.0]
+      refs: [P009, P038, P040, P042, P044, P046, P055]
+    long_jet:
+      rgba: [0.10, 0.58, 0.95, 1.0]
+      refs: [P064, P065, P066, P067, P068, P070,
+             P071, P072, P073, P074, P075, P076, P077, P078, P079, P080,
+             P081, P082, P083, P084, P085, P086, P087, P091, P094, P095]
+
+# Occurrence refs belong to this STEP revision. Catalog IDs remain reusable.
+stage_instances:
+  - {ref: A206, library_id: LIB-000032416, catalog: micronix_vt_50l_c0014}
+  - {ref: A207, library_id: LIB-000032872, catalog: thorlabs_lx10}
+  - {ref: A208, library_id: LIB-000032872, catalog: thorlabs_lx10}
+  - {ref: A210, library_id: LIB-000008869, catalog: kohzu_sxa0530_r01_bm}
+  - {ref: A211, library_id: LIB-000008990, catalog: kohzu_sxa0750_r01_bm}
+  - {ref: A212, library_id: LIB-000009442, catalog: kohzu_sa04b_rt02_r_bm}
+  - {ref: A213, library_id: LIB-000007914, catalog: kohzu_ra04a_w01}
+
+  - {ref: A215, library_id: LIB-000007911, catalog: kohzu_sa04b_rt02_bm}
+  - {ref: A216, library_id: LIB-000007914, catalog: kohzu_ra04a_w01}
+  - {ref: A217, library_id: LIB-000008869, catalog: kohzu_sxa0530_r01_bm}
+  - {ref: A218, library_id: LIB-000011082, catalog: kohzu_sxa0750_r01_r_bm}
+
+  - {ref: A220, library_id: LIB-000009442, catalog: kohzu_sa04b_rt02_r_bm}
+  - {ref: A221, library_id: LIB-000007914, catalog: kohzu_ra04a_w01}
+  - {ref: A222, library_id: LIB-000008869, catalog: kohzu_sxa0530_r01_bm}
+  - {ref: A223, library_id: LIB-000008990, catalog: kohzu_sxa0750_r01_bm}
+
+  - {ref: A226, library_id: LIB-000007591, catalog: kohzu_ya04a_r102_nnr_bm}
+  - {ref: A227, library_id: LIB-000032469, catalog: kohzu_za05a_w101_bm}
+  - {ref: A229, library_id: LIB-000007591, catalog: kohzu_ya04a_r102_nnr_bm}
+  - {ref: A231, library_id: LIB-000032469, catalog: kohzu_za05a_w101_bm}
+  - {ref: A233, library_id: LIB-000032469, catalog: kohzu_za05a_w101_bm}
+  - {ref: A235, library_id: LIB-000032455, catalog: kohzu_ya04a_r102_rrn_bm}
+
+  # Long-jet stack, DSG-000007948, outside the 43841 subassembly and grounded through
+  # the DSG-000024758 jet stage mounting plate on the breadboard.
+  - {ref: A007, library_id: LIB-000009189, catalog: kohzu_xa05a_l202_r}
+  - {ref: A006, library_id: LIB-000032478, catalog: kohzu_xa05a_r202}
+  - {ref: A005, library_id: LIB-000032469, catalog: kohzu_za05a_w101_bm}
+
+  - {ref: A024, library_id: LIB-000032451, catalog: lj_detector_vertical}
+  - {ref: A026, library_id: LIB-000032478, catalog: kohzu_xa05a_r202}
+  - {ref: A030, library_id: LIB-000032451, catalog: lj_detector_vertical}
+  - {ref: A032, library_id: LIB-000032478, catalog: kohzu_xa05a_r202}
+  - {ref: A043, library_id: LIB-000013709, catalog: lj_camera_xy}
+
+# Reviewed base-to-payload order for the detector and three crystal stacks.
+motion_chains:
+  # CAD-inferred base-to-payload order; confirm joint directions before hardware use.
+  Detector: [A208, A206, A207]
+  North Crystal: [A218, A217, A216, A215]
+  Middle Crystal: [A211, A210, A213, A212]
+  South Crystal: [A223, A222, A221, A220]
+  # Base to payload: 50 mm linear, 15 mm transverse, 8 mm lift, then the adapter and
+  # the long jet. Travel directions come from the stage frames, not from the assembly
+  # axes: A007 drives along DSG-000102548 Y (the jet's own axis), A006 along X, A005
+  # along Z. Each stage's own rail confirms it - A006 has only 5 mm of clearance in Y
+  # and needs 15 mm, so it cannot be the Y axis.
+  Long Jet: [A007, A006, A005]
+  LJ Detector 1: [A024, A026]
+  LJ Detector 2: [A030, A032]
+
+compound_motion_chains:
+  North Polycap:
+    - {key: A233:z, stage_ref: A233, fixed_role: fixed, moving_role: moving, name: z, axis_local: [0, 0, 1], limits: [-0.004, 0.004], cad_position: -0.003105455}
+    - {key: A235:y, stage_ref: A235, fixed_role: fixed, moving_role: y, name: y, axis_local: [1, 0, 0], limits: [-0.005, 0.005]}
+    - {key: A235:x, stage_ref: A235, moving_role: x, name: x, axis_local: [0, 1, 0], limits: [-0.005, 0.005]}
+  Middle Polycap:
+    - {key: A231:z, stage_ref: A231, fixed_role: fixed, moving_role: moving, name: z, axis_local: [0, 0, 1], limits: [-0.004, 0.004], cad_position: -0.003105455}
+    - {key: A229:y, stage_ref: A229, fixed_role: fixed, moving_role: y, name: y, axis_local: [1, 0, 0], limits: [-0.005, 0.005]}
+    - {key: A229:x, stage_ref: A229, moving_role: x, name: x, axis_local: [0, 1, 0], limits: [-0.005, 0.005]}
+  South Polycap:
+    - {key: A227:z, stage_ref: A227, fixed_role: fixed, moving_role: moving, name: z, axis_local: [0, 0, 1], limits: [-0.004, 0.004], cad_position: -0.003105455}
+    - {key: A226:y, stage_ref: A226, fixed_role: fixed, moving_role: y, name: y, axis_local: [1, 0, 0], limits: [-0.005, 0.005]}
+    - {key: A226:x, stage_ref: A226, moving_role: x, name: x, axis_local: [0, 1, 0], limits: [-0.005, 0.005]}
+# Line-of-sight beams: out of each collimating optic, off its Bragg crystal face,
+# stopping at the first part met. `ignore` lets a beam leave its own mount; `expected`
+# marks the parts it is meant to land on, so stopping there is not an obstruction.
+# Refs remapped to the 2026-09-24 STEP.
+#
+# The crystal itself is not separately identifiable in this CAD. Each `crystal.ref`
+# is the holder, whose topmost face normal to local +z is the lip the crystal seats
+# in; that lip's proud face is flush with the crystal surface (reviewed 2026-09-27),
+# so it is the diffracting plane with no normal offset applied. The face reads as a
+# 28 mm circle; its normal comes from the part transform, not the tessellation, so
+# mesh deflection does not enter the reflected angle.
+beam_paths:
+  - name: South
+    diameter_mm: 20.0
+    subdivisions: 1
+    source:
+      ref: P2664                                   # REF-000221282 collimating optic
+      mesh: attached_A224_polycap_and_holder.obj
+      ignore: [P2665, P2679, P2700, P2706]         # optic body, KM and its adapters
+    crystal:
+      ref: P2587                                   # DSG-000042292 Bragg xtal holder clip
+      mesh: attached_A218_crystal_and_holder.obj
+      ignore: [P2589, P2648]                       # 42294 adapter and 27467 holder
+    expected: [P2588, P2398]                       # South annular PIPS diode, EPIX 100P
+  - name: Middle
+    diameter_mm: 20.0
+    subdivisions: 1
+    source:
+      ref: P2731                                   # REF-000221282 collimating optic
+      mesh: attached_A227_polycap_and_holder.obj
+      ignore: [P2732, P2735, P2736, P2737]         # optic body, KM and its adapters
+    crystal:
+      ref: P2518                                   # DSG-000041271 Bragg xtal holder clip
+      mesh: attached_A210_crystal_and_holder.obj
+      ignore: [P2519, P2514]
+    expected: [P2515, P2398]                       # Middle annular PIPS diode, EPIX 100P
+  - name: North
+    diameter_mm: 20.0
+    subdivisions: 1
+    source:
+      ref: P2792                                   # REF-000221282 collimating optic
+      mesh: attached_A233_polycap_and_holder.obj
+      ignore: [P2793, P2815, P2817, P2828]         # optic body, KM and its adapters
+    crystal:
+      ref: P2521                                   # DSG-000041271 Bragg xtal holder clip
+      mesh: attached_A213_crystal_and_holder.obj
+      ignore: [P2522, P2537]                       # 42294 adapter and 27467 holder
+    expected: [P2523, P2398]                       # North annular PIPS diode, EPIX 100P
+
+# Editable logical operating limits and home positions. Angular values here are
+# degrees; A216/A221 use the assembly's 180-degree mounting orientation as home.
+joint_limit_overrides:
+  A206: {unit: meter, limits: [-0.400, 0.0], home: 0.0}  # EPIX CAD pose is upper endpoint
+  # The jet lift is assembled fully down, so its 8 mm travel runs one way from the CAD
+  # pose. Home is the bottom of that travel, which is the CAD pose itself.
+  A005: {unit: meter, limits: [0.0, 0.008], home: 0.0, cad_position: 0.0}
+  A212: {unit: degree, limits: [-10, 10]}
+  A213: {unit: degree, limits: [125, 185], home: 155}
+  A215: {unit: degree, limits: [-10, 10]}
+  A216: {unit: degree, limits: [150, 210], home: 180}
+  A220: {unit: degree, limits: [-10, 10]}
+  A221: {unit: degree, limits: [150, 210], home: 180}
+
+# Human-reviewed exceptions always override automatic proximity grouping.
+hidden_occurrences:
+  - P2375  # REF-000168820 beam path
+  - P2376  # REF-000168820 beam path
+  - P2377  # REF-000168820 beam path
+  - P495   # floating alternate camera-stack mounting plate
+  - P496   # floating alternate camera-stack mounting plate
+  - P497   # floating alternate camera-stack mounting plate
+
+hidden_stage_geometry:
+  - A043   # surrogate frame only; the exported camera X stage has zero faces
+
+# Flexible LJ chamber boots remain visible but are not rigid collision geometry.
+collision_excluded_parts: [P517, P530]  # LIB-000017334
+
+supplemental_attachments:
+  - parent_stage_ref: A005
+    mesh: cad/DSG-000040389/supplements/lcl5009-010086.obj
+    name: LCL5009-010086
+    part_count: 2
+    style: long_jet
+    rgba: [0.10, 0.58, 0.95, 1.0]
+
+# Per-part convex-decomposition overrides. Drake replaces each collision mesh with its
+# convex hulls, so a hollow shell split into too few hulls fills its own cavity and
+# reports contact that cannot happen. The enclosure shell walls need a tighter CoACD
+# threshold and more hulls so the hulls hug the walls instead of spanning the interior.
+decomposition:
+  overrides:
+    - refs: [P636, P637, P638, P639, P640, P641, P642, P644]
+      threshold: 0.01
+      max_hulls: 64
+      reason: hollow enclosure shell walls; coarse hulls span the cavity and touch the polycap optics
+
+# Part pairs that clearance reports should not flag. Drake already filters bodies
+# joined by a joint and bodies welded into one subgraph, so this is only for parts
+# that touch by design across otherwise independent bodies. Populate from a review
+# of the home-pose report; every entry needs a reason.
+# Baselined from the home-pose report: the reviewed CAD home is an assembled state,
+# so contact there is pre-existing, not an interference produced by motion. Depths
+# are 0.5-2.7 mm. NOT yet individually validated as by-design; re-review if a stack
+# is re-modelled.
+ignored_pairs:
+  - pair: [A043, P652]
+    reason: camera bracket DSG-000001429 mounted to the A043 rotary-stage assembly
+  - pair: [A043, P649]
+    reason: camera mount mo39131788 mounted to the A043 rotary-stage assembly
+  - pair: [P519, P652]
+    reason: chamber support DSG-000001328 and camera bracket DSG-000001429 are mounted together by design
+  - pair: [P352, P261]
+    reason: fixed detector-tower support extension P352 mounts directly to the A024 stack component P261
+  - pair: [P333, P254]
+    reason: fixed detector-tower base plate P333 is mounted to the A024 lifting-stage bracket P254
+  - pair: [P333, P255]
+    reason: fixed detector-tower base plate P333 is mounted to the A024 lifting-stage bracket P255
+  - pair: [P235, P303]
+    reason: fixed detector-tower base plate P235 is mounted to the A030 lifting-stage bracket P303
+  - pair: [P235, P304]
+    reason: fixed detector-tower base plate P235 is mounted to the A030 lifting-stage bracket P304
+  - pair: [P1100, P3089]
+    reason: touching at reviewed CAD home (-2.69 mm)
+  - pair: [P1057, P3089]
+    reason: touching at reviewed CAD home (-2.37 mm)
+  - pair: [P1099, P3089]
+    reason: touching at reviewed CAD home (-2.10 mm)
+  - pair: [P1063, P3089]
+    reason: touching at reviewed CAD home (-1.59 mm)
+  # RE-REVIEW: P064 is no longer static. It rides the long-jet lift now, so this pair can
+  # move into real interference and this entry would hide it.
+  - pair: [P064, P1098]
+    reason: touching at reviewed CAD home (-1.15 mm)
+  # Validated against the exact tessellated meshes rather than the hulls: the bracket sits
+  # flush on the adapter with a 0.000 mm gap and no vertex inside the other part, and the
+  # reported depth matches the two parts' measured hull inflation (0.95 + 0.40 mm). A CoACD
+  # threshold/max_hulls sweep was run and did not reduce it.
+  - pair: [P768, P793]
+    reason: 4556T43 cable-carrier bracket flush on the 41969 detector adapter at home (-1.34 mm of hull inflation, true gap 0.000 mm)
+
+# The two detector towers are separately grounded, but their assembled home geometry
+# overlaps at these interfaces. Keep them clear in the home display while retaining
+# collision checks as soon as either tower moves.
+home_ignored_pairs:
+  - pair: [P270, P310]
+    reason: adjacent LJ detector tower mounts are assembled 2.21 mm apart at home
+  - pair: [P333, P261]
+    reason: adjacent LJ detector tower base and mount are assembled together at home
+
+attachment_overrides:
+  fixed:
+    - P654   # DSG-000001433 base bracket below the rotary carriage
+    - P645
+    - P646
+    - P647
+    - P648
+    - P649
+    - P652
+    - P653
+    - P659
+    - P664
+    - P670
+    - P2468   # DSG-000041331; Middle Crystal base mount
+    - P2536   # DSG-000043036; North Crystal base mount
+    - P2538   # DSG-000041169; North Crystal base support
+    - P2652  # DSG-000043037; South Crystal base mount
+    - P2653  # DSG-000041293; South Crystal base support
+    - P2670  # DSG-000046522; South Polycap angled Z-stage bracket fixed to breadboard
+    - P2727  # DSG-000046528; Middle Polycap angled Z-stage bracket fixed to breadboard
+    - P2738  # LIB-000004373; Middle Polycap base fastener
+    - P2739  # LIB-000004373; Middle Polycap base fastener
+    - P2740  # LIB-000004373; Middle Polycap base fastener
+    - P2741  # LIB-000004373; Middle Polycap base fastener
+    - P2798  # DSG-000046530; North Polycap angled Z-stage bracket fixed to breadboard
+    - P035   # DSG-000024758-EXT; jet stage mounting plate, bolted to the breadboard
+    - P011   # Thorlabs RS1P; jet stage mounting-plate pedestal
+    - P028   # Thorlabs RS1P; jet stage mounting-plate pedestal
+    - P030   # Thorlabs RS1P; jet stage mounting-plate pedestal
+    - P032   # Thorlabs RS1P; jet stage mounting-plate pedestal
+    - P034   # Thorlabs RS1P; jet stage mounting-plate pedestal
+    - P049   # Thorlabs RS1P; jet stage mounting-plate pedestal
+    - P051   # Thorlabs RS1P; jet stage mounting-plate pedestal
+    - P053   # Thorlabs RS1P; jet stage mounting-plate pedestal
+    - P235   # detector tower base plate
+    - P284   # detector tower support
+    - P285   # detector tower support extension
+    - P286   # detector tower support foot
+    - P333   # detector tower base plate
+    - P334   # detector tower support
+    - P343   # detector tower mounting bracket
+    - P348   # detector tower support extension
+    - P349   # detector tower support foot
+    - P350   # detector tower support extension
+    - P351   # detector tower support foot
+    - P352   # detector tower support extension
+    - P353   # detector tower support foot
+  moving:
+    # RE-REVIEW: refs stale after the Sep 2026 CAD refresh (see git history of this file).
+    # EPIX 100P detector (P2398) and both Newport locating pegs (P2404, P2407) are
+    # confirmed by name against the current manifest. The old "41969 adapter" (DSG-000041969)
+    # no longer exists under A206 in this revision - candidates DSG-000112058/59/61 sit in
+    # the same subtree but none is confirmed, so it is deliberately left out rather than
+    # guessed; it currently falls through to the default attached_refs walk instead.
+    A208: [P2413]        # lower LX10 carriage carries the long detector-stage bracket
+    A206: [P2416]        # VT-50L carriage to upper LX10 base
+    A207: [P2398, P2399, P2404, P2407]  # EPIX 100P detector and locating pegs
+    A211: [P2492]
+    A210: [P2463]
+    A213: [P2462]       # DSG-000028455: rotation carriage to tilt base
+    # Tip/tilt carries the whole optical payload: bracket, KM, holder, Bragg crystal, diode.
+    A212: [P2518, P2519, P2514, P2515]
+    A218: [P2533]       # DSG-000044973: first linear carriage to second linear base
+    A217: [P2530]       # DSG-000041276: second linear carriage to rotation base
+    A216: [P2527]       # DSG-000028455: rotation carriage to tilt base
+    A215: [P2521, P2522, P2537, P2523]
+    A223: [P2635]       # DSG-000035628: first linear carriage to second linear base
+    A222: [P2616]       # DSG-000041276: second linear carriage to rotation base
+    A221: [P2606]       # DSG-000028455: rotation carriage to tilt base
+    A220: [P2587, P2589, P2648, P2588]
+    A227: [P2671]         # DSG-000046523: ZA carriage to 7591 fixed base, South Polycap
+    # Each polycap chain ends at the collimating optic, carrying the retained
+    # stage-side and optic-side kinematic mounts with it.
+    A226: [P2700, P2706, P2679, P2664, P2665]
+    A231: [P2726]         # DSG-000046527: ZA carriage to 7591 fixed base, Middle Polycap
+    A229: [P2735, P2737, P2736, P2731, P2732]
+    A233: [P2799]         # DSG-000046523: ZA carriage to 7591 fixed base, North Polycap
+    A235: [P2817, P2828, P2815, P2792, P2793]
+    # The recovered LCL5009-010086 mesh rides the ZA05A lift through
+    # supplemental_attachments; the flat DSG-000022427 cartridge is excluded.
+    A005: [P009, P038, P040, P042, P044, P046, P055]
+
+reviewed_connections:
+  - [P815, P793, P792]  # VT-50L carriage to 41969 adapter and EPIX 100P
+  - [P840, P769]   # 41331 rigidly attached to fixed 43035
+  - [P861, P839, P837]  # 34586: 191475 to SXA0530 base
+  - [P835, P836, P844]  # 41329: 225448 to 220756
+  - [P834, P845, P843]  # 28455: 220755 to SA04B-RT02-R-BM base
+  - [P887, P841, P886]  # 42294: 197604 to 27647
+  - [P1046, P1026, P1022]  # ZA carriage to 46523 adapter and 7591 base, South
+  - [P1026, P1029, P1024, P1025]  # 40767: 7591 carriage to polycap, South
+  - [P1064, P1014, P1015]  # 46528 fixed to 43737/43743, Middle Polycap
+  - [P1066, P1058, P1060]  # ZA carriage to 46527 adapter and 7591 base, Middle
+  - [P1062, P1067, P1068, P1069]  # 40909 equivalent, Middle Polycap
+  - [P1097, P1105, P1102]  # ZA carriage to 46523 adapter and A070 fixed plate, North
+  - [P1105, P1106, P1103, P1104]  # 40767: A070 X carrier to polycap, North
