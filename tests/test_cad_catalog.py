@@ -256,3 +256,26 @@ def test_viewer_launches_catalog_revision_without_inventory_discovery(tmp_path, 
     collision_viewer.main()
     assert received["package"] == tmp_path / "package"
     assert received["port"] == 7002
+
+
+def test_catalog_exposes_complete_simulation_identity_and_saved_dofs(tmp_path):
+    from twin_lab.cad_catalog import register_bundle
+    from twin_lab.collision_artifacts import capture_bundle, write_reference
+
+    root = tmp_path / "repo"
+    inventory, package, scene, decomposition = _runtime_source(root / "author")
+    reference = capture_bundle(
+        inventory, package, scene, decomposition, tmp_path / "bundle.tar.gz",
+    )
+    selected = tmp_path / "reference.json"
+    write_reference(selected, reference)
+    record = register_bundle(
+        inventory, selected, root=root, assembly="assembly", store=tmp_path / "store",
+    )
+    simulation = record["bundles"][0]["simulation"]
+    assert simulation["snapshot_status"] == "complete"
+    assert simulation["source_step_sha256"] == record["step"]["sha256"]
+    assert simulation["stage_catalog_sha256"] == reference["inputs"]["files"]["stage_catalog"]
+    assert simulation["bundle_id"] == reference["bundle_id"]
+    assert simulation["dof_count"] == 0
+    assert len(simulation["simulation_id"]) == 64

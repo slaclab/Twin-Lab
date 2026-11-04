@@ -101,7 +101,7 @@ def ingest_step(
 
 
 def read_revision(revision: str, *, root: Path = REPOSITORY_ROOT) -> dict[str, Any]:
-    from .collision_artifacts import _lfs_oid
+    from .collision_artifacts import _lfs_oid, simulation_identity
 
     directory = _directory(revision, root)
     revision = directory.name
@@ -123,6 +123,12 @@ def read_revision(revision: str, *, root: Path = REPOSITORY_ROOT) -> dict[str, A
             record["step"]["sha256"]
         ) or reference.get("bundle_id") != binding["bundle_id"]:
             raise ValueError("Catalog bundle reference does not match its STEP binding")
+        if "simulation" in binding:
+            expected = simulation_identity(reference)
+            if any(binding["simulation"].get(key) != value for key, value in expected.items()):
+                raise ValueError(
+                    "Catalog simulation does not match its STEP/catalog/cache identity"
+                )
         binding["catalog_path"] = path.relative_to(root).as_posix()
         bundles.append(binding)
     return {
@@ -164,7 +170,13 @@ def register_bundle(
     """Verify a bundle and persist an explicit, hash-bound STEP/cache relationship."""
     import yaml
 
-    from .collision_artifacts import resolve_runtime, write_reference
+    from .collision_artifacts import (
+        RUNTIME_SCHEMA,
+        resolve_runtime,
+        simulation_identity,
+        validate_simulation_snapshot,
+        write_reference,
+    )
 
     data = yaml.safe_load(inventory.read_text(encoding="utf-8"))
     descriptor = json.loads(reference.read_text(encoding="utf-8"))
@@ -173,7 +185,17 @@ def register_bundle(
         "subassembly", {}
     ).get("name") or inventory.name.removesuffix(".inventory.yaml")
     step = resolve_repo_path(data["source_step"], relative_to=inventory.parent)
-    resolve_runtime(inventory, reference=reference, store=store)
+    runtime_root = resolve_runtime(inventory, reference=reference, store=store)
+    runtime = json.loads((runtime_root / "runtime.json").read_text(encoding="utf-8"))
+    simulation = simulation_identity(descriptor)
+    simulation["snapshot_status"] = "legacy_compiled_only"
+    if runtime["schema"] == RUNTIME_SCHEMA:
+        snapshot = validate_simulation_snapshot(runtime_root)
+        simulation.update(
+            snapshot_status="complete", dof_count=snapshot["dof_count"],
+            snapshot_path="review/simulation.json", stage_catalog_path="review/stage-catalog.yaml",
+            step_path="cad/source.stp",
+        )
     record = ingest_step(
         step, selected_assembly, root=root, parent=parent,
         name=name or embedded.get("assembly_name"), existing=not bool(embedded),
@@ -190,7 +212,11 @@ def register_bundle(
             raise ValueError("An existing bundle ID cannot be rebound to another archive")
         if binding["reference"] != descriptor:
             binding["reference"] = descriptor
+            binding["simulation"] = simulation
             binding["updated_at"] = _now()
+            write_reference(destination, binding)
+        elif binding.get("simulation") != simulation:
+            binding["simulation"] = simulation
             write_reference(destination, binding)
         return read_revision(record["revision_id"], root=root)
     binding = {
@@ -198,6 +224,7 @@ def register_bundle(
         "bundle_id": descriptor["bundle_id"], "step_sha256": record["step"]["sha256"],
         "bound_at": _now(), "collision_mode": descriptor["inputs"]["collision_mode"],
         "reference": descriptor,
+        "simulation": simulation,
     }
     write_reference(destination, binding)
     return read_revision(record["revision_id"], root=root)

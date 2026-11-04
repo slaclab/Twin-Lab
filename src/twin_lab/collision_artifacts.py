@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import hashlib
 import json
 import os
 import shutil
@@ -24,7 +26,9 @@ from .paths import (
     review_artifact_stem,
 )
 
-RUNTIME_SCHEMA = "twin-lab-collision-runtime/v1"
+RUNTIME_SCHEMA = "twin-lab-collision-runtime/v2"
+SUPPORTED_RUNTIME_SCHEMAS = {"twin-lab-collision-runtime/v1", RUNTIME_SCHEMA}
+SIMULATION_SCHEMA = "twin-lab-simulation-snapshot/v1"
 
 
 def _lfs_oid(path: Path) -> str | None:
@@ -64,9 +68,10 @@ def inventory_inputs(inventory: Path, collision_mode: str) -> dict[str, Any]:
 
 def validate_inputs(inventory: Path, reference: dict[str, Any]) -> None:
     recorded = reference.get("inputs", {})
-    if recorded.get("runtime") != RUNTIME_SCHEMA:
+    if recorded.get("runtime") not in SUPPORTED_RUNTIME_SCHEMAS:
         raise ValueError("Unsupported collision artifact runtime; build a compatible bundle")
     current = inventory_inputs(inventory, recorded["collision_mode"])
+    current["runtime"] = recorded["runtime"]
     if current != recorded:
         raise ValueError(
             "CAD or reviewed inventory differs from the pinned artifact. "
@@ -85,6 +90,82 @@ def _generator_versions() -> dict[str, str]:
     for name in ("stage_cad_viewer.py", "sdf_compiler.py", "convex_collision.py"):
         versions[name] = file_sha256(Path(__file__).with_name(name))
     return versions
+
+
+def _snapshot_simulation(
+    root: Path, inventory: Path, data: dict[str, Any], scene: dict[str, Any],
+    inputs: dict[str, Any],
+) -> None:
+    review = root / "review"
+    catalog = resolve_repo_path(data["stage_catalog"], relative_to=inventory.parent)
+    shutil.copyfile(catalog, review / "stage-catalog.yaml")
+    shutil.copyfile(inventory, review / "source.inventory.yaml")
+    stage_types = yaml.safe_load(catalog.read_text(encoding="utf-8"))["stages"]
+    for instance in data.get("stage_instances", []):
+        if instance["catalog"] not in stage_types:
+            raise ValueError(f"Stage {instance['ref']} has no definition in its saved catalog")
+    source = resolve_repo_path(data["source_step"], relative_to=inventory.parent)
+    if _lfs_oid(source) is not None:
+        raise ValueError("A complete bundle requires STEP contents; run git lfs pull first")
+    (root / "cad").mkdir()
+    shutil.copyfile(source, root / "cad" / "source.stp")
+    with (root / "package" / "joint_metadata.csv").open(encoding="utf-8") as stream:
+        compiled_joints = list(csv.DictReader(stream))
+    snapshot = {
+        "schema": SIMULATION_SCHEMA,
+        "assembly": data.get("subassembly", {}),
+        "source_step_sha256": inputs["files"]["source_step"],
+        "stage_catalog_sha256": inputs["files"]["stage_catalog"],
+        "inventory_sha256": inputs["files"]["inventory"],
+        "stage_instances": data.get("stage_instances", []),
+        "motion_chains": scene.get("motion_chains", []),
+        "reviewed_motion_chains": data.get("motion_chains", {}),
+        "compound_motion_chains": data.get("compound_motion_chains", {}),
+        "joint_limit_overrides": data.get("joint_limit_overrides", {}),
+        "compiled_joints": compiled_joints,
+        "dof_count": len(compiled_joints),
+    }
+    (review / "simulation.json").write_text(
+        json.dumps(snapshot, indent=2, sort_keys=True) + "\n", encoding="utf-8",
+    )
+
+
+def validate_simulation_snapshot(root: Path) -> dict[str, Any]:
+    review = root / "review"
+    snapshot = json.loads((review / "simulation.json").read_text(encoding="utf-8"))
+    if snapshot.get("schema") != SIMULATION_SCHEMA:
+        raise ValueError("Unsupported simulation snapshot schema")
+    for path, key in (
+        (root / "cad" / "source.stp", "source_step_sha256"),
+        (review / "stage-catalog.yaml", "stage_catalog_sha256"),
+        (review / "source.inventory.yaml", "inventory_sha256"),
+    ):
+        if file_sha256(path) != snapshot[key]:
+            raise ValueError(f"Simulation snapshot checksum mismatch: {path.name}")
+    with (root / "package" / "joint_metadata.csv").open(encoding="utf-8") as stream:
+        joints = list(csv.DictReader(stream))
+    if joints != snapshot["compiled_joints"] or len(joints) != snapshot["dof_count"]:
+        raise ValueError("Compiled DOFs do not match the saved simulation snapshot")
+    catalog = yaml.safe_load((review / "stage-catalog.yaml").read_text(encoding="utf-8"))
+    for instance in snapshot["stage_instances"]:
+        if instance["catalog"] not in catalog["stages"]:
+            raise ValueError("Simulation references an unknown stage catalog entry")
+    return snapshot
+
+
+def simulation_identity(reference: dict[str, Any]) -> dict[str, Any]:
+    files = reference["inputs"]["files"]
+    identity = {
+        "source_step_sha256": files["source_step"],
+        "stage_catalog_sha256": files["stage_catalog"],
+        "inventory_sha256": files["inventory"],
+        "bundle_id": reference["bundle_id"],
+    }
+    encoded = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return {
+        "schema": "twin-lab-simulation-identity/v1",
+        "simulation_id": hashlib.sha256(encoded).hexdigest(), **identity,
+    }
 
 
 def capture_bundle(
@@ -133,7 +214,10 @@ def capture_bundle(
             shutil.copy2(mesh, target)
         review = root / "review"
         review.mkdir()
-        bundled_inventory = {**data, "cad_manifest": "manifest.json"}
+        bundled_inventory = {
+            **data, "cad_manifest": "manifest.json", "stage_catalog": "stage-catalog.yaml",
+            "source_step": "../cad/source.stp",
+        }
         (review / "inventory.yaml").write_text(
             yaml.safe_dump(bundled_inventory, sort_keys=False), encoding="utf-8"
         )
@@ -141,6 +225,7 @@ def capture_bundle(
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         manifest.pop("source_step", None)
         (review / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        _snapshot_simulation(root, inventory, data, scene, inputs)
         if decomposition is not None and decomposition.is_dir():
             destination = root / "decomposition"
             for source_manifest in sorted(decomposition.rglob("manifest.json")):
@@ -186,6 +271,11 @@ def capture_bundle(
 
 
 def validate_runtime(root: Path) -> None:
+    runtime = json.loads((root / "runtime.json").read_text(encoding="utf-8"))
+    if runtime.get("schema") not in SUPPORTED_RUNTIME_SCHEMAS:
+        raise ValueError("Unsupported installed collision runtime")
+    if runtime["schema"] == RUNTIME_SCHEMA:
+        validate_simulation_snapshot(root)
     package = root / "package"
     models = [path for path in package.glob("*.sdf") if not path.stem.endswith("_matlab")]
     if len(models) != 1 or not (package / "joint_metadata.csv").is_file():
@@ -242,7 +332,7 @@ def resolve_runtime(
     validate_inputs(inventory, descriptor)
     root = install_bundle(descriptor, store or CACHE_ROOT / "artifacts", offline=offline)
     runtime = json.loads((root / "runtime.json").read_text(encoding="utf-8"))
-    if runtime.get("schema") != RUNTIME_SCHEMA:
+    if runtime.get("schema") not in SUPPORTED_RUNTIME_SCHEMAS:
         raise ValueError("Unsupported installed collision runtime")
     validate_runtime(root)
     return root

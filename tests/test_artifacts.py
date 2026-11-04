@@ -435,3 +435,35 @@ def test_explicit_build_compiles_portable_sdf_in_isolated_workspace(tmp_path, mo
     collision_artifacts.validate_runtime(installed)
     assert len(list((installed / "package").glob("*.sdf"))) == 2
     assert reference["inputs"]["collision_mode"] == "hull"
+
+
+def test_bundle_preserves_stage_catalog_and_assembly_links_across_checkouts(tmp_path):
+    from twin_lab.collision_artifacts import capture_bundle, inventory_inputs
+
+    inventory, package, scene, decomposition = _runtime_source(tmp_path / "author")
+    catalog = inventory.parent / "catalog.yaml"
+    catalog.write_text(yaml.safe_dump({
+        "stages": {"rotary": {"joint_type": "revolute", "limits": [-0.5, 0.5]}},
+    }), encoding="utf-8")
+    data = yaml.safe_load(inventory.read_text(encoding="utf-8"))
+    data["stage_instances"] = [{"ref": "A001", "catalog": "rotary"}]
+    data["subassembly"] = {"ref": "A100", "name": "reviewed-assembly"}
+    inventory.write_text(yaml.safe_dump(data), encoding="utf-8")
+    content = yaml.safe_load(scene.read_text(encoding="utf-8"))
+    content["source_fingerprints"] = inventory_inputs(inventory, "convex")["files"]
+    scene.write_text(yaml.safe_dump(content), encoding="utf-8")
+    descriptor = capture_bundle(
+        inventory, package, scene, decomposition, tmp_path / "bundle.tar.gz",
+    )
+    installed = install_bundle(descriptor, tmp_path / "store")
+    catalog.write_text("stages: {}\n", encoding="utf-8")
+    saved = yaml.safe_load((installed / "review" / "stage-catalog.yaml").read_text())
+    assert saved["stages"]["rotary"]["limits"] == [-0.5, 0.5]
+    simulation = json.loads((installed / "review" / "simulation.json").read_text())
+    assert simulation["assembly"]["name"] == "reviewed-assembly"
+    assert simulation["stage_instances"] == [{"ref": "A001", "catalog": "rotary"}]
+    assert simulation["stage_catalog_sha256"] == descriptor["inputs"]["files"]["stage_catalog"]
+    assert simulation["source_step_sha256"] == descriptor["inputs"]["files"]["source_step"]
+    assert (installed / "cad" / "source.stp").read_bytes() == (
+        inventory.parent / "source.stp"
+    ).read_bytes()

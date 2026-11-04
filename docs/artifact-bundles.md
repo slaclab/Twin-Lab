@@ -6,6 +6,37 @@ exact bundle. Commit that reference with its CAD review. Branch names are not
 cache keys: branches with identical references can use the same published bytes,
 and a new build never replaces the previous revision.
 
+## Complete Simulation Revisions
+
+A simulation is more than a STEP file or a directory of hulls. New v2 bundles
+contain the exact STEP bytes, stage catalog, reviewed source inventory, assembly
+to stage-instance mapping, resolved motion chains, home/limit overrides, compiled
+joint table, and generated SDF/meshes. The reviewed inventory is necessary because
+catalog entries describe reusable hardware while assembly-specific chains,
+directions, attachments, and home positions describe how that hardware is used.
+
+`review/simulation.json` links these components by SHA-256 and records the DOF
+count and full compiled joint definitions. Loading validates the saved STEP,
+catalog, source inventory, and joint table. The viewer restores DOFs from the
+saved compiled model; it does not infer them again from whatever catalog happens
+to be in the current branch. Drake still needs to load its plant and geometry.
+
+Each catalog bundle binding exposes a `simulation` object with a simulation ID
+that incorporates STEP, stage-catalog, reviewed-inventory, and bundle identities.
+It also lists saved metadata paths and the DOF count. One STEP can therefore have
+multiple explicitly distinguished reviewed simulations. A hash mismatch fails
+closed instead of silently adopting new stage definitions.
+
+Legacy v1 bundles remain readable as compiled-only snapshots. Enriching a legacy
+baseline uses a new archive and reference, not an in-place rewrite. The catalog
+marks new snapshots `complete` and older registrations `legacy_compiled_only`.
+If a CAD revision has several bundles, select the intended `--bundle ID` from
+catalog JSON; do not infer it from filesystem ordering or a "latest" filename.
+
+For reproducible execution, retain the framework commit and dependency lockfile
+as well. The data bundle isolates assembly state; Git and each worktree's own
+environment isolate the software that interprets it.
+
 ## Run a Published Review
 
 For a cataloged model, no file discovery is necessary:
@@ -77,6 +108,7 @@ certification: review the actual poses and contacts in the viewer.
 
 Each bundle contains:
 
+- The source STEP, exact stage catalog, and reviewed assembly/DOF snapshot (v2).
 - The collision-enabled SDF, joint metadata, and portable mesh package.
 - Saved tessellations, including the meshes used by beam and contact checks.
 - Active convex hulls and their source manifests, with bundle-relative paths.
@@ -209,6 +241,42 @@ For other object stores, upload the unchanged archive and set its HTTPS URL usin
 the build/capture `--url` option. Make the object immutable and accessible to the
 intended audience. A changed object fails checksum verification even if its URL
 is reused. Respect the storage provider's asset-size and retention limits.
+
+## Branch and Merge Workflow
+
+Do not use mutable branch names as simulation versions. Use tagged, verified
+baseline commits and immutable catalog/bundle identities. Keep `main` as the
+reviewed integration branch, not the workspace where replacement CAD is tried.
+
+1. Finish this framework feature branch, publish the complete baseline artifact,
+  and commit its matching catalog/reference metadata. Submit a PR to `main`.
+2. After tests and review, merge that framework PR once. Tag the integrated
+  baseline, for example `review/43841-baseline`; retain its release artifacts.
+3. Use a detached worktree at that tag for the old-CAD presentation. It needs no
+  long-lived `old-cad` development branch.
+4. Create `cad/43841-next` and a separate worktree from the same tagged framework
+  commit. Ingest and review the new CAD there, with an independent environment.
+5. Test both saved simulations offline and side by side. Only after design review
+  should a second PR integrate the new catalog revision. Retain the old CAD,
+  bundle binding, and presentation tag when merging the new revision.
+
+Example commands after the framework PR has been integrated and the baseline
+artifacts published:
+
+```bash
+git tag review/43841-baseline main
+git worktree add --detach ../Twin-Lab-review-old review/43841-baseline
+git worktree add -b cad/43841-next ../Twin-Lab-review-new review/43841-baseline
+code -n ../Twin-Lab-review-old
+code -n ../Twin-Lab-review-new
+```
+
+Run the normal environment setup in each worktree, then fetch/verify its selected
+bundle. Worktrees do not copy ignored virtual environments or installed caches.
+No branch switch or writable shared cache is needed during a live presentation.
+Keep both reviews on a compatible framework baseline when comparing CAD; make
+framework changes on a separate feature branch rather than conflating them with
+geometry changes. Do not move an existing presentation tag to a newer commit.
 
 ## Compare Two Revisions
 
