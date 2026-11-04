@@ -30,5 +30,5 @@
   },
   "schema": "twin-lab-artifact-reference/v1",
   "sha256": "e64e4683e5a56a3df79e86280a05f7ba70b73118c1158c365605e90cb8792e9e",
-  "url": "file:///home/koashen/src/Twin-Lab/exports/artifacts/43841-complete-baseline.tar.gz"
+  "url": "https://github.com/slaclab/Twin-Lab/releases/download/geometry-43841-baseline/43841-complete-baseline.tar.gz"
 }

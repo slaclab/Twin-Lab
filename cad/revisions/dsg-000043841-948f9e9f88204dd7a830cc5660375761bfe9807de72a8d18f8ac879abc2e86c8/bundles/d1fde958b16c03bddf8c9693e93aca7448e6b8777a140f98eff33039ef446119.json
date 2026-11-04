@@ -34,8 +34,18 @@
     },
     "schema": "twin-lab-artifact-reference/v1",
     "sha256": "3f55c2ad040bddaee115ababd634bb75d55f6f4153b184a102609195a1a876a7",
-    "url": "file:///home/koashen/src/Twin-Lab/exports/artifacts/43841-baseline.tar.gz"
+    "url": "https://github.com/slaclab/Twin-Lab/releases/download/geometry-43841-baseline/43841-baseline.tar.gz"
   },
   "schema": "twin-lab-cad-bundle-binding/v1",
-  "step_sha256": "948f9e9f88204dd7a830cc5660375761bfe9807de72a8d18f8ac879abc2e86c8"
+  "simulation": {
+    "bundle_id": "d1fde958b16c03bddf8c9693e93aca7448e6b8777a140f98eff33039ef446119",
+    "inventory_sha256": "6548edf22e1ff7831a64c35e1f23bf0de286029cf97af750d73a2d5cdf15e6de",
+    "schema": "twin-lab-simulation-identity/v1",
+    "simulation_id": "6589e1a43cd1c5e02e406fc0af3f0a86d8da7e3661e7dde247d400712abd3a16",
+    "snapshot_status": "legacy_compiled_only",
+    "source_step_sha256": "948f9e9f88204dd7a830cc5660375761bfe9807de72a8d18f8ac879abc2e86c8",
+    "stage_catalog_sha256": "4a2ca9cf5d30f745182a726d8992e56f38bca93c026978311718b7ebe580c641"
+  },
+  "step_sha256": "948f9e9f88204dd7a830cc5660375761bfe9807de72a8d18f8ac879abc2e86c8",
+  "updated_at": "2026-11-04T07:16:02.322046Z"
 }
