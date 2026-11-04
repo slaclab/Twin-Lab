@@ -1,0 +1,75 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Meeting: verify offline baseline",
+      "type": "process",
+      "command": "${workspaceFolder}/../Twin-Lab-review-old/.venv/bin/python",
+      "args": [
+        "-m", "twin_lab.cad_catalog", "verify",
+        "dsg-000043841-948f9e9f8820",
+        "--bundle", "4a977e1d80898540f6801b04c2fb7f3479a528b541a5ce2eea359b1e87d22989",
+        "--offline"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/../Twin-Lab-review-old"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Meeting: start verified baseline",
+      "type": "process",
+      "command": "${workspaceFolder}/../Twin-Lab-review-old/.venv/bin/python",
+      "args": [
+        "-m", "twin_lab.collision_viewer",
+        "--revision", "dsg-000043841-948f9e9f8820",
+        "--bundle", "4a977e1d80898540f6801b04c2fb7f3479a528b541a5ce2eea359b1e87d22989",
+        "--offline", "--port", "7000"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/../Twin-Lab-review-old",
+        "env": { "PYTHONUNBUFFERED": "1" }
+      },
+      "dependsOn": "Meeting: verify offline baseline",
+      "group": { "kind": "build", "isDefault": true },
+      "runOptions": { "instanceLimit": 1 },
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Meeting: verify offline new CAD",
+      "type": "process",
+      "command": "${workspaceFolder}/../Twin-Lab-review-new/.venv/bin/python",
+      "args": [
+        "-m", "twin_lab.cad_catalog", "verify",
+        "dsg-000043841-d73a0befee4a",
+        "--bundle", "e7fc3f221ddfc2c054978a3ac264a7a190ee10f45c39384733189d40c07781d5",
+        "--offline"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/../Twin-Lab-review-new"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Meeting: start verified new CAD",
+      "type": "process",
+      "command": "${workspaceFolder}/../Twin-Lab-review-new/.venv/bin/python",
+      "args": [
+        "-m", "twin_lab.collision_viewer",
+        "--revision", "dsg-000043841-d73a0befee4a",
+        "--bundle", "e7fc3f221ddfc2c054978a3ac264a7a190ee10f45c39384733189d40c07781d5",
+        "--offline", "--port", "7001"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/../Twin-Lab-review-new",
+        "env": { "PYTHONUNBUFFERED": "1" }
+      },
+      "dependsOn": "Meeting: verify offline new CAD",
+      "group": "build",
+      "runOptions": { "instanceLimit": 1 },
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "problemMatcher": []
+    }
+  ]
+}

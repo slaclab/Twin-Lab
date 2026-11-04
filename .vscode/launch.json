@@ -1,0 +1,39 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Meeting: verified baseline (offline)",
+      "type": "debugpy",
+      "request": "launch",
+      "python": "${workspaceFolder}/../Twin-Lab-review-old/.venv/bin/python",
+      "module": "twin_lab.collision_viewer",
+      "cwd": "${workspaceFolder}/../Twin-Lab-review-old",
+      "args": [
+        "--revision", "dsg-000043841-948f9e9f8820",
+        "--bundle", "4a977e1d80898540f6801b04c2fb7f3479a528b541a5ce2eea359b1e87d22989",
+        "--offline", "--port", "7000"
+      ],
+      "env": { "PYTHONUNBUFFERED": "1" },
+      "console": "integratedTerminal",
+      "preLaunchTask": "Meeting: verify offline baseline",
+      "justMyCode": true
+    },
+    {
+      "name": "Meeting: new CAD 2026-11-03 (offline)",
+      "type": "debugpy",
+      "request": "launch",
+      "python": "${workspaceFolder}/../Twin-Lab-review-new/.venv/bin/python",
+      "module": "twin_lab.collision_viewer",
+      "cwd": "${workspaceFolder}/../Twin-Lab-review-new",
+      "args": [
+        "--revision", "dsg-000043841-d73a0befee4a",
+        "--bundle", "e7fc3f221ddfc2c054978a3ac264a7a190ee10f45c39384733189d40c07781d5",
+        "--offline", "--port", "7001"
+      ],
+      "env": { "PYTHONUNBUFFERED": "1" },
+      "console": "integratedTerminal",
+      "preLaunchTask": "Meeting: verify offline new CAD",
+      "justMyCode": true
+    }
+  ]
+}

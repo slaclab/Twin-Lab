@@ -1,5 +1,46 @@
 # Published Collision Geometry
 
+## Meeting Launcher on This Workstation
+
+Open the original `Twin-Lab` folder in VS Code. In **Run and Debug**, select
+**Meeting: verified baseline (offline)** and click the green Run button. The
+default build task, **Meeting: start verified baseline**, runs the same model
+without the debugger and is also available with **Ctrl+Shift+B**.
+
+The baseline Run configuration and default task use `../Twin-Lab-review-old`,
+its own Python environment, and the exact complete baseline bundle. They verify
+the saved data offline first and never run CAD ingestion, tessellation, or hull
+generation. The browser address is `http://localhost:7000`.
+
+Allow roughly 60-90 seconds for Drake to load the saved geometry. The canvas can
+be blank until the terminal reports that collision geometry is loaded. This is
+model loading, not rebuilding the CAD cache. Use **Isometric view** to frame the
+assembly if the initial camera is too far away. The model exposes 31 manual
+joints, collision detection, and CAD verification.
+
+The recovered new revision is a separate Run choice:
+**Meeting: new CAD 2026-11-03 (offline)**. It uses `../Twin-Lab-review-new`,
+its own saved bundle and interpreter, and port `http://localhost:7001`.
+Its task is **Meeting: start verified new CAD**. Both models retain 31 DOFs;
+the new revision keeps the newly exported camera stages fixed, as recorded in
+its reviewed inventory. The baseline remains the default presentation fallback.
+
+Each viewer requires several GiB of RAM. Load them sequentially, check available
+memory before keeping both open, and stop the new viewer first if the machine
+becomes memory constrained. Loading saved geometry is still required after a
+restart, but no CoACD or STEP tessellation runs from either meeting launcher.
+
+Leave this baseline separate from `../Twin-Lab-review-new` on branch
+`cad/43841-next`. Do not replace its STEP, bundle, interpreter, or worktree before
+the meeting. If a browser tab is closed, reopen the URL; if VS Code or WSL
+restarts, use the Run button again. If port 7000 is occupied by a working baseline,
+reuse that browser session instead of starting another copy. To restart
+deliberately, stop the existing viewer first.
+
+These workstation launchers require the two worktrees and environments prepared
+here. Other machines should follow the published-bundle setup below rather than
+assuming the sibling directory already exists.
+
 Collision geometry is a versioned build artifact, not a disposable startup cache.
 A small `*.artifacts.json` reference next to each reviewed inventory selects an
 exact bundle. Commit that reference with its CAD review. Branch names are not
