@@ -596,10 +596,10 @@ def view_stage_cad(
             )
             parent_path = joint_path
     for item in instances:
+        if item["ref"] in hidden_stage_geometry:
+            continue
         if item["ref"] in scene["motion_stage_meshes"]:
             meshes = scene["motion_stage_meshes"][item["ref"]]
-            if item["ref"] in hidden_stage_geometry:
-                continue
             for role, mesh_path in meshes.items():
                 meshcat.SetObject(
                     role_paths[(item["ref"], role)],

@@ -163,7 +163,7 @@ def _build_tree(scene: dict[str, Any], scene_file: Path) -> tuple[list[LinkSpec]
     hidden_stage_geometry = set(scene.get("hidden_stage_geometry", []))
 
     for instance in scene["instances"]:
-        if instance["ref"] not in motion_meshes:
+        if instance["ref"] not in motion_meshes and instance["ref"] not in hidden_stage_geometry:
             base.meshes.append(
                 (
                     f"{instance['ref']}_{instance['model']}",
