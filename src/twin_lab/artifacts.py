@@ -53,7 +53,7 @@ def _safe_name(name: str) -> bool:
 
 
 def create_bundle(
-    source: Path, archive: Path, *, inputs: dict[str, Any]
+    source: Path, archive: Path, *, inputs: dict[str, Any], metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Write a reproducible bundle without replacing an existing published archive."""
     source = source.resolve()
@@ -72,6 +72,8 @@ def create_bundle(
     if not files:
         raise ValueError("Cannot publish an empty bundle")
     manifest = {"schema": BUNDLE_SCHEMA, "inputs": inputs, "files": files}
+    if metadata is not None:
+        manifest["metadata"] = metadata
     manifest_bytes = _canonical(manifest)
     archive.parent.mkdir(parents=True, exist_ok=True)
     with archive.open("xb") as output:

@@ -912,7 +912,13 @@ def main() -> None:
     from .collision_artifacts import resolve_runtime
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("stage_inventory")
+    parser.add_argument("stage_inventory", nargs="?")
+    parser.add_argument(
+        "--revision", help="Select a registered CAD revision without file discovery"
+    )
+    parser.add_argument(
+        "--bundle", help="Select an exact catalog bundle when a revision has several"
+    )
     parser.add_argument("--package-dir", type=Path)
     parser.add_argument("--artifact-ref", type=Path, help="Override the committed bundle reference")
     parser.add_argument(
@@ -953,9 +959,22 @@ def main() -> None:
         )
     if args.port is not None and not 1 <= args.port <= 65535:
         parser.error("--port must be between 1 and 65535")
-    inventory = resolve_repo_path(args.stage_inventory).resolve()
+    if bool(args.stage_inventory) == bool(args.revision):
+        parser.error("Select either an inventory path or --revision, not both")
+    if args.bundle and not args.revision:
+        parser.error("--bundle requires --revision")
+    if args.artifact_ref and args.revision:
+        parser.error("--artifact-ref cannot override a catalog revision's binding")
     try:
-        root = resolve_runtime(inventory, reference=args.artifact_ref, offline=args.offline)
+        if args.revision:
+            from .cad_catalog import resolve_revision_runtime
+
+            root = resolve_revision_runtime(
+                args.revision, bundle_id=args.bundle, offline=args.offline,
+            )
+        else:
+            inventory = resolve_repo_path(args.stage_inventory).resolve()
+            root = resolve_runtime(inventory, reference=args.artifact_ref, offline=args.offline)
         runtime = json.loads((root / "runtime.json").read_text(encoding="utf-8"))
         if args.collision_mode is not None and args.collision_mode != runtime["collision_mode"]:
             parser.error("Selected bundle has a different collision mode; select another reference")

@@ -16,7 +16,13 @@ from typing import Any
 import yaml
 
 from .artifacts import create_bundle, file_sha256, install_bundle
-from .paths import CACHE_ROOT, EXPORT_ROOT, resolve_repo_path, review_artifact_stem
+from .paths import (
+    CACHE_ROOT,
+    EXPORT_ROOT,
+    REPOSITORY_ROOT,
+    resolve_repo_path,
+    review_artifact_stem,
+)
 
 RUNTIME_SCHEMA = "twin-lab-collision-runtime/v1"
 
@@ -90,11 +96,16 @@ def capture_bundle(
     *,
     collision_mode: str = "convex",
     accept_legacy: bool = False,
+    cad_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Snapshot a validated build into portable files, leaving the build untouched."""
     from .sdf_compiler import _build_tree
 
     inputs = inventory_inputs(inventory, collision_mode)
+    if cad_metadata is not None and cad_metadata.get("step", {}).get("sha256") != (
+        inputs["files"]["source_step"]
+    ):
+        raise ValueError("CAD metadata belongs to a different STEP checksum")
     scene = yaml.safe_load(scene_path.read_text(encoding="utf-8"))
     recorded = scene.get("source_fingerprints")
     if recorded != inputs["files"] and not (recorded is None and accept_legacy):
@@ -168,7 +179,10 @@ def capture_bundle(
             encoding="utf-8",
         )
         validate_runtime(root)
-        return create_bundle(root, archive, inputs=inputs)
+        return create_bundle(
+            root, archive, inputs=inputs,
+            metadata={"cad": cad_metadata} if cad_metadata is not None else None,
+        )
 
 
 def validate_runtime(root: Path) -> None:
@@ -236,6 +250,7 @@ def resolve_runtime(
 
 def build_bundle(
     inventory: Path, archive: Path, *, collision_mode: str = "convex", workers: int | None = None,
+    cad_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build new CAD in an isolated workspace; failure leaves installed revisions alone."""
     from .sdf_compiler import compile_sdf_package
@@ -261,6 +276,7 @@ def build_bundle(
             raise ValueError("CAD review changed during the build; no reference was updated")
         return capture_bundle(
             inventory, package, scene, decomposition, archive, collision_mode=collision_mode,
+            cad_metadata=cad_metadata,
         )
 
 
@@ -286,6 +302,8 @@ def main() -> None:
     import argparse
     import re
     from urllib.parse import quote
+
+    from .cad_catalog import ingest_step, register_bundle, revision_metadata
 
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -332,11 +350,18 @@ def main() -> None:
                 f"{quote(args.tag, safe='')}/{quote(args.archive.name, safe='')}"
             )
             write_reference(selected, descriptor)
+            register_bundle(inventory, selected, root=REPOSITORY_ROOT)
             print(f"Published without replacing existing assets. Commit {selected}")
             return
+        data = yaml.safe_load(inventory.read_text(encoding="utf-8"))
+        source = resolve_repo_path(data["source_step"], relative_to=inventory.parent)
+        assembly = data.get("subassembly", {}).get("name") or review_artifact_stem(inventory)
+        record = ingest_step(source, assembly, root=REPOSITORY_ROOT, existing=True)
+        cad_metadata = revision_metadata(record)
         if args.command == "build":
             descriptor = build_bundle(
                 inventory, args.archive, collision_mode=args.collision_mode, workers=args.workers,
+                cad_metadata=cad_metadata,
             )
         else:
             from .sdf_compiler import package_is_current
@@ -353,13 +378,16 @@ def main() -> None:
                 inventory, package, scene,
                 args.decomposition_dir or CACHE_ROOT / "convex-collision" / stem,
                 args.archive, collision_mode=args.collision_mode, accept_legacy=args.accept_legacy,
+                cad_metadata=cad_metadata,
             )
+            descriptor["cad"] = cad_metadata
         root = install_bundle(descriptor, CACHE_ROOT / "artifacts")
         if args.url:
             if not args.url.startswith("https://"):
                 raise ValueError("Published bundle URLs must use HTTPS")
             descriptor["url"] = args.url
         write_reference(selected, descriptor)
+        register_bundle(inventory, selected, root=REPOSITORY_ROOT)
         print(f"Verified and installed: {root}")
         print(f"Artifact reference: {selected}")
         if not args.url:

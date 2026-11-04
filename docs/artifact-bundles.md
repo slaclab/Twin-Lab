@@ -8,6 +8,39 @@ and a new build never replaces the previous revision.
 
 ## Run a Published Review
 
+For a cataloged model, no file discovery is necessary:
+
+```bash
+uv run slac-cad-catalog list
+uv run slac-cad-catalog list --json
+uv run slac-cad-catalog show dsg-000043841-948f9e9f8820
+uv run slac-collision --revision dsg-000043841-948f9e9f8820 --offline --port 7000
+```
+
+Selectors may use a unique hash prefix; ambiguous selectors are rejected. The
+JSON form contains the full revision ID, assembly identity and display name,
+timestamps, original filename, saved STEP path and hash, parent revision, bundle
+IDs, collision modes, verified input hashes, archive URLs, and binding dates.
+Agents should query this metadata rather than infer relationships from filenames.
+
+Each revision lives under `cad/revisions/<revision-id>/`. Its `source.stp` is a
+managed read-only copy; `revision.json` records its provenance and `bundles/`
+contains its verified artifact associations. Commit these records and the STEP
+using the repository's existing Git LFS rule. Local archives and installed
+bundles remain ignored. Existing revisions are not removed when new ones arrive.
+
+`uploaded_at` means the UTC time of import into this repository, not the CAD
+authoring time. For a legacy baseline, the original upload time is unknown:
+`uploaded_at` is null, `timestamp_basis` is `registered_existing`, and
+`ingested_at` records when this catalog registered it. File modification times
+are never passed off as upload provenance.
+
+New build/capture commands automatically create the catalog association and embed
+the CAD revision metadata inside the bundle manifest. Registering a legacy bundle
+adds metadata to its catalog/reference without changing that archive's bytes.
+A STEP may have several reviewed collision configurations; each binding names an
+exact bundle, and the viewer requires `--bundle ID` if selection is ambiguous.
+
 After the normal repository setup:
 
 ```bash
@@ -94,6 +127,30 @@ To keep a migration reference entirely local until publishing, add
 
 ## Revise CAD Intentionally
 
+Download a replacement STEP under a new filename anywhere accessible to the
+workspace, such as a Downloads directory. Do not copy it over the baseline's
+`source.stp`. Ingest it without changing any existing CAD or cache:
+
+```bash
+uv run slac-cad-catalog ingest /path/to/new-revision.step \
+  --assembly DSG-000043841 --name "43841 stage stack (DSG-000040389)" \
+  --parent dsg-000043841-948f9e9f8820
+```
+
+The command copies the file into a new content-identified revision directory,
+timestamps the import, records its parent, and returns all metadata as JSON.
+Re-importing identical bytes reuses the same record and original ingestion time.
+The new revision is `awaiting_review` and cannot accidentally launch with the
+old revision's cache.
+
+Give the returned revision selector to the reviewing agent. Prepare a separate
+manifest and inventory for that saved STEP under its revision directory; remap
+and review occurrences, selection rules, motion chains, and attachments there.
+Do not run the fixed-path 43841 replacement command in the baseline checkout.
+Then build using the new revision's inventory path. Build/capture automatically
+registers its successful bundle and changes the derived status to `cached`.
+Assembly identity in the inventory must match the ingestion assembly identity.
+
 Use a development worktree so the presentation checkout, environment, CAD, and
 artifact reference remain unchanged. Import and review the new STEP there. The
 existing `slac-refresh-43841` workflow remains available for the reviewed 43841
@@ -155,6 +212,20 @@ is reused. Respect the storage provider's asset-size and retention limits.
 
 ## Compare Two Revisions
 
+After both are cached, prove their saved sources and artifact files remain
+available and valid without networking:
+
+```bash
+uv run slac-cad-catalog compare OLD_REVISION NEW_REVISION
+uv run slac-collision --revision OLD_REVISION --offline --port 7000
+uv run slac-collision --revision NEW_REVISION --offline --port 7001
+```
+
+`compare` verifies the saved STEP hashes, exact bundle associations, and both
+installed bundles, then emits a JSON report containing both revisions and
+whether their STEP hashes differ. It does not merely check that two directories
+exist. This is the acceptance check for a real two-CAD demonstration.
+
 Keep two Git worktrees and two environments. Each worktree has an independent
 artifact store and a committed reference to its selected CAD revision. In the
 old revision's terminal:
@@ -184,6 +255,11 @@ CAD review tools. Validate that review, then use the same `build`, `verify`, and
 setup. The assembly-specific 43841 refresh script is not a generic importer.
 
 ## Recovery
+
+Catalog listing reports a damaged entry as `invalid` while keeping healthy
+revisions discoverable. Catalog-based launch verifies both the managed STEP (or
+matching LFS pointer) and its selected bundle. Reassigning a reference to another
+STEP fails verification. There is no automatic deletion or cleanup operation.
 
 A failed download or build does not update the selected reference or replace an
 installed revision. Correct a stale reference by selecting the intended Git

@@ -27,6 +27,12 @@ first [capture a validated existing cache or build a new bundle](docs/artifact-b
 That guide also covers publication, offline preflight, CAD revisions, and running
 old/new revisions side by side with `--port 7000` and `--port 7001`.
 
+Use `uv run slac-cad-catalog list --json` to discover registered assemblies,
+timestamped STEP revisions, and their exact bundle associations. A registered
+model can be opened with `uv run slac-collision --revision REVISION_ID`; there
+is no need to locate its dependent files manually. Use the catalog's `ingest`
+command to preserve a new STEP alongside the old one before reviewing it.
+
 Pseudo-live archive playback from a known start time:
 
 ```bash
