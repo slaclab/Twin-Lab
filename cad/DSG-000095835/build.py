@@ -9,25 +9,28 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shutil
 from pathlib import Path
 
 import numpy as np
 import yaml
-from OCP.BRep import BRep_Builder
+from OCP.BRep import BRep_Builder, BRep_Tool
 from OCP.BRepAlgoAPI import BRepAlgoAPI_Common, BRepAlgoAPI_Cut, BRepAlgoAPI_Fuse
 from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
 from OCP.BRepGProp import BRepGProp
+from OCP.BRepMesh import BRepMesh_IncrementalMesh
 from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCylinder
 from OCP.BRepTools import BRepTools
-from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt, gp_Trsf
+from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt, gp_Trsf, gp_Vec
 from OCP.GProp import GProp_GProps
 from OCP.TCollection import TCollection_ExtendedString
 from OCP.TDataStd import TDataStd_Name
 from OCP.TDocStd import TDocStd_Document
-from OCP.TopAbs import TopAbs_SOLID
-from OCP.TopExp import TopExp_Explorer
+from OCP.TopAbs import TopAbs_FACE, TopAbs_REVERSED, TopAbs_SOLID
+from OCP.TopExp import TopExp, TopExp_Explorer
 from OCP.TopLoc import TopLoc_Location
-from OCP.TopoDS import TopoDS_Compound, TopoDS_Shape
+from OCP.TopoDS import TopoDS, TopoDS_Compound, TopoDS_Shape
+from OCP.TopTools import TopTools_IndexedMapOfShape
 from OCP.XCAFDoc import XCAFDoc_DocumentTool
 
 from twin_lab.cad_geometry import OccurrenceShape, write_group_obj
@@ -46,6 +49,9 @@ HERE = Path(__file__).resolve().parent
 RECIPE = HERE / "reviews" / "assembly.yaml"
 CACHE = CACHE_ROOT / "95835-inspect"
 MESHES = CACHE_ROOT / "DSG-000095835" / "meshes"
+# Bump when the STEP-coloured visual mesh format changes.
+VISUAL_SCHEMA = 1
+EMPTY_GEOMETRY = "Empty geometry in source STEP"
 
 
 def select_solids(shape: TopoDS_Shape, ref: str, solids: list[int] | None) -> TopoDS_Shape:
@@ -90,20 +96,40 @@ def mask_shape(spec: dict) -> TopoDS_Shape:
     raise ValueError(f"Unknown mask kind: {spec['kind']}")
 
 
-def read_shape(part: str | dict, review: dict, stats: dict) -> TopoDS_Shape:
-    ref = part if isinstance(part, str) else part["ref"]
-    region = None if isinstance(part, str) else part.get("region")
-    shape = TopoDS_Shape()
-    frame = "local" if region else "placed"
-    if not BRepTools.Read_s(shape, str(CACHE / f"{ref}-{frame}.brep"), BRep_Builder()):
-        raise ValueError(f"Cannot read cached shape {ref}")
-    if not region:
-        return select_solids(shape, ref, None if isinstance(part, str) else part.get("solids"))
+def _placement(
+    stats: dict, ref: str, review: dict | None = None, region: str | None = None
+) -> gp_Trsf:
+    matrix = np.array(stats[ref]["transform"])
+    transform = gp_Trsf()
+    transform.SetValues(*matrix[:3, :].flatten().tolist())
+    offset = (review or {}).get("stage_splits", {}).get(ref, {}).get("moving_offset_mm")
+    if region == "moving" and offset:
+        # The STEP can place a payload away from the carriage modelled in a fused stage.
+        shift = gp_Trsf()
+        shift.SetTranslation(gp_Vec(*offset))
+        transform = transform.Multiplied(shift)
+    return transform
+
+
+def expand_stage_splits(review: dict, templates: dict) -> dict:
+    """Resolve each reviewed split to its template, keeping any per-stage carriage offset."""
+    splits = {}
+    for ref, entry in review["stage_splits"].items():
+        if isinstance(entry, str):
+            splits[ref] = templates[entry]
+        else:
+            extra = {key: value for key, value in entry.items() if key != "template"}
+            splits[ref] = {**templates[entry["template"]], **extra}
+    return splits
+
+
+def _region_solids(shape: TopoDS_Shape, ref: str, region: str, review: dict):
+    """Split a local fused stage body; return its source solids, the Boolean, and the kept half."""
     split = review["stage_splits"][ref]
-    shape = select_solids(shape, ref, split["source_solids"])
+    selected = select_solids(shape, ref, split["source_solids"])
     mask = mask_shape(split["moving_mask"])
     operation = BRepAlgoAPI_Common if region == "moving" else BRepAlgoAPI_Cut
-    cut = operation(shape, mask)
+    cut = operation(selected, mask)
     if not cut.IsDone():
         raise ValueError(f"Failed to split {ref} ({region})")
     # The imported swivel contains inverted screw-hole fragments. Keep physical
@@ -122,10 +148,154 @@ def read_shape(part: str | dict, review: dict, stats: dict) -> TopoDS_Shape:
         explorer.Next()
     if not count:
         raise ValueError(f"Split {ref} ({region}) has no physical solids")
-    matrix = np.array(stats[ref]["transform"])
-    transform = gp_Trsf()
-    transform.SetValues(*matrix[:3, :].flatten().tolist())
-    return BRepBuilderAPI_Transform(clean, transform, True).Shape()
+    return selected, cut, clean
+
+
+def read_shape(part: str | dict, review: dict, stats: dict) -> TopoDS_Shape:
+    ref = part if isinstance(part, str) else part["ref"]
+    region = None if isinstance(part, str) else part.get("region")
+    shape = TopoDS_Shape()
+    frame = "local" if region else "placed"
+    if not BRepTools.Read_s(shape, str(CACHE / f"{ref}-{frame}.brep"), BRep_Builder()):
+        raise ValueError(f"Cannot read cached shape {ref}")
+    if not region:
+        return select_solids(shape, ref, None if isinstance(part, str) else part.get("solids"))
+    _, _, clean = _region_solids(shape, ref, region, review)
+    return BRepBuilderAPI_Transform(clean, _placement(stats, ref, review, region), True).Shape()
+
+
+def _faces(shape: TopoDS_Shape) -> TopTools_IndexedMapOfShape:
+    faces = TopTools_IndexedMapOfShape()
+    TopExp.MapShapes_s(shape, TopAbs_FACE, faces)
+    return faces
+
+
+def colored_shape(
+    part: str | dict, review: dict, stats: dict, leaf: dict
+) -> tuple[TopoDS_Shape, list[tuple[float, ...] | None]]:
+    """Place a selection from its local BRep and carry each STEP face colour onto it.
+
+    Colours are listed in ``TopExp.MapShapes`` face order of the returned shape. Boolean
+    history colours split pieces of a source face; faces the split mask creates get none.
+    """
+    ref = part if isinstance(part, str) else part["ref"]
+    region = None if isinstance(part, str) else part.get("region")
+    local = TopoDS_Shape()
+    if not BRepTools.Read_s(local, str(CACHE / f"{ref}-local.brep"), BRep_Builder()):
+        raise ValueError(f"Cannot read cached shape {ref}")
+    source = _faces(local)
+    if source.Extent() != len(leaf["faces"]):
+        raise ValueError(f"STEP colours do not match the cached faces of {ref}")
+    if region:
+        _, operation, kept = _region_solids(local, ref, region, review)
+    else:
+        operation = None
+        kept = select_solids(local, ref, None if isinstance(part, str) else part.get("solids"))
+    kept_faces = _faces(kept)
+    transformer = BRepBuilderAPI_Transform(kept, _placement(stats, ref, review, region), True)
+    placed = transformer.Shape()
+    placed_faces = _faces(placed)
+    colors: list[tuple[float, ...] | None] = [None] * placed_faces.Extent()
+    for index in range(1, source.Extent() + 1):
+        palette_index = leaf["faces"][index - 1]
+        face = source.FindKey(index)
+        if palette_index < 0 or (operation is not None and operation.IsDeleted(face)):
+            continue
+        pieces = [face] if operation is None else (list(operation.Modified(face)) or [face])
+        for piece in pieces:
+            if kept_faces.FindIndex(piece):
+                target = placed_faces.FindIndex(transformer.ModifiedShape(piece))
+                if target:
+                    colors[target - 1] = tuple(leaf["palette"][palette_index])
+    return placed, colors
+
+
+def write_colored_obj(
+    shape: TopoDS_Shape,
+    colors: list[tuple[float, ...] | None],
+    default: tuple[float, ...],
+    ref: str,
+    output: Path,
+    *,
+    linear_deflection_mm: float,
+) -> list[float]:
+    """Write placed geometry as OBJ+MTL with one material per colour; return the main colour."""
+    BRepMesh_IncrementalMesh(shape, linear_deflection_mm, False, 0.5, True).Perform()
+    faces = _faces(shape)
+    vertices: list[tuple[float, float, float]] = []
+    groups: dict[tuple[float, ...], list[tuple[int, int, int]]] = {}
+    explorer = TopExp_Explorer(shape, TopAbs_FACE)
+    while explorer.More():
+        face = TopoDS.Face_s(explorer.Current())  # pyright: ignore[reportAttributeAccessIssue]
+        location = TopLoc_Location()
+        triangulation = BRep_Tool.Triangulation_s(face, location)
+        if triangulation is not None:
+            offset = len(vertices)
+            transform = location.Transformation()
+            for index in range(1, triangulation.NbNodes() + 1):
+                point = triangulation.Node(index).Transformed(transform)
+                vertices.append((point.X() * 0.001, point.Y() * 0.001, point.Z() * 0.001))
+            triangles = groups.setdefault(colors[faces.FindIndex(face) - 1] or default, [])
+            for index in range(1, triangulation.NbTriangles() + 1):
+                n1, n2, n3 = (triangulation.Triangle(index).Value(i) for i in (1, 2, 3))
+                if face.Orientation() == TopAbs_REVERSED:
+                    n1, n2, n3 = n3, n2, n1
+                triangles.append((offset + n1, offset + n2, offset + n3))
+        explorer.Next()
+    groups = {color: triangles for color, triangles in groups.items() if triangles}
+    if not groups:
+        raise ValueError(f"Selection produced no mesh triangles: {output.stem}")
+    points = np.array(vertices)
+    areas = {}
+    for color, triangles in groups.items():
+        corners = points[np.array(triangles) - 1]
+        edges = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
+        areas[color] = float(np.linalg.norm(edges, axis=1).sum())
+    material = output.with_suffix(".mtl")
+    lines = [f"mtllib {material.name}"]
+    lines.extend(f"v {x:.9g} {y:.9g} {z:.9g}" for x, y, z in vertices)
+    lines.append(f"o {ref}")
+    materials = []
+    for number, (color, triangles) in enumerate(groups.items()):
+        lines.append(f"usemtl c{number}")
+        lines.extend(f"f {a} {b} {c}" for a, b, c in triangles)
+        red, green, blue, alpha = color
+        materials.append(f"newmtl c{number}\nKd {red:.4f} {green:.4f} {blue:.4f}\nd {alpha:.4f}\n")
+    output.write_text("\n".join(lines) + "\n", encoding="ascii")
+    material.write_text("".join(materials), encoding="ascii")
+    return list(max(areas, key=areas.__getitem__))
+
+
+def step_visual(
+    part: str | dict, review: dict, stats: dict, leaf: dict, fallback: list[float],
+    mesh: Path, mesh_key: str, *, rebuild: bool,
+) -> tuple[list[float], Path]:
+    """Cache a STEP-coloured visual for one selection beside its collision source mesh."""
+    ref = part if isinstance(part, str) else part["ref"]
+    visual = mesh.with_suffix(".visual.obj")
+    record = mesh.with_suffix(".visual.json")
+    key = hashlib.sha256(
+        json.dumps([VISUAL_SCHEMA, mesh_key, leaf, fallback], sort_keys=True).encode()
+    ).hexdigest()
+    if not rebuild and visual.exists() and visual.with_suffix(".mtl").exists() and record.exists():
+        cached = json.loads(record.read_text())
+        if cached.get("key") == key:
+            return cached["rgba"], visual
+    shape, colors = colored_shape(part, review, stats, leaf)
+    # Faces the STEP leaves uncoloured, and faces cut by a split, take the part's usual colour.
+    counts = {}
+    for index in leaf["faces"]:
+        if index >= 0:
+            counts[index] = counts.get(index, 0) + 1
+    default = tuple(fallback)
+    if counts:
+        default = tuple(leaf["palette"][max(counts, key=counts.__getitem__)])
+    rgba = write_colored_obj(
+        shape, colors, default, ref, visual,
+        linear_deflection_mm=float(review.get("linear_deflection_mm", 0.5)),
+    )
+    record.write_text(json.dumps({"key": key, "rgba": rgba}) + "\n")
+    return rgba, visual
 
 
 def validate_review(review: dict, stats: dict) -> None:
@@ -166,6 +336,14 @@ def validate_review(review: dict, stats: dict) -> None:
         raise ValueError("Retained/omitted occurrence assignments overlap")
     if retained | omitted != set(stats):
         raise ValueError("Every source leaf must be retained or explicitly omitted")
+    # Re-exports can fill in previously empty parts; a stale entry would silently hide them.
+    empty = {ref for ref, item in stats.items() if not item["local"]["solids"]}
+    listed_empty = set(review["omitted_occurrences"].get(EMPTY_GEOMETRY, []))
+    if listed_empty != empty:
+        raise ValueError(
+            f"{EMPTY_GEOMETRY!r} must list exactly the leaves without solids; "
+            f"has solids: {sorted(listed_empty - empty)}, unlisted: {sorted(empty - listed_empty)}"
+        )
     for ref in review["stage_splits"]:
         regions = {key[2] for key in owners if key[0] == ref and key[2] is not None}
         if regions != {"fixed", "moving"}:
@@ -219,7 +397,7 @@ def build(
     review = yaml.safe_load(recipe_bytes)
     template_bytes = (RECIPE.parent / review["split_templates"]).read_bytes()
     templates = yaml.safe_load(template_bytes)
-    review["stage_splits"] = {ref: templates[key] for ref, key in review["stage_splits"].items()}
+    review["stage_splits"] = expand_stage_splits(review, templates)
     stats = json.loads((CACHE / "stats.json").read_text())
     if json.loads((CACHE / "source-stamp.json").read_text())["sha256"] != review["source_sha256"]:
         raise ValueError("STEP revision differs from this review; re-review CAD references first")
@@ -231,6 +409,14 @@ def build(
     source_key = (CACHE / "source-stamp.json").read_bytes()
     document = TDocStd_Document(TCollection_ExtendedString("95835-export"))
     shape_tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
+    # STEP presentation colours go into visual-only OBJ+MTL meshes, so the collision source
+    # meshes, and the convex decompositions keyed to their bytes, are unchanged.
+    step_colors = review.get("visual_colors") == "step"
+    if step_colors:
+        from cache_geometry import prepare_colors
+
+        leaf_colors = prepare_colors()
+    colored_visuals: dict[Path, Path] = {}
     links = []
     for name, spec in review["bodies"].items():
         link = LinkSpec(name)
@@ -269,6 +455,10 @@ def build(
                 "visual_rgba",
                 spec.get("part_colors", {}).get(ref, spec.get("rgba", [0.62, 0.66, 0.72, 1.0])),
             )
+            if step_colors:
+                color, colored_visuals[mesh] = step_visual(
+                    part, review, stats, leaf_colors[ref], color, mesh, key, rebuild=rebuild
+                )
             link.meshes.append((label, mesh, color))
         links.append(link)
         print(f"  {name}: {len(link.meshes)} CAD selections", flush=True)
@@ -320,8 +510,15 @@ def build(
     # outputs so inspection and camera fitting cannot pick up stale geometry.
     emitted = {Path(uri).name for uri in [*visual.values(), *stl.values()]}
     emitted.update(Path(uri).name for pieces in collision_meshes.values() for _, uri in pieces)
+    for source, colored in colored_visuals.items():
+        target = output / visual[source]
+        material = target.with_suffix(".mtl")
+        _, body = colored.read_text(encoding="ascii").split("\n", 1)
+        target.write_text(f"mtllib {material.name}\n{body}", encoding="ascii")
+        shutil.copyfile(colored.with_suffix(".mtl"), material)
+        emitted.add(material.name)
     for path in (output / "meshes").iterdir():
-        if path.suffix in {".obj", ".stl"} and path.name not in emitted:
+        if path.suffix in {".obj", ".stl", ".mtl"} and path.name not in emitted:
             path.unlink()
     model_name = "DSG-000095835"
     sdf = output / f"{model_name}.sdf"
@@ -358,6 +555,7 @@ def build(
                 "body_count": len(links),
                 "joint_count": len(joints),
                 "cad_selections": sum(len(link.meshes) for link in links),
+                "visual_colors": "step" if step_colors else "recipe",
             },
             indent=2,
         )

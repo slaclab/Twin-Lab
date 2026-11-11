@@ -177,6 +177,7 @@ P1052:
       - 20.1
       - 28.6
       - 17.1
+# Kohzu RA04A-W rotor. Unused since the 2026-11-04 STEP replaced it with LIB-000032444.
 P1054:
   source_solids:
   - 1
@@ -208,6 +209,7 @@ P1177:
     radius_mm: 69
     length_mm: 18.3
 # Newport IMS300CC: local Z is travel; the carriage top plate spans Z -100..82 above Y 76.
+# A recipe entry can add moving_offset_mm when the STEP places the payload elsewhere.
 IMS300CC:
   source_solids:
   - 1
@@ -215,3 +217,35 @@ IMS300CC:
     kind: box
     min_mm: [-100, 76, -100]
     max_mm: [100, 95, 82]
+# ePix100 lead-screw linear stage LIB-000000725, fused into one solid. Local Z is travel.
+# The carriage plate, guide block, right-side flag skirt and hex drive nut move; the
+# channel, guide rail, lead screw (r 3.17 at X -2.55, Y 10.2), end blocks and motor stay.
+LIB-000000725:
+  source_solids:
+  - 1
+  moving_mask:
+    kind: difference
+    operands:
+    - kind: union
+      operands:
+      - {kind: box, min_mm: [-27.3, 6.8, 77.5], max_mm: [35.8, 16.8, 133.6]}
+      - {kind: box, min_mm: [-23.1, -4.1, 77.5], max_mm: [-15.05, 6.9, 133.6]}
+      - {kind: box, min_mm: [9.05, -4.1, 77.5], max_mm: [17.45, 6.9, 133.6]}
+      - {kind: box, min_mm: [-15.05, 1.05, 77.5], max_mm: [9.05, 6.9, 133.6]}
+      - {kind: box, min_mm: [17.45, 5.55, 77.5], max_mm: [25.05, 6.9, 133.6]}
+      - {kind: box, min_mm: [25.05, -6.0, 77.5], max_mm: [35.8, 6.9, 133.6]}
+      - {kind: box, min_mm: [-15.3, 3.9, 56.0], max_mm: [10.3, 16.7, 77.6]}
+    - {kind: cylinder, origin_mm: [-2.55, 10.2, 50.0], axis_xyz: [0, 0, 1], radius_mm: 3.3,
+       length_mm: 90.0}
+# Old Kohzu 70 mm manual cross-roller X stage LIB-000005430, fused into one solid. Local Y
+# is travel. The inverted-U table (top plate above Z 12.5, skirts at |X| 26.8..35 down to
+# Z 7.1) moves; the base, its rails (|X| 19..25.2, up to Z 12.0), micrometer and lock stay.
+LIB-000005430:
+  source_solids:
+  - 1
+  moving_mask:
+    kind: union
+    operands:
+    - {kind: box, min_mm: [-35.1, -35.1, 12.25], max_mm: [35.1, 35.1, 18.1]}
+    - {kind: box, min_mm: [-35.1, -35.1, 6.8], max_mm: [-26.0, 35.1, 12.3]}
+    - {kind: box, min_mm: [26.0, -35.1, 6.8], max_mm: [35.1, 35.1, 12.3]}

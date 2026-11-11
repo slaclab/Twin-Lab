@@ -202,6 +202,7 @@ class CollisionModel:
         )
         self.context = scene.create_context()
         self._reviewed_home_positions: np.ndarray | None = None
+        self._home_geometry_poses: dict[str, np.ndarray] | None = None
         self.reopened_joints = self._reopen_joint_adjacent_pairs()
         self._configure_stack_interference_filters()
         self.refiner = (
@@ -438,6 +439,21 @@ class CollisionModel:
         self.set_positions(positions)
         plant_context = self.scene.plant.GetMyContextFromRoot(self.context)
         self._reviewed_home_positions = self.scene.plant.GetPositions(plant_context).copy()
+        self._home_geometry_poses = self._proximity_poses()
+
+    def _proximity_poses(self) -> dict[str, np.ndarray]:
+        from pydrake.geometry import Role
+
+        scene_graph = self.scene.scene_graph
+        scene_context = scene_graph.GetMyContextFromRoot(self.context)
+        query = scene_graph.get_query_output_port().Eval(scene_context)
+        inspector = query.inspector()
+        return {
+            self.scene.geometry_name(inspector, geometry_id): query.GetPoseInWorld(
+                geometry_id
+            ).GetAsMatrix4()
+            for geometry_id in inspector.GetAllGeometryIds(Role.kProximity)
+        }
 
     def _at_reviewed_home(self) -> bool:
         if self._reviewed_home_positions is None:
@@ -446,6 +462,28 @@ class CollisionModel:
         positions = self.scene.plant.GetPositions(plant_context)
         return bool(np.allclose(positions, self._reviewed_home_positions, rtol=0.0, atol=1e-9))
 
+    def _keeps_home_relative_pose(self, item) -> bool:
+        """True while a geometry pair sits exactly as it did, relative to each other, at home.
+
+        Moving a joint that carries both parts, or neither, cannot change their contact, so
+        the reviewed home baseline still describes it.
+        """
+
+        home = self._home_geometry_poses
+        if home is None or item.pose_a is None or item.pose_b is None:
+            return False
+        home_a, home_b = home.get(item.a), home.get(item.b)
+        if home_a is None or home_b is None:
+            return False
+        return bool(
+            np.allclose(
+                np.linalg.solve(home_a, home_b),
+                np.linalg.solve(item.pose_a, item.pose_b),
+                rtol=0.0,
+                atol=1e-9,
+            )
+        )
+
     def report(
         self, *, warn_m: float = 0.005, max_distance_m: float | None = None
     ) -> ClearanceReport:
@@ -453,22 +491,31 @@ class CollisionModel:
         distances = self.scene.signed_distances(
             self.context, max_distance_m=max_distance_m if max_distance_m is not None else warn_m
         )
-        clearances = tuple(
-            Clearance(
-                a=item.a,
-                b=item.b,
-                distance_m=item.distance_m,
-                witness_a_m=item.witness_a_m,
-                witness_b_m=item.witness_b_m,
-                pose_a=item.pose_a,
-                pose_b=item.pose_b,
+        clearances = []
+        for item in distances:
+            pair = _pair_key(item.a, item.b)
+            if pair in self.ignored_pairs:
+                continue
+            # Home contacts and reviewed home pairs are the accepted baseline for as long as
+            # the two parts have not moved relative to each other.
+            if (item.distance_m <= 0.0 or pair in self.home_ignored_pairs) and (
+                at_home or self._keeps_home_relative_pose(item)
+            ):
+                continue
+            clearances.append(
+                Clearance(
+                    a=item.a,
+                    b=item.b,
+                    distance_m=item.distance_m,
+                    witness_a_m=item.witness_a_m,
+                    witness_b_m=item.witness_b_m,
+                    pose_a=item.pose_a,
+                    pose_b=item.pose_b,
+                )
             )
-            for item in distances
-            if _pair_key(item.a, item.b) not in self.ignored_pairs
-            and not (at_home and _pair_key(item.a, item.b) in self.home_ignored_pairs)
-            and not (at_home and item.distance_m <= 0.0)
+        return ClearanceReport(
+            clearances=tuple(clearances), warn_m=warn_m, part_labels=self.part_labels
         )
-        return ClearanceReport(clearances=clearances, warn_m=warn_m, part_labels=self.part_labels)
 
     def refine(
         self, report: ClearanceReport, *, limit: int = 12, with_mesh: bool = True
@@ -527,7 +574,7 @@ def read_collision_excluded_parts(path: str | Path) -> frozenset[str]:
 
 
 def read_home_ignored_pairs(path: str | Path) -> frozenset[tuple[str, str]]:
-    """Read reviewed contacts suppressed only at the configured home pose."""
+    """Read reviewed pairs suppressed while they keep their home relative pose."""
 
     data = yaml.safe_load(resolve_repo_path(path).read_text(encoding="utf-8")) or {}
     return frozenset(

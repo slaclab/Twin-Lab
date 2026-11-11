@@ -26,8 +26,11 @@ class AssemblySliderJoint(SliderJoint):
             "top_slit_y_joint": "Top slit y",
             "detector_x_joint": "ePix10k x",
             "detector_z_joint": "ePix10k z",
+            "epix100_x_joint": "ePix100 x",
+            "epix100_z_joint": "ePix100 z",
+            "epix100_tilt_joint": "ePix100 tilt",
         }
-        for number in range(1, 4):
+        for number in range(1, 5):
             for axis in ("translation", "rotation", "tilt"):
                 names[f"crystal_{number}_{axis}_joint"] = f"Crystal {number} {axis}"
         return f"{names.get(self.joint_name, self.joint_name)} ({self.unit})"

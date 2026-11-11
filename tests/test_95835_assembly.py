@@ -12,40 +12,55 @@ import yaml
 from twin_lab.collision import Clearance
 
 ASSEMBLY = Path(__file__).resolve().parents[1] / "cad" / "DSG-000095835"
-# Lift plate P831, its controls envelope P867 and support posts P922/P1087/P1089/P1093.
-LIFT_CONTROLS = {"P867", "P922", "P1087", "P1089", "P1093"}
 
 
-def test_controls_envelope_and_posts_ride_the_lift_and_are_not_omitted():
-    review = yaml.safe_load((ASSEMBLY / "reviews" / "assembly.yaml").read_text())
-    owners = {
+def _review():
+    return yaml.safe_load((ASSEMBLY / "reviews" / "assembly.yaml").read_text())
+
+
+def _manifest():
+    return json.loads((ASSEMBLY / "manifest.json").read_text())["occurrences"]
+
+
+def _refs(name, entries=None):
+    """Leaf refs whose CAD name, without Solid Edge's ``_oa_`` suffix, is ``name``.
+
+    Refs are renumbered by every STEP export, so tests find parts by name.
+    """
+    return [
+        entry["ref"] for entry in (entries or _manifest())
+        if not entry["is_assembly"] and entry["name"].split("_oa_")[0] == name
+    ]
+
+
+def _owners(review):
+    return {
         part if isinstance(part, str) else part["ref"]: body
         for body, spec in review["bodies"].items()
         for part in spec["parts"]
+        if isinstance(part, str) or "region" not in part
     }
-    omitted = {ref for refs in review["omitted_occurrences"].values() for ref in refs}
-
-    assert all(owners[ref] == owners["P831"] == "parker_lift" for ref in LIFT_CONTROLS)
-    assert LIFT_CONTROLS.isdisjoint(omitted)
 
 
-def test_user_supplied_controls_envelope_is_retained_on_the_lift():
-    review = yaml.safe_load((ASSEMBLY / "reviews" / "assembly.yaml").read_text())
-    entries = json.loads((ASSEMBLY / "manifest.json").read_text())["occurrences"]
-    controls = {
+def _omitted(review):
+    return {ref for refs in review["omitted_occurrences"].values() for ref in refs}
+
+
+def test_controls_envelope_and_posts_ride_the_lift_and_are_not_omitted():
+    review = _review()
+    entries = _manifest()
+    owners = _owners(review)
+    # Lift plate mo39154769, the user-supplied controls envelope and its four support posts.
+    plate = _refs("mo39154769", entries)
+    envelope = [
         entry["ref"] for entry in entries
         if entry["name"].startswith("REF__mo39154780-_UserSuppliedControls")
-    }
-    assert controls == {"P867"}
-    for ref in controls:
-        owners = [
-            body for body, spec in review["bodies"].items()
-            for part in spec["parts"]
-            if (part if isinstance(part, str) else part["ref"]) == ref
-        ]
-        assert owners == ["parker_lift"], ref
-    omitted = {ref for refs in review["omitted_occurrences"].values() for ref in refs}
-    assert controls.isdisjoint(omitted)
+    ]
+    posts = _refs("Thorlabs__PillarPostExtension_1.00Dx3.00L__RS3", entries)
+    assert len(plate) == 1 and len(envelope) == 1 and len(posts) == 4
+
+    assert {owners[ref] for ref in [*plate, *envelope, *posts]} == {"parker_lift"}
+    assert _omitted(review).isdisjoint([*envelope, *posts])
 
 
 def test_local_viewer_defaults_to_contact_only_coloring(monkeypatch, tmp_path):
@@ -67,10 +82,10 @@ def test_local_viewer_defaults_to_contact_only_coloring(monkeypatch, tmp_path):
 
 
 def test_all_imported_crystal_stacks_have_reviewed_payloads():
-    entries = json.loads((ASSEMBLY / "manifest.json").read_text())["occurrences"]
-    review = yaml.safe_load((ASSEMBLY / "reviews" / "assembly.yaml").read_text())
-    stacks = [entry for entry in entries if entry["name"] == "mo39154771"]
-    assert len(stacks) == 3
+    entries = _manifest()
+    review = _review()
+    stacks = [entry for entry in entries if entry["name"].split("_oa_")[0] == "mo39154771"]
+    assert len(stacks) == 4
     for number, stack in enumerate(stacks, start=1):
         payloads = {
             entry["ref"] for entry in entries
@@ -85,6 +100,229 @@ def test_all_imported_crystal_stacks_have_reviewed_payloads():
         for axis in ("translation", "rotation", "tilt"):
             assert review["bodies"][f"crystal_{number}_{axis}"]["parts"]
     assert review["visual_rgba"] == [0.7, 0.7, 0.7, 1.0]
+    assert review["visual_colors"] == "step"
+
+
+def test_fourth_stack_joints_match_the_first_stack():
+    joints = {joint["name"]: joint for joint in _review()["joints"]}
+    for axis in ("translation", "rotation", "tilt"):
+        first, fourth = joints[f"crystal_1_{axis}_joint"], joints[f"crystal_4_{axis}_joint"]
+        assert (fourth["parent"], fourth["child"]) == (
+            first["parent"].replace("crystal_1", "crystal_4"),
+            first["child"].replace("crystal_1", "crystal_4"),
+        )
+        assert fourth["type"] == first["type"]
+        assert fourth["limits"] == first["limits"]
+        assert np.linalg.norm(fourth["axis_xyz"]) == pytest.approx(1.0)
+
+
+def test_slit_blade_holders_and_blades_ride_their_blade_rods():
+    review = _review()
+    entries = _manifest()
+    owners = _owners(review)
+    holders = _refs("DSG-000000720", entries)
+    blades = _refs("mo39143619", entries) + _refs("mo39143620", entries)
+    assert len(holders) == 2 and len(blades) == 4
+    assert _omitted(review).isdisjoint(holders + blades)
+    # Each rod tip clamps one holder DSG-000000720 and two blade plates.
+    for body, rod in (("bottom_slit_x", "DSG-000092551"), ("top_slit_x", "DSG-000092523")):
+        assert {owners[ref] for ref in _refs(rod, entries)} == {body}
+        assert sum(owners[ref] == body for ref in holders) == 1
+        assert sum(owners[ref] == body for ref in blades) == 2
+
+
+def test_analyzer_and_crystal_rotations_are_limited_to_45_degrees():
+    joints = {joint["name"]: joint for joint in _review()["joints"]}
+    rotations = ["analyzer_rotation_joint"] + [
+        f"crystal_{number}_rotation_joint" for number in range(1, 5)
+    ]
+    for name in rotations:
+        assert joints[name]["limits"] == pytest.approx([-np.pi / 4, np.pi / 4]), name
+
+
+def test_epix_z_travel_follows_the_payload_offset_from_its_fused_carriage():
+    review = _review()
+    joint = next(joint for joint in review["joints"] if joint["name"] == "detector_z_joint")
+    split = review["stage_splits"][joint["stage_ref"]]
+    offset_m = -split["moving_offset_mm"][2] / 1000.0
+    # 300 mm of travel stays centred on the carriage the fused slide models.
+    assert joint["limits"] == pytest.approx([-0.15 + offset_m, 0.15 + offset_m])
+    assert joint["limits"][0] < 0.0 < joint["limits"][1]
+
+
+def test_epix100_rides_linear_stage_manual_kohzu_and_swivel():
+    review = _review()
+    entries = _manifest()
+    owners = _owners(review)
+    bodies = review["bodies"]
+    joints = {joint["name"]: joint for joint in review["joints"]}
+    (linear,) = _refs("LIB-000000725", entries)
+    (kohzu,) = _refs("LIB-000005430", entries)
+    (swivel_base,) = _refs("LIB-000013710", entries)
+    (swivel_top,) = _refs("LIB-000013712", entries)
+    (sensor,) = _refs("REF__Chip__sa39154207", entries)
+
+    def regions(body, ref):
+        return {
+            part["region"] for part in bodies[body]["parts"]
+            if isinstance(part, dict) and part["ref"] == ref and "region" in part
+        }
+
+    # Each fused stage is split between the body it is bolted to and the body it carries.
+    assert regions("assembly_base", linear) == {"fixed"}
+    assert regions("epix100_x", linear) == {"moving"}
+    assert regions("epix100_x", kohzu) == {"fixed"}
+    assert regions("epix100_z", kohzu) == {"moving"}
+    assert owners[swivel_base] == "epix100_z" and owners[swivel_top] == "epix100_tilt"
+    assert owners[sensor] == "epix100_tilt"
+    chain = [("epix100_x_joint", "prismatic"), ("epix100_z_joint", "prismatic"),
+             ("epix100_tilt_joint", "revolute")]
+    parent = "assembly_base"
+    for name, kind in chain:
+        joint = joints[name]
+        assert (joint["parent"], joint["type"]) == (parent, kind)
+        parent = joint["child"]
+    assert joints["epix100_z_joint"]["limits"] == pytest.approx([-0.0065, 0.0065])
+    assert joints["epix100_tilt_joint"]["limits"] == pytest.approx([-np.pi / 18, np.pi / 18])
+    templates = yaml.safe_load((ASSEMBLY / "reviews" / "stage-splits.yaml").read_text())
+    assert {"LIB-000000725", "LIB-000005430"} <= set(templates)
+
+
+def test_epix100_housing_and_rear_plumbing_ride_the_swivel():
+    review = _review()
+    entries = _manifest()
+    owners = _owners(review)
+    # The 14:01 export gave the covers and cooling block solids; earlier exports left them empty.
+    housing = [
+        ref for name in (
+            "REF__sa39154258__RearCover-1", "REF__sa39154222__FrontCover-0",
+            "mo39154260", "mo39154261",
+        )
+        for ref in _refs(name, entries)
+    ]
+    plumbing = [
+        ref for name in (
+            "Swagelok__Ftg_NutVCR.25Male__SS-4-HVCR-4SR",
+            "Swagelok__Fitting_ShortSktWld__SS-4-VCR-3-.50LG",
+            "mo39154264", "mo39154267", "mo39154257",
+        )
+        for ref in _refs(name, entries)
+    ]
+    assert len(housing) == 4 and len(plumbing) == 8
+    assert {owners[ref] for ref in housing + plumbing} == {"epix100_tilt"}
+
+def test_diffractometer_base_is_fixed_geometry_and_its_empty_parts_stay_omitted():
+    review = _review()
+    entries = _manifest()
+    (base,) = _refs("REF__mo39144450__DiffractometerBase", entries)
+    assert _owners(review)[base] == "assembly_base"
+    # Body, 2-theta arm and 2-theta stage carry only coordinate systems in this STEP.
+    empty = {
+        ref for name in ("Diffractometer", "2ThetaArm", "2ThetaStage")
+        for ref in _refs(f"REF__mo39144450__{name}", entries)
+    }
+    assert len(empty) == 3
+    assert empty <= set(review["omitted_occurrences"]["Empty geometry in source STEP"])
+
+
+def test_bearing_parts_sit_on_their_joint_bodies():
+    review = _review()
+    owned = {
+        body: {part if isinstance(part, str) else part["ref"] for part in spec["parts"]}
+        for body, spec in review["bodies"].items()
+    }
+    for joint in review["joints"]:
+        fixed, moving = joint["bearing_parts"]
+        assert set(fixed) <= owned[joint["parent"]], joint["name"]
+        assert set(moving) <= owned[joint["child"]], joint["name"]
+    joints = {joint["name"]: joint for joint in review["joints"]}
+    (end_plate,) = _refs("mo39154774")
+    assert end_plate in joints["analyzer_rotation_joint"]["bearing_parts"][1]
+
+
+def test_step_colours_follow_split_history_onto_visual_meshes(monkeypatch, tmp_path):
+    pytest.importorskip("OCP")
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.BRepTools import BRepTools
+
+    monkeypatch.syspath_prepend(str(ASSEMBLY))
+    module = import_module("build")
+    monkeypatch.setattr(module, "CACHE", tmp_path)
+    BRepTools.Write_s(BRepPrimAPI_MakeBox(10.0, 10.0, 10.0).Shape(), str(tmp_path / "X-local.brep"))
+    transform = [[1, 0, 0, 100], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
+    stats = {"X": {"transform": transform}}
+    red, blue = [1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 0.5]
+    # MakeBox faces are x=0, x=10, y=0, y=10, z=0, z=10; -1 is a face the STEP left plain.
+    partly_plain = {"palette": [red, blue], "faces": [0, 1, 1, 1, 1, -1]}
+    leaf = {"palette": [red, blue], "faces": [0, 1, 1, 1, 1, 1]}
+    review = {"stage_splits": {"X": {
+        "source_solids": [1],
+        "moving_mask": {"kind": "box", "min_mm": [5, -1, -1], "max_mm": [15, 11, 11]},
+    }}}
+
+    _, whole_colors = module.colored_shape("X", review, stats, partly_plain)
+    assert sorted(map(str, whole_colors)) == sorted(
+        map(str, [tuple(red), *[tuple(blue)] * 4, None])
+    )
+    fixed, colors = module.colored_shape({"ref": "X", "region": "fixed"}, review, stats, leaf)
+    # The x=0 face survives whole, x=10 goes with the moving half, four faces are cut in
+    # half, and the cut face itself is new.
+    assert len(colors) == 6
+    assert colors.count(tuple(red)) == 1
+    assert colors.count(tuple(blue)) == 4
+    assert colors.count(None) == 1
+
+    output = tmp_path / "visual.obj"
+    main = module.write_colored_obj(
+        fixed, colors, (0.5, 0.5, 0.5, 1.0), "X", output, linear_deflection_mm=0.5
+    )
+    lines = output.read_text().splitlines()
+    assert lines[0] == "mtllib visual.mtl"
+    assert sum(line.startswith("usemtl ") for line in lines) == 3
+    xs = [float(line.split()[1]) for line in lines if line.startswith("v ")]
+    assert min(xs) == pytest.approx(0.1) and max(xs) == pytest.approx(0.105)
+    material = output.with_suffix(".mtl").read_text()
+    assert "Kd 0.0000 0.0000 1.0000\nd 0.5000" in material
+    assert main == blue
+
+    # A reviewed carriage offset moves only the moving half, and keeps its colours.
+    from OCP.Bnd import Bnd_Box
+    from OCP.BRepBndLib import BRepBndLib
+
+    def x_range(shape):
+        box = Bnd_Box()
+        BRepBndLib.Add_s(shape, box, False)
+        return box.Get()[0], box.Get()[3]
+
+    moving_part = {"ref": "X", "region": "moving"}
+    assert x_range(module.read_shape(moving_part, review, stats)) == pytest.approx((105, 110))
+    review["stage_splits"]["X"]["moving_offset_mm"] = [-30.0, 0.0, 0.0]
+    moving, moving_colors = module.colored_shape(moving_part, review, stats, leaf)
+    assert x_range(moving) == pytest.approx((75, 80))
+    assert x_range(module.read_shape(moving_part, review, stats)) == pytest.approx((75, 80))
+    assert moving_colors.count(tuple(blue)) == 5 and moving_colors.count(None) == 1
+    assert x_range(module.read_shape({"ref": "X", "region": "fixed"}, review, stats)) == (
+        pytest.approx((100, 105))
+    )
+
+
+def test_split_templates_expand_with_reviewed_offsets(monkeypatch):
+    monkeypatch.syspath_prepend(str(ASSEMBLY))
+    module = import_module("build")
+    templates = {"T": {"source_solids": [1]}}
+    review = {"stage_splits": {"A": "T", "B": {"template": "T", "moving_offset_mm": [0, 0, 5]}}}
+
+    assert module.expand_stage_splits(review, templates) == {
+        "A": {"source_solids": [1]},
+        "B": {"source_solids": [1], "moving_offset_mm": [0, 0, 5]},
+    }
+
+
+def test_recipe_ignored_pairs_reach_the_collision_model(cad_model):
+    model, _, _ = cad_model
+    (port,) = _refs("DSG-000052395")
+    rods = _refs("DSG-000092551") + _refs("DSG-000092523")
+    assert {tuple(sorted((port, rod))) for rod in rods} <= model.ignored_pairs
 
 
 def test_jet_slit_and_detector_stages_are_driven_in_beamline_axes():
@@ -274,10 +512,10 @@ def test_targeted_refinement_selects_overshoot_gaps_and_home_contacts(monkeypatc
     monkeypatch.syspath_prepend(str(ASSEMBLY))
     module = import_module("refine_hulls")
     baseline = [
-        {"source": "cage", "part_ref": "P691", "max_bulge_mm": 11.0, "max_gap_mm": 0.0},
+        {"source": "cage", "part_ref": "P526", "max_bulge_mm": 11.0, "max_gap_mm": 0.0},
         {"source": "good", "part_ref": "P001", "max_bulge_mm": 0.1, "max_gap_mm": 0.0},
-        {"source": "home", "part_ref": "P1058", "max_bulge_mm": 0.4, "max_gap_mm": 0.0},
-        {"source": "gap", "part_ref": "P864", "max_bulge_mm": 0.2, "max_gap_mm": 0.4},
+        {"source": "home", "part_ref": "P936", "max_bulge_mm": 0.4, "max_gap_mm": 0.0},
+        {"source": "gap", "part_ref": "P699", "max_bulge_mm": 0.2, "max_gap_mm": 0.4},
     ]
 
     assert [item["source"] for item in module.select_targets(baseline)] == ["cage", "home", "gap"]

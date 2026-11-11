@@ -17,7 +17,7 @@ from OCP.TopoDS import TopoDS_Compound
 from pydrake.geometry import CollisionFilterDeclaration, GeometrySet, Role
 
 from twin_lab import collision_viewer
-from twin_lab.collision import CollisionModel, part_of
+from twin_lab.collision import CollisionModel, part_of, read_ignored_pairs
 
 RECIPE = Path(__file__).resolve().parent / "reviews" / "assembly.yaml"
 
@@ -52,6 +52,7 @@ class AssemblyCollisionModel(CollisionModel):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.ignored_pairs = self.ignored_pairs | read_ignored_pairs(RECIPE)
         self._cad_shapes = {}
         self._cad_gaps = {}
         self._cad_review = None
@@ -62,15 +63,13 @@ class AssemblyCollisionModel(CollisionModel):
         return True
 
     def _cad_shape(self, name):
-        from build import CACHE, read_shape
+        from build import CACHE, expand_stage_splits, read_shape
 
         if name not in self._cad_shapes:
             if self._cad_review is None:
                 review = yaml.safe_load(RECIPE.read_text())
                 templates = yaml.safe_load((RECIPE.parent / review["split_templates"]).read_text())
-                review["stage_splits"] = {
-                    ref: templates[key] for ref, key in review["stage_splits"].items()
-                }
+                review["stage_splits"] = expand_stage_splits(review, templates)
                 self._cad_review = review
                 self._cad_stats = json.loads((CACHE / "stats.json").read_text())
             review = self._cad_review

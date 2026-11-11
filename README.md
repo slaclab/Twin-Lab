@@ -9,7 +9,7 @@ Two models are currently runnable:
 | Key | Model | Joints |
 | --- | --- | --- |
 | `43841` | Subassembly `*43841` from drawing `DSG-000040389`: an EPIX detector stage, three crystal stacks, and three polycapillary stacks | 27 |
-| `95835` | Offline assembly `DSG-000095835`: Parker lift and slide, Huber rotation, and three Kohzu crystal stacks. See [its README](cad/DSG-000095835/README.md) | 12 |
+| `95835` | Offline assembly `DSG-000095835`: Parker lift and slide, Huber rotation, four crystal stacks, liquid jet, two slit towers, the ePix10k slides, and the ePix100's linear stage, manual Kohzu translation and swivel. See [its README](cad/DSG-000095835/README.md) | 27 |
 
 In `43841`, the two Thorlabs LX10 detector stages are manual-only because they
 are not powered and have no EPICS archive data.
@@ -1010,6 +1010,12 @@ re-modelled. Run
 at home before adding to this block: a pair that comes back `explained` is an
 artefact of the collision geometry, and recording it as expected contact hides a
 decomposition problem instead of a design one.
+
+Separately, the viewer treats every contact present at the reviewed home pose as
+baseline for as long as its two parts keep their home relative pose. Moving a
+stage elsewhere in the assembly therefore does not bring back unrelated home
+contacts; moving either part relative to the other checks the pair again.
+`home_ignored_pairs` near misses follow the same rule.
 
 **Optional**, only when the pairs you want to exclude live elsewhere: pass
 `--ignore-file` to read the block from another YAML file instead.

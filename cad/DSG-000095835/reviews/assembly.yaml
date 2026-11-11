@@ -1,86 +1,131 @@
 schema: twin-lab-local-assembly/v1
 model_name: DSG-000095835
 source_step: cad/DSG-000095835/source.stp
-source_sha256: 93ae4dc6645ba0402a05baecccb16ae6cbc26188ed1a7bb7519daee9f3cb788e
+source_sha256: b1c34cc1ddab5fa5db03b531fea010e15f8e73646cb32b8fcfcde00f2d6f4da4
 cad_manifest: cad/DSG-000095835/manifest.json
 linear_deflection_mm: 0.5
+# Visual meshes use the STEP presentation colours, face by face (STEP carries no image
+# textures). visual_rgba is the fallback for leaves the STEP leaves uncoloured.
+visual_colors: step
 visual_rgba: [0.7, 0.7, 0.7, 1.0]
 split_templates: stage-splits.yaml
 collision_regressions:
 - name: CAD home is clear
   positions: {}
   expect_clear: true
-  # The STEP itself overlaps the jet adapter 1.1 mm into the chamber wall.
-  allowed_pairs:
-  - [P011, P679]
 - name: Vertical lift contacts the outer cage
   positions:
     parker_lift_joint: -0.05
-  touching_pairs:
-  - [P691, P867]
+  touching_pairs: [[P526, P702]]
 - name: Return from cage contact to home
   positions: {}
   expect_clear: true
-  allowed_pairs:
-  - [P011, P679]
+# Reviewed hull false positives that cannot close within travel. The convex hulls of chamber
+# port P403 fill the bores the slit blade rods pass through; source CAD keeps clearance around
+# each rod at every corner of its +/-4 mm y and +/-7.5 mm x travel.
+ignored_pairs:
+- pair: [P403, P077]
+  reason: Bottom slit rod passes through the port bore with >= 2.786 mm CAD clearance over travel.
+- pair: [P403, P123]
+  reason: Top slit rod passes through the port bore with >= 2.729 mm CAD clearance over travel.
 notes:
 - Offline provisional kinematic model; CAD pose is q=0 for every joint.
 - Axes and attachment order inferred from bearing geometry and coincident mounting planes.
-- Catalog travel is exposed for review; imported Parker and Kohzu absolute travel zeros are
-  uncalibrated.
-- Kohzu RA/SA and Huber fused solids are partitioned at visible moving interfaces; internal
-  bearings simplified.
+- Catalog travel is exposed for review; imported Parker and Kohzu absolute travel zeros are uncalibrated.
+- Kohzu XA/SA and Huber fused solids are partitioned at visible moving interfaces; internal bearings
+  simplified.
+- Bearing parts also list payloads riding a constant designed clearance to their own stage, which
+  the inflated hulls fill. These are Huber end plate P936 (0.5 mm over +/-45 degrees), Parker
+  bracket P698 (3.25 mm over +/-50 mm), slit lift brackets P091/P140 (0.787 mm over +/-4 mm) and
+  slit X-stage sensor brackets P106/P155 (0.498 mm to the X carriage over +/-7.5 mm). Source-CAD
+  gaps were checked across the full travel.
+- The four crystal rotation stages LIB-000032444 (P767/P811/P854/P897) replaced the Kohzu RA04A-W
+  in this revision and carry no solids in the STEP, so no rotation stage is drawn or checked. Each
+  rotation axis rides the adapter mo39185433 above it, which kept its place in the stack; the XA07A
+  translation stages sit 0.5 mm higher in each stack than before.
+- The STEP holds four mo39154771 crystal stacks A064-A067. Stack 4 joint frames are stack 1 frames
+  carried by the stack placement transform; the same transform reproduces stacks 2 and 3 to 0.022 mm.
 - Jet stage parts are present in this STEP revision.
-- Manual stages remain fixed. Diffractometer, beam construction geometry and communication
-  configuration omitted.
-- Split outputs discard inverted and disconnected solids below 100 cubic millimetres; external
-  stage bodies and carriage interfaces retained.
-- Beamline axes, used to name the LJ, slit and detector joints, are y up (world +Z) and beam
-  travelling along -z (world -Y), so z is world +Y and x is world -X. The beam direction is
-  inferred from the slits upstream at world +Y and the ePix10k centred on world Y downstream.
-- Liquid jet DSG-000007948 is a three-axis chain, as in the 43841 review. Kohzu XA05A-L202-R
-  A007 runs along the jet (x, 50 mm), XA05A-R202 A006 carries z (15 mm), then the ZA05A lift
-  A005 carries y (8 mm, assembled fully down). The adapter and long jet DSG-000022427 ride the
-  lift.
-- Bottom and top slits A021/A027 each stack a LIB-000032451 vertical lift (y, 8 mm) under an
-  XA05A-R202 (x, 15 mm); the blade rods ride the X stage. See auxiliary-stages.md.
-- The ePix10k detector rides two Newport IMS300CC slides, the lower P1920 along z and the
-  upper P1852 along x. Each fused slide is split at its carriage. 300 mm travel is assumed to
-  be centred on the CAD pose.
-- Outer cage A047 is fixed collision geometry. Large spectrometer controls are the two 100
-  mm Parker slides.
-- The user-supplied controls envelope P867 and its support posts ride the Parker lift plate
-  P831; this STEP revision replaces the earlier XCS Von Hamos Controls assembly DSG-000108873
-  with that single envelope.
-- The supplied STEP is the 10 degree mounting configuration of DSG-000095826 on DSG-000097481.
-  The 0 and 5 degree mounting placements are not yet verified.
-- Detector assembly LCL5005-008450 (ePix10k on two Newport IMS300 slides) keeps its 45 parts
-  at least 100 mm across; smaller parts and electronics are omitted.
-- Table assembly DSG-000008836 (understructure, floor anchors, diffractometer) stays omitted.
-- Camera stages LIB-000032933/LIB-000032929 have no geometry in this STEP; the camera stays
-  fixed.
+- Manual stages remain fixed, except the ePix100's manual Kohzu translation and swivel. Beam
+  construction geometry and communication configuration omitted.
+- Analyzer (Huber 410) and crystal rotations are limited to +/-45 degrees about the CAD pose by
+  request.
+- Split outputs discard inverted and disconnected solids below 100 cubic millimetres; external stage
+  bodies and carriage interfaces retained.
+- Beamline axes, used to name the LJ, slit and detector joints, are y up (world +Z) and beam travelling
+  along -z (world -Y), so z is world +Y and x is world -X. The beam direction is inferred from the
+  slits upstream at world +Y and the ePix10k centred on world Y downstream.
+- Liquid jet DSG-000007948 is a three-axis chain, as in the 43841 review. Kohzu XA05A-L202-R A007
+  runs along the jet (x, 50 mm), XA05A-R202 A006 carries z (15 mm), then the ZA05A lift A005 carries
+  y (8 mm, assembled fully down). The jet adapter DSG-000000506 P011, holder DSG-000108486 P507 and
+  tube DSG-000005121 P514 ride the lift. The long jet DSG-000022427 left the design in the
+  2026-11-04 revision.
+- Bottom and top slits A009/A015 each stack a LIB-000032451 vertical lift (y, 8 mm) under an XA05A-R202
+  (x, 15 mm); the blade rods ride the X stage. See auxiliary-stages.md.
+- The slit blade holders DSG-000000720 (P497 bottom, P194 top) and their blade plates (P424/P425 bottom,
+  P422/P423 top) are placed directly under chamber assembly A003 in the STEP, but are clamped by four
+  5-40 screws to the tip of each blade rod (P077, P123). They ride the slit X stages.
+- The ePix10k detector rides two Newport IMS300CC slides, the lower P1791 along z and the upper P1723
+  along x. Each fused slide is split at its carriage, and 300 mm travel is assumed centred on the
+  carriage position the fused slide models. In the 2026-11-04 STEP everything on the lower carriage
+  sits 80.1151 mm along world -Y from that carriage, so its moving region is offset to sit under
+  the payload and z travel is -69.885/+230.115 mm about the CAD pose.
+- Outer cage A035 is fixed collision geometry. Large spectrometer controls are the two 100 mm Parker
+  slides.
+- The user-supplied controls envelope P702 and its support posts ride the Parker lift plate P666;
+  this STEP revision replaces the earlier XCS Von Hamos Controls assembly DSG-000108873 with that
+  single envelope.
+- The supplied STEP is the 10 degree mounting configuration of DSG-000095826 on DSG-000097481. The
+  0 and 5 degree mounting placements are not yet verified.
+- Detector assembly LCL5005-008450 (ePix10k on two Newport IMS300 slides) keeps its parts at least
+  100 mm across, including front plate mo39134025 P1342; smaller parts and electronics are omitted.
+- Diffractometer base P973 is fixed geometry. The diffractometer body, 2-theta arm and 2-theta stage
+  (P974-P976) carry only coordinate systems in this STEP, so no further diffractometer geometry can
+  be shown; its goniometer SA-391-444-50 is not in the export. The rest of table assembly
+  DSG-000008836 (understructure, floor anchors) stays omitted.
+- Camera stages LIB-000032933/LIB-000032929 have no geometry in this STEP; the camera stays fixed.
+- The upward-facing ePix100 (module mo39154223 in DSG-000042618 A021) rides, from the fixed column
+  P302/P328/P202, a lead-screw linear stage LIB-000000725 P197 along world X, an old 70 mm manual
+  Kohzu cross-roller X stage LIB-000005430 P313 along world Y, and a Kohzu SH05B-RM manual swivel
+  LIB-000013709 A031 about world X through datum sphere P326. A 10 degree wedge adapter P196 under
+  the swivel gives the detector's CAD tilt; the swivel itself is centred. Both stages are fused
+  single solids in the STEP and are split at their carriage/table (stage-splits.yaml). The linear
+  stage travel comes from its end blocks, -92.2/+101.7 mm for the fused carriage; the payload sits
+  61.19 mm from that carriage in this STEP, so its moving region is offset and ePix100 x runs
+  -40.51/+153.39 mm about the CAD pose. The Kohzu travel is the +/-6.5 mm of the current XM07A
+  equivalent. The module's front/rear covers P266/P222 and cooling block P249/P250 have solids since
+  the 2026-11-04 14:01 export (empty before), so they are retained with the external coolant fittings
+  and tubes P251-P258/P288 and the transceiver P240 and ribbon cable P247 that protrude from the
+  rear face; the parts fully enclosed by the covers stay omitted as internals.
 stage_splits:
-  P1055: P1177
-  P925: P1047
-  P932: P1054
-  P930: P1052
-  P969: P1047
-  P976: P1054
-  P974: P1052
-  P1012: P1047
-  P1019: P1054
-  P1017: P1052
-  P1920: IMS300CC
-  P1852: IMS300CC
+  P933: P1177
+  P760: P1047
+  P765: P1052
+  P804: P1047
+  P809: P1052
+  P847: P1047
+  P852: P1052
+  P1791:
+    template: IMS300CC
+    moving_offset_mm: [0.0, 0.0, -80.1151]
+  P1723: IMS300CC
+  # The ePix100 payload sits 61.19 mm along local +Z from the fused carriage, matched
+  # by the adapter's M3 counterbores against the carriage's tapped holes.
+  P197:
+    template: LIB-000000725
+    moving_offset_mm: [0.0, 0.0, 61.19]
+  P313: LIB-000005430
+  P890: P1047
+  P895: P1052
 bodies:
   assembly_base:
     rgba: [0.6, 0.64, 0.69, 1.0]
     parts:
-    - P849
-    - P851
-    - P852
-    - P862
-    - P881
+    - P684
+    - P686
+    - P687
+    - P697
+    - P716
     - P001
     - P002
     - P003
@@ -93,397 +138,342 @@ bodies:
     - P051
     - P053
     - P055
-    - P089
-    - P091
-    - P093
-    - P094
-    - P095
-    - P097
-    - P098
-    - P099
-    - P102
-    - P191
-    - P192
-    - P194
-    - P195
-    - P207
-    - P231
-    - P232
-    - P235
-    - P502
-    - P503
-    - P504
-    - P506
-    - P508
-    - P511
-    - P514
-    - P516
-    - P517
-    - P518
-    - P520
-    - P521
-    - P523
-    - P524
-    - P525
-    - P531
-    - P533
-    - P534
-    - P541
-    - P544
-    - P545
-    - P551
-    - P552
-    - P556
-    - P558
-    - P559
-    - P563
-    - P566
-    - P567
-    - P572
-    - P575
-    - P577
-    - P584
-    - P237
-    - P238
-    - P256
-    - P257
-    - P258
-    - P264
-    - P269
-    - P270
-    - P271
-    - P287
-    - P288
-    - P289
-    - P305
-    - P306
-    - P307
-    - P313
-    - P318
-    - P319
-    - P320
+    - P063
+    - P066
+    - P332
+    - P333
+    - P334
     - P336
-    - P337
+    - P338
+    - P341
+    - P344
     - P346
+    - P347
+    - P348
+    - P350
     - P351
-    - P352
     - P353
     - P354
     - P355
-    - P356
+    - P361
     - P363
     - P364
-    - P366
-    - P367
-    - P369
     - P371
-    - P372
     - P374
-    - P472
-    - P483
-    - P495
-    - P497
-    - P498
-    - P499
+    - P375
+    - P381
+    - P382
+    - P386
+    - P388
+    - P389
+    - P393
+    - P396
+    - P397
+    - P402
+    - P405
+    - P407
+    - P414
+    - P068
+    - P086
+    - P087
+    - P088
+    - P094
+    - P099
+    - P100
+    - P101
+    - P117
+    - P118
+    - P119
+    - P135
+    - P136
+    - P137
+    - P143
+    - P148
+    - P149
+    - P150
+    - P166
+    - P167
+    - P176
+    - P181
+    - P182
+    - P183
+    - P184
+    - P185
+    - P186
+    - P193
+    - {ref: P197, region: fixed}
+    - P202
+    - P302
+    - P328
+    - P421
+    - P426
+    - P427
+    - P428
+    - P429
+    - P430
+    - P431
+    - P432
+    - P433
+    - P434
+    - P435
+    - P436
+    - P437
+    - P438
+    - P439
+    - P440
+    - P441
+    - P442
+    - P443
+    - P444
+    - P445
+    - P446
+    - P447
+    - P452
+    - P454
+    - P456
+    - P461
+    - P464
+    - P465
+    - P466
+    - P471
+    - P476
+    - P482
+    - P493
+    - P494
     - P500
-    - P590
-    - P591
-    - P592
-    - P593
-    - P594
-    - P595
-    - P596
-    - P597
-    - P598
+    - P1079
+    - P1080
+    - P1081
+    - P1088
+    - P515
+    - P516
+    - P517
+    - P518
+    - P551
+    - P547
+    - P519
+    - P548
+    - P544
+    - P524
+    - P549
+    - P526
+    - P527
+    - P528
+    - P530
+    - P531
+    - P532
+    - P545
+    - P536
+    - P556
+    - P557
+    - P558
+    - P559
+    - P560
+    - P561
+    - P562
+    - P563
+    - P564
+    - P565
+    - P566
+    - P567
+    - P568
+    - P569
+    - P570
+    - P571
+    - P572
+    - P573
+    - P574
+    - P575
+    - P576
+    - P577
+    - P578
+    - P579
+    - P580
+    - P581
+    - P582
     - P599
     - P600
     - P601
     - P602
-    - P603
-    - P604
-    - P605
-    - P606
-    - P607
-    - P608
-    - P609
-    - P610
-    - P611
-    - P612
-    - P613
-    - P614
-    - P615
-    - P616
-    - P617
-    - P618
-    - P622
-    - P624
-    - P626
-    - P628
-    - P633
-    - P636
-    - P637
-    - P638
-    - P643
-    - P648
-    - P654
-    - P665
-    - P666
-    - P669
-    - P672
-    - P1209
-    - P1210
-    - P1211
-    - P1218
-    - P680
-    - P681
-    - P682
-    - P683
-    - P716
-    - P712
-    - P684
-    - P713
-    - P709
-    - P689
-    - P714
-    - P691
-    - P692
-    - P693
-    - P695
-    - P696
-    - P697
-    - P710
-    - P701
-    - P721
-    - P722
-    - P723
-    - P724
-    - P725
-    - P726
-    - P727
-    - P728
-    - P729
-    - P730
-    - P731
-    - P732
-    - P733
-    - P734
-    - P735
-    - P736
-    - P737
-    - P738
-    - P739
-    - P740
-    - P741
-    - P742
-    - P743
-    - P744
-    - P745
-    - P746
-    - P747
-    - P764
-    - P765
-    - P766
-    - P767
     - P010
     - P023
-    - P375
-    - P376
-    - P379
-    - P468
-    - P469
-    - P471
-    - P510
-    - P573
-    - P587
-    - P588
-    - P589
-    - P679
-    - P711
-    - P715
-    - P1894
-    - P1917
-    - P1922
-    - {ref: P1920, region: fixed}
+    - P340
+    - P403
+    - P417
+    - P418
+    - P419
+    - P513
+    - P546
+    - P550
+    - P1765
+    - P1788
+    - P1793
+    - {ref: P1791, region: fixed}
+    - P973
+    - P331
+    - P508
+    - P511
+    - P512
     part_colors:
-      P680: &id001 [0.43, 0.49, 0.56, 1.0]
-      P681: [0.43, 0.49, 0.56, 1.0]
-      P682: [0.43, 0.49, 0.56, 1.0]
-      P683: [0.43, 0.49, 0.56, 1.0]
-      P684: [0.43, 0.49, 0.56, 1.0]
-      P689: [0.43, 0.49, 0.56, 1.0]
-      P691: [0.43, 0.49, 0.56, 1.0]
-      P692: [0.43, 0.49, 0.56, 1.0]
-      P693: [0.43, 0.49, 0.56, 1.0]
-      P695: [0.43, 0.49, 0.56, 1.0]
-      P696: [0.43, 0.49, 0.56, 1.0]
-      P697: [0.43, 0.49, 0.56, 1.0]
-      P701: [0.43, 0.49, 0.56, 1.0]
-      P709: [0.43, 0.49, 0.56, 1.0]
-      P710: [0.43, 0.49, 0.56, 1.0]
-      P711: *id001
-      P712: [0.43, 0.49, 0.56, 1.0]
-      P713: [0.43, 0.49, 0.56, 1.0]
-      P714: [0.43, 0.49, 0.56, 1.0]
-      P715: *id001
-      P716: [0.43, 0.49, 0.56, 1.0]
-      P721: [0.43, 0.49, 0.56, 1.0]
-      P722: [0.43, 0.49, 0.56, 1.0]
-      P723: [0.43, 0.49, 0.56, 1.0]
-      P724: [0.43, 0.49, 0.56, 1.0]
-      P725: [0.43, 0.49, 0.56, 1.0]
-      P726: [0.43, 0.49, 0.56, 1.0]
-      P727: [0.43, 0.49, 0.56, 1.0]
-      P728: [0.43, 0.49, 0.56, 1.0]
-      P729: [0.43, 0.49, 0.56, 1.0]
-      P730: [0.43, 0.49, 0.56, 1.0]
-      P731: [0.43, 0.49, 0.56, 1.0]
-      P732: [0.43, 0.49, 0.56, 1.0]
-      P733: [0.43, 0.49, 0.56, 1.0]
-      P734: [0.43, 0.49, 0.56, 1.0]
-      P735: [0.43, 0.49, 0.56, 1.0]
-      P736: [0.43, 0.49, 0.56, 1.0]
-      P737: [0.43, 0.49, 0.56, 1.0]
-      P738: [0.43, 0.49, 0.56, 1.0]
-      P739: [0.43, 0.49, 0.56, 1.0]
-      P740: [0.43, 0.49, 0.56, 1.0]
-      P741: [0.43, 0.49, 0.56, 1.0]
-      P742: [0.43, 0.49, 0.56, 1.0]
-      P743: [0.43, 0.49, 0.56, 1.0]
-      P744: [0.43, 0.49, 0.56, 1.0]
-      P745: [0.43, 0.49, 0.56, 1.0]
-      P746: [0.43, 0.49, 0.56, 1.0]
-      P747: [0.43, 0.49, 0.56, 1.0]
-      P764: [0.43, 0.49, 0.56, 1.0]
-      P765: [0.43, 0.49, 0.56, 1.0]
-      P766: [0.43, 0.49, 0.56, 1.0]
-      P767: [0.43, 0.49, 0.56, 1.0]
+      P515: [0.43, 0.49, 0.56, 1.0]
+      P516: [0.43, 0.49, 0.56, 1.0]
+      P517: [0.43, 0.49, 0.56, 1.0]
+      P518: [0.43, 0.49, 0.56, 1.0]
+      P519: [0.43, 0.49, 0.56, 1.0]
+      P524: [0.43, 0.49, 0.56, 1.0]
+      P526: [0.43, 0.49, 0.56, 1.0]
+      P527: [0.43, 0.49, 0.56, 1.0]
+      P528: [0.43, 0.49, 0.56, 1.0]
+      P530: [0.43, 0.49, 0.56, 1.0]
+      P531: [0.43, 0.49, 0.56, 1.0]
+      P532: [0.43, 0.49, 0.56, 1.0]
+      P536: [0.43, 0.49, 0.56, 1.0]
+      P544: [0.43, 0.49, 0.56, 1.0]
+      P545: [0.43, 0.49, 0.56, 1.0]
+      P546: [0.43, 0.49, 0.56, 1.0]
+      P547: [0.43, 0.49, 0.56, 1.0]
+      P548: [0.43, 0.49, 0.56, 1.0]
+      P549: [0.43, 0.49, 0.56, 1.0]
+      P550: [0.43, 0.49, 0.56, 1.0]
+      P551: [0.43, 0.49, 0.56, 1.0]
+      P556: [0.43, 0.49, 0.56, 1.0]
+      P557: [0.43, 0.49, 0.56, 1.0]
+      P558: [0.43, 0.49, 0.56, 1.0]
+      P559: [0.43, 0.49, 0.56, 1.0]
+      P560: [0.43, 0.49, 0.56, 1.0]
+      P561: [0.43, 0.49, 0.56, 1.0]
+      P562: [0.43, 0.49, 0.56, 1.0]
+      P563: [0.43, 0.49, 0.56, 1.0]
+      P564: [0.43, 0.49, 0.56, 1.0]
+      P565: [0.43, 0.49, 0.56, 1.0]
+      P566: [0.43, 0.49, 0.56, 1.0]
+      P567: [0.43, 0.49, 0.56, 1.0]
+      P568: [0.43, 0.49, 0.56, 1.0]
+      P569: [0.43, 0.49, 0.56, 1.0]
+      P570: [0.43, 0.49, 0.56, 1.0]
+      P571: [0.43, 0.49, 0.56, 1.0]
+      P572: [0.43, 0.49, 0.56, 1.0]
+      P573: [0.43, 0.49, 0.56, 1.0]
+      P574: [0.43, 0.49, 0.56, 1.0]
+      P575: [0.43, 0.49, 0.56, 1.0]
+      P576: [0.43, 0.49, 0.56, 1.0]
+      P577: [0.43, 0.49, 0.56, 1.0]
+      P578: [0.43, 0.49, 0.56, 1.0]
+      P579: [0.43, 0.49, 0.56, 1.0]
+      P580: [0.43, 0.49, 0.56, 1.0]
+      P581: [0.43, 0.49, 0.56, 1.0]
+      P582: [0.43, 0.49, 0.56, 1.0]
+      P599: [0.43, 0.49, 0.56, 1.0]
+      P600: [0.43, 0.49, 0.56, 1.0]
+      P601: [0.43, 0.49, 0.56, 1.0]
+      P602: [0.43, 0.49, 0.56, 1.0]
   parker_lift:
     rgba: [0.2, 0.45, 0.75, 1.0]
-    parts:
-    - P850
-    - P866
-    - P831
-    - P817
-    - P819
-    - P820
-    - P830
-    - P922
-    - P1087
-    - P1089
-    - P1093
-    - P867
+    parts: [P685, P701, P666, P652, P654, P655, P665, P757, P965, P967, P971, P702]
     part_colors:
-      P867: [0.22, 0.25, 0.29, 1.0]
+      P702: [0.22, 0.25, 0.29, 1.0]
   parker_cross:
     rgba: [0.27, 0.59, 0.85, 1.0]
     parts:
-    - P818
-    - P863
-    - P864
-    - P865
-    - P1057
-    - ref: P1055
-      region: fixed
+    - P653
+    - P698
+    - P699
+    - P700
+    - P935
+    - {ref: P933, region: fixed}
   analyzer_rotation:
     rgba: [0.75, 0.43, 0.18, 1.0]
     parts:
-    - ref: P1055
-      region: moving
-    - P1058
-    - P1063
-    - P1064
-    - P1069
-    - P923
-    - ref: P925
-      region: fixed
-    - ref: P969
-      region: fixed
-    - ref: P1012
-      region: fixed
+    - {ref: P933, region: moving}
+    - P936
+    - P941
+    - P942
+    - P947
+    - P758
+    - {ref: P760, region: fixed}
+    - {ref: P804, region: fixed}
+    - {ref: P847, region: fixed}
+    - {ref: P890, region: fixed}
   crystal_1_translation:
     rgba: [0.26, 0.63, 0.46, 1.0]
     parts:
-    - ref: P925
-      region: moving
-    - P928
-    - ref: P932
-      region: fixed
+    - {ref: P760, region: moving}
+    - P763
   crystal_1_rotation:
     rgba: [0.59, 0.37, 0.78, 1.0]
     parts:
-    - ref: P932
-      region: moving
-    - P931
-    - ref: P930
-      region: fixed
-    - ref: P930
-      solids: [2, 3]
+    - P766
+    - {ref: P765, region: fixed}
+    - {ref: P765, solids: [2, 3]}
   crystal_1_tilt:
     rgba: [0.12, 0.73, 0.72, 1.0]
     parts:
-    - ref: P930
-      region: moving
-    - P926
-    - P934
-    - P965
-    - P966
-    - P967
+    - {ref: P765, region: moving}
+    - P761
+    - P769
+    - P800
+    - P801
+    - P802
   crystal_2_translation:
     rgba: [0.26, 0.63, 0.46, 1.0]
     parts:
-    - ref: P969
-      region: moving
-    - P972
-    - ref: P976
-      region: fixed
+    - {ref: P804, region: moving}
+    - P807
   crystal_2_rotation:
     rgba: [0.59, 0.37, 0.78, 1.0]
     parts:
-    - ref: P976
-      region: moving
-    - P975
-    - ref: P974
-      region: fixed
-    - ref: P974
-      solids: [2, 3]
+    - P810
+    - {ref: P809, region: fixed}
+    - {ref: P809, solids: [2, 3]}
   crystal_2_tilt:
     rgba: [0.12, 0.73, 0.72, 1.0]
     parts:
-    - ref: P974
-      region: moving
-    - P970
-    - P978
-    - P1009
-    - P1010
-    - P1011
+    - {ref: P809, region: moving}
+    - P805
+    - P813
+    - P844
+    - P845
+    - P846
   crystal_3_translation:
     rgba: [0.26, 0.63, 0.46, 1.0]
     parts:
-    - ref: P1012
-      region: moving
-    - P1015
-    - ref: P1019
-      region: fixed
+    - {ref: P847, region: moving}
+    - P850
   crystal_3_rotation:
     rgba: [0.59, 0.37, 0.78, 1.0]
     parts:
-    - ref: P1019
-      region: moving
-    - P1018
-    - ref: P1017
-      region: fixed
-    - ref: P1017
-      solids: [2, 3]
+    - P853
+    - {ref: P852, region: fixed}
+    - {ref: P852, solids: [2, 3]}
   crystal_3_tilt:
     rgba: [0.12, 0.73, 0.72, 1.0]
     parts:
-    - ref: P1017
-      region: moving
-    - P1013
-    - P1021
-    - P1052
-    - P1053
-    - P1054
+    - {ref: P852, region: moving}
+    - P848
+    - P856
+    - P887
+    - P888
+    - P889
+  crystal_4_translation:
+    rgba: [0.26, 0.63, 0.46, 1.0]
+    parts:
+    - {ref: P890, region: moving}
+    - P893
+  crystal_4_rotation:
+    rgba: [0.59, 0.37, 0.78, 1.0]
+    parts:
+    - P896
+    - {ref: P895, region: fixed}
+    - {ref: P895, solids: [2, 3]}
+  crystal_4_tilt:
+    rgba: [0.12, 0.73, 0.72, 1.0]
+    parts:
+    - {ref: P895, region: moving}
+    - P891
+    - P899
+    - P930
+    - P931
+    - P932
   lj_x:
     rgba: [0.16, 0.52, 0.44, 1.0]
     parts: [P024, P021]
@@ -491,74 +481,91 @@ bodies:
     rgba: [0.32, 0.74, 0.62, 1.0]
     parts: [P022, P019]
   lj_y:
-    rgba: [0.10, 0.58, 0.95, 1.0]
-    parts: [P020, P011, P040, P042, P044, P046, P048, P057, P063, P065, P066, P067, P068,
-      P069, P070, P071, P072, P073, P074, P075, P076, P077, P078, P079, P083, P086, P087]
+    rgba: [0.1, 0.58, 0.95, 1.0]
+    parts: [P020, P011, P040, P042, P044, P046, P048, P057, P507, P514]
   bottom_slit_y:
     rgba: [0.82, 0.34, 0.48, 1.0]
-    parts: [P255, P261, P267, P273, P276, P277, P280]
+    parts: [P085, P091, P097, P103, P106, P107, P110]
   bottom_slit_x:
     rgba: [0.32, 0.74, 0.62, 1.0]
-    parts: [P274, P275, P281, P243, P244, P247]
+    parts: [P104, P105, P111, P073, P074, P077, P497, P424, P425]
   top_slit_y:
     rgba: [0.82, 0.34, 0.48, 1.0]
-    parts: [P304, P310, P316, P322, P325, P326, P329]
+    parts: [P134, P140, P146, P152, P155, P156, P159]
   top_slit_x:
     rgba: [0.32, 0.74, 0.62, 1.0]
-    parts: [P323, P324, P330, P292, P293]
+    parts: [P153, P154, P160, P122, P123, P194, P422, P423]
   detector_z:
-    rgba: [0.20, 0.58, 0.68, 1.0]
+    rgba: [0.2, 0.58, 0.68, 1.0]
     parts:
-    - {ref: P1920, region: moving}
-    - {ref: P1852, region: fixed}
-    - P1887
-    - P1915
+    - {ref: P1791, region: moving}
+    - {ref: P1723, region: fixed}
+    - P1758
+    - P1786
   detector_x:
     rgba: [0.18, 0.72, 0.62, 1.0]
     parts:
-    - {ref: P1852, region: moving}
-    - P1899
-    - P1236
-    - P1848
-    - P1856
-    - P1866
-    - P1876
-    - P1886
-    - P1888
-    - P1889
-    - P1893
-    - P1897
-    - P1244
-    - P1253
-    - P1266
-    - P1279
+    - {ref: P1723, region: moving}
+    - P1770
+    - P1106
+    - P1719
+    - P1727
+    - P1737
+    - P1747
+    - P1757
+    - P1759
+    - P1760
+    - P1764
+    - P1768
+    - P1114
+    - P1123
+    - P1136
+    - P1149
+    - P1164
+    - P1170
+    - P1183
+    - P1194
+    - P1210
+    - P1218
+    - P1289
+    - P1290
+    - P1293
     - P1294
-    - P1300
-    - P1313
-    - P1324
-    - P1340
-    - P1348
-    - P1419
-    - P1420
-    - P1423
-    - P1424
-    - P1425
-    - P1429
-    - P1436
-    - P1437
-    - P1438
+    - P1295
+    - P1299
+    - P1306
+    - P1307
+    - P1308
+    - P1315
+    - P1333
+    - P1343
+    - P1441
+    - P1443
+    - P1444
     - P1445
-    - P1463
-    - P1472
-    - P1570
-    - P1572
-    - P1573
-    - P1574
-    - P1575
+    - P1446
+    - P1342
+  epix100_x:
+    rgba: [0.55, 0.45, 0.75, 1.0]
+    parts:
+    - {ref: P197, region: moving}
+    - P199
+    - {ref: P313, region: fixed}
+  epix100_z:
+    rgba: [0.65, 0.5, 0.82, 1.0]
+    parts:
+    - {ref: P313, region: moving}
+    - P196
+    - P329
+    - P325
+  epix100_tilt:
+    rgba: [0.75, 0.55, 0.9, 1.0]
+    parts: [P327, P330, P204, P201, P205, P206, P209, P298, P299, P301, P222, P249, P250, P266,
+      P240, P247, P251, P252, P253, P254, P255, P256, P257, P258, P288]
 joints:
 - name: parker_lift_joint
   stack: Spectrometer / large vertical slide (100 mm travel)
-  stage_ref: P849
+  stage_ref: P684
   type: prismatic
   parent: assembly_base
   child: parker_lift
@@ -566,158 +573,161 @@ joints:
   origin_m: [-0.51054, 0.103376299865, 0.578943697639]
   limits: [-0.05, 0.05]
   home: 0.0
-  bearing_parts:
-  - - P849
-    - P851
-    - P852
-    - P862
-  - - P850
+  bearing_parts: [[P684, P686, P687, P697], [P685]]
 - name: parker_cross_joint
   stack: Spectrometer / large horizontal slide (100 mm travel)
-  stage_ref: P817
+  stage_ref: P652
   type: prismatic
   parent: parker_lift
   child: parker_cross
-  axis_xyz: [1.0, -0.0, 0.0]
+  axis_xyz: [1.0, 0.0, 0.0]
   origin_m: [-0.244418, 0.099219249316, 0.555367892435]
   limits: [-0.05, 0.05]
   home: 0.0
-  bearing_parts:
-  - - P817
-    - P819
-    - P820
-    - P830
-  - - P818
+  bearing_parts: [[P652, P654, P655, P665], [P653, P698]]
 - name: analyzer_rotation_joint
   stack: Analyzer support
-  stage_ref: P1055
+  stage_ref: P933
   type: revolute
   parent: parker_cross
   child: analyzer_rotation
-  axis_xyz: [1.0, -0.0, 0.0]
+  axis_xyz: [1.0, 0.0, 0.0]
   origin_m: [-0.312393, 0.043412044417, 0.246211938253]
-  limits: [-3.141592653589793, 3.141592653589793]
+  limits: [-0.7853981633974483, 0.7853981633974483]
   home: 0.0
-  bearing_parts:
-  - - P1055
-  - - P1055
+  bearing_parts: [[P933], [P933, P936]]
 - name: crystal_1_translation_joint
   stack: crystal_1
-  stage_ref: P925
+  stage_ref: P760
   type: prismatic
   parent: analyzer_rotation
   child: crystal_1_translation
   axis_xyz: [0.0, 0.059306373576, -0.998239827924]
-  origin_m: [0.123887, -0.016331468901, 0.274899893319]
+  origin_m: [0.122887, -0.016331468901, 0.274899893319]
   limits: [-0.035, 0.035]
   home: 0.0
-  bearing_parts:
-  - - P925
-  - - P925
+  bearing_parts: [[P760], [P760]]
 - name: crystal_1_rotation_joint
   stack: crystal_1
-  stage_ref: P932
+  stage_ref: P767
   type: revolute
   parent: crystal_1_translation
   child: crystal_1_rotation
-  axis_xyz: [-1.0, 0.0, -0.0]
-  origin_m: [0.074362, -0.014825087012, 0.249544601689]
-  limits: [-3.0892327760299634, 3.0892327760299634]
+  axis_xyz: [-1.0, 0.0, 0.0]
+  origin_m: [0.073862, -0.014825087012, 0.249544601689]
+  limits: [-0.7853981633974483, 0.7853981633974483]
   home: 0.0
-  bearing_parts:
-  - - P932
-  - - P932
+  bearing_parts: [[], [P766]]
 - name: crystal_1_tilt_joint
   stack: crystal_1
-  stage_ref: P930
+  stage_ref: P765
   type: revolute
   parent: crystal_1_rotation
   child: crystal_1_tilt
   axis_xyz: [0.0, 0.998239827924, 0.059306373576]
-  origin_m: [-0.039163, -0.014825087012, 0.249544601689]
+  origin_m: [-0.039663, -0.014825087012, 0.249544601689]
   limits: [-0.17453292519943295, 0.17453292519943295]
   home: 0.0
-  bearing_parts:
-  - - P930
-  - - P930
+  bearing_parts: [[P765], [P765]]
 - name: crystal_2_translation_joint
   stack: crystal_2
-  stage_ref: P969
+  stage_ref: P804
   type: prismatic
   parent: analyzer_rotation
   child: crystal_2_translation
   axis_xyz: [0.0, -0.397147890635, -0.917754625684]
-  origin_m: [0.123887, 0.109364441524, 0.252736312946]
+  origin_m: [0.122887, 0.109364441524, 0.252736312946]
   limits: [-0.035, 0.035]
   home: 0.0
-  bearing_parts:
-  - - P969
-  - - P969
+  bearing_parts: [[P804], [P804]]
 - name: crystal_2_rotation_joint
   stack: crystal_2
-  stage_ref: P976
+  stage_ref: P811
   type: revolute
   parent: crystal_2_translation
   child: crystal_2_rotation
-  axis_xyz: [-1.0, 0.0, -0.0]
-  origin_m: [0.074362, 0.099276885102, 0.229425345454]
-  limits: [-3.0892327760299634, 3.0892327760299634]
+  axis_xyz: [-1.0, 0.0, 0.0]
+  origin_m: [0.073862, 0.099276885102, 0.229425345454]
+  limits: [-0.7853981633974483, 0.7853981633974483]
   home: 0.0
-  bearing_parts:
-  - - P976
-  - - P976
+  bearing_parts: [[], [P810]]
 - name: crystal_2_tilt_joint
   stack: crystal_2
-  stage_ref: P974
+  stage_ref: P809
   type: revolute
   parent: crystal_2_rotation
   child: crystal_2_tilt
   axis_xyz: [0.0, 0.917754625684, -0.397147890635]
-  origin_m: [-0.039163, 0.099276885102, 0.229425345454]
+  origin_m: [-0.039663, 0.099276885102, 0.229425345454]
   limits: [-0.17453292519943295, 0.17453292519943295]
   home: 0.0
-  bearing_parts:
-  - - P974
-  - - P974
+  bearing_parts: [[P809], [P809]]
 - name: crystal_3_translation_joint
   stack: crystal_3
-  stage_ref: P1012
+  stage_ref: P847
   type: prismatic
   parent: analyzer_rotation
   child: crystal_3_translation
-  axis_xyz: [-0.0, 0.059306373576, -0.998239827924]
+  axis_xyz: [0.0, 0.059306373576, -0.998239827924]
   origin_m: [-0.232693, -0.016331468901, 0.274899893319]
   limits: [-0.035, 0.035]
   home: 0.0
-  bearing_parts:
-  - - P1012
-  - - P1012
+  bearing_parts: [[P847], [P847]]
 - name: crystal_3_rotation_joint
   stack: crystal_3
-  stage_ref: P1019
+  stage_ref: P854
   type: revolute
   parent: crystal_3_translation
   child: crystal_3_rotation
-  axis_xyz: [1.0, -0.0, -0.0]
-  origin_m: [-0.183168, -0.014825087012, 0.249544601689]
-  limits: [-3.0892327760299634, 3.0892327760299634]
+  axis_xyz: [1.0, 0.0, 0.0]
+  origin_m: [-0.183668, -0.014825087012, 0.249544601689]
+  limits: [-0.7853981633974483, 0.7853981633974483]
   home: 0.0
-  bearing_parts:
-  - - P1019
-  - - P1019
+  bearing_parts: [[], [P853]]
 - name: crystal_3_tilt_joint
   stack: crystal_3
-  stage_ref: P1017
+  stage_ref: P852
   type: revolute
   parent: crystal_3_rotation
   child: crystal_3_tilt
-  axis_xyz: [-0.0, -0.998239827924, -0.059306373576]
-  origin_m: [-0.069643, -0.014825087012, 0.249544601689]
+  axis_xyz: [0.0, -0.998239827924, -0.059306373576]
+  origin_m: [-0.070143, -0.014825087012, 0.249544601689]
   limits: [-0.17453292519943295, 0.17453292519943295]
   home: 0.0
-  bearing_parts:
-  - - P1017
-  - - P1017
+  bearing_parts: [[P852], [P852]]
+- name: crystal_4_translation_joint
+  stack: crystal_4
+  stage_ref: P890
+  type: prismatic
+  parent: analyzer_rotation
+  child: crystal_4_translation
+  axis_xyz: [0.0, -0.397147890635, -0.917754625684]
+  origin_m: [-0.232670645038, 0.109367861726, 0.252735709872]
+  limits: [-0.035, 0.035]
+  home: 0.0
+  bearing_parts: [[P890], [P890]]
+- name: crystal_4_rotation_joint
+  stack: crystal_4
+  stage_ref: P897
+  type: revolute
+  parent: crystal_4_translation
+  child: crystal_4_rotation
+  axis_xyz: [1.0, 0.0, 0.0]
+  origin_m: [-0.183645645038, 0.099280305303, 0.229424742379]
+  limits: [-0.7853981633974483, 0.7853981633974483]
+  home: 0.0
+  bearing_parts: [[], [P896]]
+- name: crystal_4_tilt_joint
+  stack: crystal_4
+  stage_ref: P895
+  type: revolute
+  parent: crystal_4_rotation
+  child: crystal_4_tilt
+  axis_xyz: [0.0, -0.917754625684, 0.397147890635]
+  origin_m: [-0.070120645038, 0.099280305303, 0.229424742379]
+  limits: [-0.17453292519943295, 0.17453292519943295]
+  home: 0.0
+  bearing_parts: [[P895], [P895]]
 - name: lj_x_joint
   stack: Liquid jet x (Kohzu XA05A-L202-R, 50 mm)
   stage_ref: P023
@@ -753,7 +763,7 @@ joints:
   bearing_parts: [[P019], [P020]]
 - name: bottom_slit_y_joint
   stack: Bottom slit y (LIB-000032451 lift, 8 mm)
-  stage_ref: P256
+  stage_ref: P086
   type: prismatic
   parent: assembly_base
   child: bottom_slit_y
@@ -761,10 +771,10 @@ joints:
   origin_m: [-0.1445352, 0.1290124, -0.165354]
   limits: [-0.004, 0.004]
   home: 0.0
-  bearing_parts: [[P256], [P255]]
+  bearing_parts: [[P086], [P085, P091]]
 - name: bottom_slit_x_joint
   stack: Bottom slit x (Kohzu XA05A-R202, 15 mm)
-  stage_ref: P273
+  stage_ref: P103
   type: prismatic
   parent: bottom_slit_y
   child: bottom_slit_x
@@ -772,10 +782,10 @@ joints:
   origin_m: [-0.1445352, 0.1290124, -0.109354]
   limits: [-0.0075, 0.0075]
   home: 0.0
-  bearing_parts: [[P273], [P274]]
+  bearing_parts: [[P103, P106], [P104]]
 - name: top_slit_y_joint
   stack: Top slit y (LIB-000032451 lift, 8 mm)
-  stage_ref: P305
+  stage_ref: P135
   type: prismatic
   parent: assembly_base
   child: top_slit_y
@@ -783,10 +793,10 @@ joints:
   origin_m: [-0.1805574, 0.1294136, -0.063754]
   limits: [-0.004, 0.004]
   home: 0.0
-  bearing_parts: [[P305], [P304]]
+  bearing_parts: [[P135], [P134, P140]]
 - name: top_slit_x_joint
   stack: Top slit x (Kohzu XA05A-R202, 15 mm)
-  stage_ref: P322
+  stage_ref: P152
   type: prismatic
   parent: top_slit_y
   child: top_slit_x
@@ -794,29 +804,62 @@ joints:
   origin_m: [-0.1805574, 0.1294136, -0.007754]
   limits: [-0.0075, 0.0075]
   home: 0.0
-  bearing_parts: [[P322], [P323]]
+  bearing_parts: [[P152, P155], [P153]]
 - name: detector_z_joint
   stack: ePix10k z (Newport IMS300CC, 300 mm)
-  stage_ref: P1920
+  stage_ref: P1791
   type: prismatic
   parent: assembly_base
   child: detector_z
   axis_xyz: [0.0, 1.0, 0.0]
   origin_m: [0.0088, -0.4741, -0.4482]
-  limits: [-0.15, 0.15]
+  limits: [-0.0698849, 0.2301151]
   home: 0.0
-  bearing_parts: [[P1920], [P1920, P1852]]
+  bearing_parts: [[P1791], [P1791, P1723]]
 - name: detector_x_joint
   stack: ePix10k x (Newport IMS300CC, 300 mm)
-  stage_ref: P1852
+  stage_ref: P1723
   type: prismatic
   parent: detector_z
   child: detector_x
   axis_xyz: [-1.0, 0.0, 0.0]
-  origin_m: [0.0, -0.394, -0.3706]
+  origin_m: [0.0, -0.474115126572, -0.3706]
   limits: [-0.15, 0.15]
   home: 0.0
-  bearing_parts: [[P1852], [P1852, P1899]]
+  bearing_parts: [[P1723], [P1723, P1770]]
+- name: epix100_x_joint
+  stack: ePix100 x (lead-screw stage LIB-000000725, mechanical end stops)
+  stage_ref: P197
+  type: prismatic
+  parent: assembly_base
+  child: epix100_x
+  axis_xyz: [-1.0, 0.0, 0.0]
+  origin_m: [-0.15966, 0.00654, -0.1233]
+  limits: [-0.04051, 0.15339]
+  home: 0.0
+  bearing_parts: [[P197], [P197]]
+- name: epix100_z_joint
+  stack: ePix100 z (manual Kohzu LIB-000005430, XM07A-class +/-6.5 mm)
+  stage_ref: P313
+  type: prismatic
+  parent: epix100_x
+  child: epix100_z
+  axis_xyz: [0.0, 1.0, 0.0]
+  origin_m: [-0.159657, 0.017218, -0.09895]
+  limits: [-0.0065, 0.0065]
+  home: 0.0
+  bearing_parts: [[P313], [P313]]
+- name: epix100_tilt_joint
+  stack: ePix100 tilt (manual Kohzu SH05B-RM swivel, +/-10 deg)
+  stage_ref: P325
+  type: revolute
+  parent: epix100_z
+  child: epix100_tilt
+  axis_xyz: [-1.0, 0.0, 0.0]
+  origin_m: [-0.159657, 0.029308, -0.005162]
+  limits: [-0.17453292519943295, 0.17453292519943295]
+  home: 0.0
+  bearing_parts: [[P325], [P327]]
 omitted_occurrences:
   Fasteners and small retention hardware:
   - P004
@@ -856,28 +899,38 @@ omitted_occurrences:
   - P061
   - P062
   - P064
+  - P065
+  - P067
+  - P069
+  - P070
+  - P071
+  - P072
+  - P075
+  - P076
+  - P078
+  - P079
   - P080
   - P081
   - P082
+  - P083
   - P084
-  - P085
-  - P088
+  - P089
   - P090
   - P092
+  - P093
+  - P095
   - P096
-  - P106
-  - P107
+  - P098
+  - P102
   - P108
   - P109
+  - P112
+  - P113
   - P114
+  - P115
   - P116
-  - P117
-  - P118
-  - P119
   - P120
   - P121
-  - P122
-  - P123
   - P124
   - P125
   - P126
@@ -885,21 +938,24 @@ omitted_occurrences:
   - P128
   - P129
   - P130
+  - P131
+  - P132
+  - P133
+  - P138
   - P139
-  - P152
-  - P153
-  - P154
-  - P156
+  - P141
+  - P142
+  - P144
+  - P145
+  - P147
+  - P151
   - P157
   - P158
-  - P160
   - P161
   - P162
   - P163
   - P164
   - P165
-  - P166
-  - P167
   - P168
   - P169
   - P170
@@ -908,44 +964,25 @@ omitted_occurrences:
   - P173
   - P174
   - P175
-  - P176
   - P177
   - P178
+  - P179
   - P180
-  - P182
-  - P183
-  - P184
-  - P185
-  - P186
   - P187
   - P188
   - P189
   - P190
-  - P196
-  - P197
+  - P191
+  - P192
+  - P195
   - P198
-  - P199
   - P200
-  - P201
-  - P202
   - P203
-  - P204
-  - P205
-  - P206
-  - P208
-  - P209
-  - P210
-  - P211
-  - P212
   - P213
+  - P214
   - P215
   - P216
-  - P217
-  - P218
-  - P219
-  - P220
   - P221
-  - P222
   - P223
   - P224
   - P225
@@ -954,151 +991,143 @@ omitted_occurrences:
   - P228
   - P229
   - P230
+  - P231
+  - P232
   - P233
   - P234
+  - P235
   - P236
-  - P239
-  - P240
-  - P241
-  - P242
-  - P245
+  - P237
+  - P244
   - P246
-  - P248
-  - P249
-  - P250
-  - P251
-  - P252
-  - P253
-  - P254
   - P259
   - P260
-  - P262
+  - P261
   - P263
+  - P264
   - P265
-  - P266
+  - P267
   - P268
+  - P269
+  - P270
+  - P271
   - P272
+  - P273
+  - P274
+  - P275
+  - P276
+  - P277
   - P278
   - P279
+  - P280
+  - P281
   - P282
   - P283
   - P284
   - P285
-  - P286
+  - P287
+  - P289
   - P290
   - P291
+  - P292
+  - P293
   - P294
   - P295
   - P296
   - P297
-  - P298
-  - P299
-  - P300
-  - P301
-  - P302
   - P303
+  - P304
+  - P305
+  - P306
+  - P307
   - P308
   - P309
+  - P310
   - P311
   - P312
   - P314
   - P315
+  - P316
   - P317
+  - P318
+  - P319
+  - P320
   - P321
-  - P327
-  - P328
-  - P331
-  - P332
-  - P333
-  - P334
+  - P322
+  - P323
+  - P324
   - P335
-  - P338
+  - P337
   - P339
-  - P340
-  - P341
   - P342
   - P343
-  - P344
-  - P345
-  - P347
-  - P348
   - P349
-  - P350
+  - P352
+  - P356
   - P357
-  - P358
   - P359
   - P360
-  - P361
   - P362
   - P365
+  - P366
+  - P367
   - P368
+  - P369
   - P370
+  - P372
   - P373
+  - P376
+  - P377
+  - P378
+  - P379
+  - P380
   - P383
   - P384
   - P385
-  - P386
-  - P391
-  - P393
+  - P387
+  - P390
+  - P392
   - P394
   - P395
-  - P396
-  - P397
   - P398
   - P399
   - P400
   - P401
-  - P402
-  - P403
   - P404
-  - P405
   - P406
-  - P407
-  - P414
+  - P408
+  - P409
+  - P410
+  - P411
+  - P412
+  - P413
+  - P415
   - P416
-  - P429
-  - P430
-  - P431
-  - P433
-  - P434
-  - P435
-  - P437
-  - P439
-  - P441
-  - P442
-  - P443
-  - P444
-  - P445
-  - P446
-  - P447
+  - P420
   - P448
   - P449
   - P450
   - P451
-  - P452
   - P453
-  - P454
   - P455
   - P457
-  - P459
-  - P460
-  - P461
+  - P458
   - P462
   - P463
-  - P464
-  - P465
-  - P466
   - P467
+  - P468
+  - P469
+  - P470
+  - P472
   - P473
   - P474
   - P475
-  - P476
   - P477
   - P478
   - P479
   - P480
   - P481
-  - P482
+  - P483
   - P484
   - P485
   - P486
@@ -1108,1188 +1137,102 @@ omitted_occurrences:
   - P490
   - P491
   - P492
-  - P493
-  - P494
+  - P495
+  - P496
+  - P498
+  - P499
   - P501
+  - P502
+  - P503
+  - P504
   - P505
-  - P507
+  - P506
   - P509
-  - P512
-  - P513
-  - P519
-  - P522
-  - P526
-  - P527
-  - P529
-  - P530
-  - P532
-  - P535
-  - P536
-  - P537
-  - P538
-  - P539
-  - P540
-  - P542
-  - P543
-  - P546
-  - P547
-  - P548
-  - P549
-  - P550
-  - P553
-  - P554
-  - P555
-  - P557
-  - P560
-  - P562
-  - P564
-  - P565
-  - P568
-  - P569
-  - P570
-  - P571
-  - P574
-  - P576
-  - P578
-  - P579
-  - P580
-  - P581
-  - P582
-  - P583
-  - P585
-  - P586
-  - P619
-  - P620
-  - P621
-  - P623
-  - P625
-  - P627
-  - P629
-  - P630
-  - P634
-  - P635
+  - P510
+  - P637
+  - P638
   - P639
   - P640
-  - P641
-  - P642
+  - P643
   - P644
   - P645
   - P646
   - P647
+  - P648
   - P649
   - P650
-  - P651
-  - P652
-  - P653
-  - P655
   - P656
   - P657
   - P658
   - P659
-  - P660
   - P661
   - P662
   - P663
   - P664
-  - P667
-  - P668
+  - P669
   - P670
   - P671
-  - P673
-  - P674
+  - P672
   - P675
   - P676
   - P677
   - P678
-  - P802
-  - P803
-  - P804
-  - P805
-  - P808
-  - P809
-  - P810
-  - P811
-  - P812
-  - P813
-  - P814
-  - P815
-  - P821
-  - P822
-  - P823
-  - P824
-  - P826
-  - P827
-  - P828
-  - P829
-  - P834
-  - P835
-  - P836
-  - P837
-  - P840
-  - P841
-  - P842
-  - P843
-  - P844
-  - P845
-  - P846
-  - P847
-  - P853
-  - P854
-  - P855
-  - P856
-  - P858
-  - P859
-  - P860
-  - P861
-  - P868
-  - P869
-  - P870
-  - P871
-  - P872
-  - P873
-  - P874
-  - P875
-  - P876
-  - P877
-  - P878
-  - P879
-  - P880
-  - P882
-  - P883
-  - P884
-  - P885
-  - P886
-  - P887
-  - P888
-  - P889
-  - P890
-  - P891
-  - P892
-  - P893
-  - P894
-  - P895
-  - P896
-  - P897
-  - P898
-  - P899
-  - P900
-  - P901
-  - P902
-  - P903
-  - P904
-  - P905
-  - P906
-  - P907
-  - P908
-  - P909
-  - P910
-  - P911
-  - P912
-  - P913
-  - P914
-  - P915
-  - P916
-  - P917
-  - P918
-  - P919
-  - P920
-  - P921
-  - P924
-  - P927
-  - P929
-  - P933
-  - P935
-  - P936
-  - P937
-  - P938
-  - P939
-  - P940
-  - P941
-  - P942
-  - P943
-  - P944
-  - P945
-  - P946
-  - P947
-  - P948
-  - P949
-  - P950
-  - P951
-  - P952
-  - P953
-  - P954
-  - P955
-  - P956
-  - P957
-  - P958
-  - P959
-  - P960
-  - P961
-  - P962
-  - P963
-  - P964
-  - P971
-  - P973
-  - P977
-  - P979
-  - P980
-  - P981
-  - P982
-  - P983
-  - P984
-  - P985
-  - P986
-  - P987
-  - P988
-  - P989
-  - P990
-  - P991
-  - P992
-  - P993
-  - P994
-  - P995
-  - P996
-  - P997
-  - P998
-  - P999
-  - P1000
-  - P1001
-  - P1002
-  - P1003
-  - P1004
-  - P1005
-  - P1006
-  - P1007
-  - P1008
-  - P1014
-  - P1016
-  - P1020
-  - P1022
-  - P1023
-  - P1024
-  - P1025
-  - P1026
-  - P1027
-  - P1028
-  - P1029
-  - P1030
-  - P1031
-  - P1032
-  - P1033
-  - P1034
-  - P1035
-  - P1036
-  - P1037
-  - P1038
-  - P1039
-  - P1040
-  - P1041
-  - P1042
-  - P1043
-  - P1044
-  - P1045
-  - P1046
-  - P1047
-  - P1048
-  - P1049
-  - P1050
-  - P1051
-  - P1056
-  - P1059
-  - P1060
-  - P1061
-  - P1062
-  - P1065
-  - P1066
-  - P1067
-  - P1068
-  - P1070
-  - P1071
-  - P1072
-  - P1073
-  - P1074
-  - P1075
-  - P1076
-  - P1077
-  - P1078
-  - P1079
-  - P1080
-  - P1081
-  - P1082
-  - P1083
-  - P1084
-  - P1085
-  - P1086
-  - P1088
-  - P1090
-  - P1091
-  - P1092
-  - P1094
-  - P1100
-  - P1103
-  - P1105
-  - P1108
-  - P1137
-  - P1138
-  - P1139
-  - P1140
-  - P1141
-  - P1142
-  - P1143
-  - P1144
-  - P1145
-  - P1146
-  - P1147
-  - P1148
-  - P1149
-  - P1150
-  - P1151
-  - P1152
-  - P1153
-  - P1154
-  - P1155
-  - P1156
-  - P1157
-  - P1158
-  - P1159
-  - P1160
-  - P1161
-  - P1162
-  - P1163
-  - P1164
-  - P1165
-  - P1166
-  - P1167
-  - P1168
-  - P1169
-  - P1170
-  - P1171
-  - P1172
-  - P1173
-  - P1174
-  - P1175
-  - P1176
-  - P1177
-  - P1178
-  - P1179
-  - P1180
-  - P1181
-  - P1182
-  - P1183
-  - P1184
-  - P1185
-  - P1186
-  - P1187
-  - P1188
-  - P1189
-  - P1190
-  - P1191
-  - P1193
-  - P1194
-  - P1196
-  - P1197
-  - P1198
-  - P1200
-  - P1201
-  - P1202
-  - P1204
-  - P1205
-  - P1206
-  - P1208
-  - P1212
-  - P1213
-  - P1214
-  - P1215
-  - P1216
-  - P1217
-  - P1219
-  - P1220
-  - P1221
-  - P1222
-  - P1223
-  - P1224
-  - P1225
-  - P1226
-  - P1227
-  - P1228
-  - P1229
-  - P1230
-  - P1231
-  - P1232
-  - P1233
-  - P1234
-  - P1235
-  - P1237
-  - P1238
-  - P1240
-  - P1241
-  - P1242
-  - P1269
-  - P1270
-  - P1271
-  - P1272
-  - P1273
-  - P1274
-  - P1275
-  - P1276
-  - P1277
-  - P1278
-  - P1292
-  - P1293
-  - P1295
-  - P1296
-  - P1297
-  - P1298
-  - P1308
-  - P1309
-  - P1310
-  - P1311
-  - P1321
-  - P1322
-  - P1323
-  - P1337
-  - P1338
-  - P1387
-  - P1388
-  - P1389
-  - P1418
-  - P1426
-  - P1427
-  - P1428
-  - P1430
-  - P1431
-  - P1432
-  - P1433
-  - P1439
-  - P1440
-  - P1441
-  - P1442
-  - P1443
-  - P1444
-  - P1446
-  - P1448
-  - P1449
-  - P1451
-  - P1464
-  - P1465
-  - P1466
-  - P1467
-  - P1468
-  - P1469
-  - P1470
-  - P1471
-  - P1473
-  - P1474
-  - P1476
-  - P1477
-  - P1478
-  - P1479
-  - P1480
-  - P1481
-  - P1482
-  - P1483
-  - P1484
-  - P1485
-  - P1487
-  - P1488
-  - P1489
-  - P1490
-  - P1491
-  - P1492
-  - P1493
-  - P1494
-  - P1495
-  - P1496
-  - P1497
-  - P1498
-  - P1499
-  - P1500
-  - P1501
-  - P1502
-  - P1503
-  - P1504
-  - P1505
-  - P1506
-  - P1508
-  - P1509
-  - P1510
-  - P1511
-  - P1512
-  - P1513
-  - P1514
-  - P1515
-  - P1516
-  - P1517
-  - P1518
-  - P1519
-  - P1520
-  - P1521
-  - P1522
-  - P1523
-  - P1524
-  - P1525
-  - P1526
-  - P1527
-  - P1528
-  - P1529
-  - P1530
-  - P1531
-  - P1532
-  - P1533
-  - P1534
-  - P1535
-  - P1537
-  - P1540
-  - P1541
-  - P1542
-  - P1543
-  - P1544
-  - P1545
-  - P1546
-  - P1547
-  - P1548
-  - P1549
-  - P1550
-  - P1551
-  - P1552
-  - P1553
-  - P1554
-  - P1555
-  - P1556
-  - P1557
-  - P1558
-  - P1559
-  - P1561
-  - P1562
-  - P1563
-  - P1564
-  - P1565
-  - P1566
-  - P1568
-  - P1571
-  - P1576
-  - P1577
-  - P1578
-  - P1579
-  - P1580
-  - P1581
-  - P1582
-  - P1583
-  - P1584
-  - P1585
-  - P1586
-  - P1587
-  - P1589
-  - P1590
-  - P1591
-  - P1592
-  - P1593
-  - P1594
-  - P1595
-  - P1596
-  - P1597
-  - P1599
-  - P1600
-  - P1601
-  - P1602
-  - P1609
-  - P1610
-  - P1838
-  - P1839
-  - P1840
-  - P1841
-  - P1842
-  - P1843
-  - P1844
-  - P1845
-  - P1846
-  - P1847
-  - P1849
-  - P1851
-  - P1854
-  - P1855
-  - P1857
-  - P1858
-  - P1859
-  - P1861
-  - P1862
-  - P1863
-  - P1864
-  - P1867
-  - P1868
-  - P1869
-  - P1870
-  - P1871
-  - P1872
-  - P1873
-  - P1874
-  - P1875
-  - P1877
-  - P1878
-  - P1879
-  - P1880
-  - P1881
-  - P1882
-  - P1884
-  - P1885
-  - P1890
-  - P1891
-  - P1892
-  - P1895
-  - P1896
-  - P1898
-  - P1900
-  - P1901
-  - P1902
-  - P1903
-  - P1904
-  - P1905
-  - P1906
-  - P1907
-  - P1908
-  - P1909
-  - P1910
-  - P1911
-  - P1912
-  - P1913
-  - P1914
-  - P1916
-  - P1918
-  - P1919
-  - P1921
-  - P1923
-  - P1925
-  - P1926
-  - P1927
-  - P1928
-  - P1929
-  - P1930
-  - P1932
-  - P1933
-  - P1934
-  - P1936
-  - P1937
-  - P1938
-  - P1940
-  - P1941
-  - P1942
-  - P1943
-  - P1944
-  - P1945
-  - P1946
-  - P1947
-  - P1948
-  Empty geometry in source STEP:
-  - P115
-  - P142
-  - P143
-  - P159
-  - P214
-  - P392
-  - P419
-  - P420
-  - P436
-  - P438
-  - P440
-  - P561
-  - P631
-  - P632
-  - P1096
-  - P1097
-  - P1098
-  - P1099
-  - P1246
-  - P1247
-  - P1255
-  - P1259
-  - P1260
-  - P1261
-  - P1263
-  - P1264
-  - P1265
-  - P1281
-  - P1285
-  - P1286
-  - P1287
-  - P1289
-  - P1290
-  - P1291
-  - P1302
-  - P1303
-  - P1315
-  - P1316
-  - P1326
-  - P1330
-  - P1331
-  - P1332
-  - P1334
-  - P1335
-  - P1336
-  - P1342
-  - P1343
-  - P1350
-  - P1354
-  - P1355
-  - P1356
-  - P1358
-  - P1359
-  - P1360
-  - P1454
-  - P1455
-  - P1475
-  - P1486
-  - P1507
-  - P1536
-  - P1614
-  - P1615
-  - P1634
-  - P1635
-  - P1644
-  - P1645
-  - P1659
-  - P1660
-  - P1674
-  - P1675
-  - P1689
-  - P1690
-  - P1704
-  - P1705
-  - P1719
-  - P1720
-  - P1734
-  - P1735
-  - P1749
-  - P1750
-  - P1764
-  - P1765
-  - P1779
-  - P1780
-  - P1794
-  - P1795
-  - P1809
-  - P1810
-  - P1824
-  - P1825
-  Detector internals; retain housing and sensor envelope:
-  - P100
-  - P101
-  - P103
-  - P104
-  - P105
-  - P110
-  - P111
-  - P112
-  - P113
-  - P131
-  - P132
-  - P133
-  - P134
-  - P135
-  - P136
-  - P137
-  - P138
-  - P140
-  - P141
-  - P144
-  - P145
-  - P146
-  - P147
-  - P148
-  - P149
-  - P150
-  - P151
-  - P155
-  - P179
-  - P181
-  - P193
-  - P377
-  - P378
-  - P380
-  - P381
-  - P382
-  - P387
-  - P388
-  - P389
-  - P390
-  - P408
-  - P409
-  - P410
-  - P411
-  - P412
-  - P413
-  - P415
-  - P417
-  - P418
-  - P421
-  - P422
-  - P423
-  - P424
-  - P425
-  - P426
-  - P427
-  - P428
-  - P432
-  - P456
-  - P458
-  - P470
-  - P1239
-  - P1243
-  - P1245
-  - P1248
-  - P1249
-  - P1250
-  - P1251
-  - P1252
-  - P1254
-  - P1256
-  - P1257
-  - P1258
-  - P1262
-  - P1267
-  - P1268
-  - P1280
-  - P1282
-  - P1283
-  - P1284
-  - P1288
-  - P1299
-  - P1301
-  - P1304
-  - P1305
-  - P1306
-  - P1307
-  - P1312
-  - P1314
-  - P1317
-  - P1318
-  - P1319
-  - P1320
-  - P1325
-  - P1327
-  - P1328
-  - P1329
-  - P1333
-  - P1339
-  - P1341
-  - P1344
-  - P1345
-  - P1346
-  - P1347
-  - P1349
-  - P1351
-  - P1352
-  - P1353
-  - P1357
-  - P1361
-  - P1362
-  - P1363
-  - P1364
-  - P1365
-  - P1366
-  - P1367
-  - P1368
-  - P1369
-  - P1370
-  - P1371
-  - P1372
-  - P1373
-  - P1374
-  - P1375
-  - P1376
-  - P1377
-  - P1378
-  - P1379
-  - P1380
-  - P1381
-  - P1382
-  - P1383
-  - P1384
-  - P1385
-  - P1386
-  - P1390
-  - P1391
-  - P1392
-  - P1393
-  - P1394
-  - P1395
-  - P1396
-  - P1397
-  - P1398
-  - P1399
-  - P1400
-  - P1401
-  - P1402
-  - P1403
-  - P1404
-  - P1405
-  - P1406
-  - P1407
-  - P1408
-  - P1409
-  - P1410
-  - P1411
-  - P1412
-  - P1413
-  - P1414
-  - P1415
-  - P1416
-  - P1417
-  - P1421
-  - P1422
-  - P1434
-  - P1435
-  - P1447
-  - P1450
-  - P1452
-  - P1453
-  - P1456
-  - P1457
-  - P1458
-  - P1459
-  - P1460
-  - P1461
-  - P1462
-  - P1538
-  - P1539
-  - P1560
-  - P1567
-  - P1569
-  - P1588
-  - P1598
-  - P1603
-  - P1604
-  - P1605
-  - P1606
-  - P1607
-  - P1608
-  - P1611
-  - P1612
-  - P1613
-  - P1616
-  - P1617
-  - P1618
-  - P1619
-  - P1620
-  - P1621
-  - P1622
-  - P1623
-  - P1624
-  - P1625
-  - P1626
-  - P1627
-  - P1628
-  - P1629
-  - P1630
-  - P1631
-  - P1632
-  - P1633
-  - P1636
-  - P1637
-  - P1638
-  - P1639
-  - P1640
-  - P1641
-  - P1642
-  - P1643
-  - P1646
-  - P1647
-  - P1648
-  - P1649
-  - P1650
-  - P1651
-  - P1652
-  - P1653
-  - P1654
-  - P1655
-  - P1656
-  - P1657
-  - P1658
-  - P1661
-  - P1662
-  - P1663
-  - P1664
-  - P1665
-  - P1666
-  - P1667
-  - P1668
-  - P1669
-  - P1670
-  - P1671
-  - P1672
-  - P1673
-  - P1676
-  - P1677
-  - P1678
-  - P1679
-  - P1680
-  - P1681
-  - P1682
-  - P1683
-  - P1684
-  - P1685
-  - P1686
-  - P1687
-  - P1688
-  - P1691
-  - P1692
-  - P1693
-  - P1694
-  - P1695
-  - P1696
-  - P1697
-  - P1698
-  - P1699
-  - P1700
-  - P1701
-  - P1702
-  - P1703
-  - P1706
-  - P1707
-  - P1708
-  - P1709
-  - P1710
-  - P1711
-  - P1712
-  - P1713
-  - P1714
-  - P1715
-  - P1716
-  - P1717
-  - P1718
-  - P1721
-  - P1722
-  - P1723
-  - P1724
-  - P1725
-  - P1726
-  - P1727
-  - P1728
-  - P1729
-  - P1730
-  - P1731
-  - P1732
-  - P1733
-  - P1736
-  - P1737
-  - P1738
-  - P1739
-  - P1740
-  - P1741
-  - P1742
-  - P1743
-  - P1744
-  - P1745
-  - P1746
-  - P1747
-  - P1748
-  - P1751
-  - P1752
-  - P1753
-  - P1754
-  - P1755
-  - P1756
-  - P1757
-  - P1758
-  - P1759
-  - P1760
-  - P1761
-  - P1762
-  - P1763
-  - P1766
-  - P1767
-  - P1768
-  - P1769
-  - P1770
-  - P1771
-  - P1772
-  - P1773
-  - P1774
-  - P1775
-  - P1776
-  - P1777
-  - P1778
-  - P1781
-  - P1782
-  - P1783
-  - P1784
-  - P1785
-  - P1786
-  - P1787
-  - P1788
-  - P1789
-  - P1790
-  - P1791
-  - P1792
-  - P1793
-  - P1796
-  - P1797
-  - P1798
-  - P1799
-  - P1800
-  - P1801
-  - P1802
-  - P1803
-  - P1804
-  - P1805
-  - P1806
-  - P1807
-  - P1808
-  - P1811
-  - P1812
-  - P1813
-  - P1814
-  - P1815
-  - P1816
-  - P1817
-  - P1818
-  - P1819
-  - P1820
-  - P1821
-  - P1822
-  - P1823
-  - P1826
-  - P1827
-  - P1828
-  - P1829
-  - P1830
-  - P1831
-  - P1832
-  - P1833
-  - P1834
-  - P1835
-  - P1836
-  - P1837
-  - P1850
-  - P1853
-  - P1860
-  - P1865
-  - P1883
-  - P1924
-  - P1931
-  - P1935
-  - P1939
-  Construction or optical reference geometry: [P496, P968]
-  Floor anchoring and table understructure omitted:
-  - P685
-  - P686
-  - P687
+  - P679
+  - P680
+  - P681
+  - P682
   - P688
+  - P689
   - P690
+  - P691
+  - P693
   - P694
-  - P698
-  - P699
-  - P700
-  - P702
+  - P695
+  - P696
   - P703
   - P704
   - P705
   - P706
   - P707
   - P708
+  - P709
+  - P710
+  - P711
+  - P712
+  - P713
+  - P714
+  - P715
   - P717
   - P718
   - P719
   - P720
+  - P721
+  - P722
+  - P723
+  - P724
+  - P725
+  - P726
+  - P727
+  - P728
+  - P729
+  - P730
+  - P731
+  - P732
+  - P733
+  - P734
+  - P735
+  - P736
+  - P737
+  - P738
+  - P739
+  - P740
+  - P741
+  - P742
+  - P743
+  - P744
+  - P745
+  - P746
+  - P747
   - P748
   - P749
   - P750
@@ -2299,15 +1242,10 @@ omitted_occurrences:
   - P754
   - P755
   - P756
-  - P757
-  - P758
   - P759
-  - P760
-  - P761
   - P762
-  - P763
+  - P764
   - P768
-  - P769
   - P770
   - P771
   - P772
@@ -2338,116 +1276,1087 @@ omitted_occurrences:
   - P797
   - P798
   - P799
+  - P806
+  - P808
+  - P812
+  - P814
+  - P815
+  - P816
+  - P817
+  - P818
+  - P819
+  - P820
+  - P821
+  - P822
+  - P823
+  - P824
+  - P825
+  - P826
+  - P827
+  - P828
+  - P829
+  - P830
+  - P831
+  - P832
+  - P833
+  - P834
+  - P835
+  - P836
+  - P837
+  - P838
+  - P839
+  - P840
+  - P841
+  - P842
+  - P843
+  - P849
+  - P851
+  - P855
+  - P857
+  - P858
+  - P859
+  - P860
+  - P861
+  - P862
+  - P863
+  - P864
+  - P865
+  - P866
+  - P867
+  - P868
+  - P869
+  - P870
+  - P871
+  - P872
+  - P873
+  - P874
+  - P875
+  - P876
+  - P877
+  - P878
+  - P879
+  - P880
+  - P881
+  - P882
+  - P883
+  - P884
+  - P885
+  - P886
+  - P892
+  - P894
+  - P898
+  - P900
+  - P901
+  - P902
+  - P903
+  - P904
+  - P905
+  - P906
+  - P907
+  - P908
+  - P909
+  - P910
+  - P911
+  - P912
+  - P913
+  - P914
+  - P915
+  - P916
+  - P917
+  - P918
+  - P919
+  - P920
+  - P921
+  - P922
+  - P923
+  - P924
+  - P925
+  - P926
+  - P927
+  - P928
+  - P929
+  - P934
+  - P937
+  - P938
+  - P939
+  - P940
+  - P943
+  - P944
+  - P945
+  - P946
+  - P948
+  - P949
+  - P950
+  - P951
+  - P952
+  - P953
+  - P954
+  - P955
+  - P956
+  - P957
+  - P958
+  - P959
+  - P960
+  - P961
+  - P962
+  - P963
+  - P964
+  - P966
+  - P968
+  - P969
+  - P970
+  - P972
+  - P1007
+  - P1008
+  - P1009
+  - P1010
+  - P1011
+  - P1012
+  - P1013
+  - P1014
+  - P1015
+  - P1016
+  - P1017
+  - P1018
+  - P1019
+  - P1020
+  - P1021
+  - P1022
+  - P1023
+  - P1024
+  - P1025
+  - P1026
+  - P1027
+  - P1028
+  - P1029
+  - P1030
+  - P1031
+  - P1032
+  - P1033
+  - P1034
+  - P1035
+  - P1036
+  - P1037
+  - P1038
+  - P1039
+  - P1040
+  - P1041
+  - P1042
+  - P1043
+  - P1044
+  - P1045
+  - P1046
+  - P1047
+  - P1048
+  - P1049
+  - P1050
+  - P1051
+  - P1052
+  - P1053
+  - P1054
+  - P1055
+  - P1056
+  - P1057
+  - P1058
+  - P1059
+  - P1060
+  - P1061
+  - P1063
+  - P1064
+  - P1066
+  - P1067
+  - P1068
+  - P1070
+  - P1071
+  - P1072
+  - P1074
+  - P1075
+  - P1076
+  - P1078
+  - P1082
+  - P1083
+  - P1084
+  - P1085
+  - P1086
+  - P1087
+  - P1089
+  - P1090
+  - P1091
+  - P1092
+  - P1093
+  - P1094
+  - P1095
+  - P1096
+  - P1097
+  - P1098
+  - P1099
+  - P1100
   - P1101
   - P1102
+  - P1103
   - P1104
-  - P1106
+  - P1105
   - P1107
-  - P1109
+  - P1108
   - P1110
   - P1111
   - P1112
-  - P1113
-  - P1114
-  - P1115
+  - P1139
+  - P1140
+  - P1141
+  - P1142
+  - P1143
+  - P1144
+  - P1145
+  - P1146
+  - P1147
+  - P1148
+  - P1162
+  - P1163
+  - P1165
+  - P1166
+  - P1167
+  - P1168
+  - P1178
+  - P1179
+  - P1180
+  - P1181
+  - P1191
+  - P1192
+  - P1193
+  - P1207
+  - P1208
+  - P1257
+  - P1258
+  - P1259
+  - P1288
+  - P1296
+  - P1297
+  - P1298
+  - P1300
+  - P1301
+  - P1302
+  - P1303
+  - P1309
+  - P1310
+  - P1311
+  - P1312
+  - P1313
+  - P1314
+  - P1316
+  - P1318
+  - P1319
+  - P1321
+  - P1334
+  - P1335
+  - P1336
+  - P1337
+  - P1338
+  - P1339
+  - P1340
+  - P1341
+  - P1344
+  - P1345
+  - P1347
+  - P1348
+  - P1349
+  - P1350
+  - P1351
+  - P1352
+  - P1353
+  - P1354
+  - P1355
+  - P1356
+  - P1358
+  - P1359
+  - P1360
+  - P1361
+  - P1362
+  - P1363
+  - P1364
+  - P1365
+  - P1366
+  - P1367
+  - P1368
+  - P1369
+  - P1370
+  - P1371
+  - P1372
+  - P1373
+  - P1374
+  - P1375
+  - P1376
+  - P1377
+  - P1379
+  - P1380
+  - P1381
+  - P1382
+  - P1383
+  - P1384
+  - P1385
+  - P1386
+  - P1387
+  - P1388
+  - P1389
+  - P1390
+  - P1391
+  - P1392
+  - P1393
+  - P1394
+  - P1395
+  - P1396
+  - P1397
+  - P1398
+  - P1399
+  - P1400
+  - P1401
+  - P1402
+  - P1403
+  - P1404
+  - P1405
+  - P1406
+  - P1408
+  - P1411
+  - P1412
+  - P1413
+  - P1414
+  - P1415
+  - P1416
+  - P1417
+  - P1418
+  - P1419
+  - P1420
+  - P1421
+  - P1422
+  - P1423
+  - P1424
+  - P1425
+  - P1426
+  - P1427
+  - P1428
+  - P1429
+  - P1430
+  - P1432
+  - P1433
+  - P1434
+  - P1435
+  - P1436
+  - P1437
+  - P1439
+  - P1442
+  - P1447
+  - P1448
+  - P1449
+  - P1450
+  - P1451
+  - P1452
+  - P1453
+  - P1454
+  - P1455
+  - P1456
+  - P1457
+  - P1458
+  - P1460
+  - P1461
+  - P1462
+  - P1463
+  - P1464
+  - P1465
+  - P1466
+  - P1467
+  - P1468
+  - P1470
+  - P1471
+  - P1472
+  - P1473
+  - P1480
+  - P1481
+  - P1709
+  - P1710
+  - P1711
+  - P1712
+  - P1713
+  - P1714
+  - P1715
+  - P1716
+  - P1717
+  - P1718
+  - P1720
+  - P1722
+  - P1725
+  - P1726
+  - P1728
+  - P1729
+  - P1730
+  - P1732
+  - P1733
+  - P1734
+  - P1735
+  - P1738
+  - P1739
+  - P1740
+  - P1741
+  - P1742
+  - P1743
+  - P1744
+  - P1745
+  - P1746
+  - P1748
+  - P1749
+  - P1750
+  - P1751
+  - P1752
+  - P1753
+  - P1755
+  - P1756
+  - P1761
+  - P1762
+  - P1763
+  - P1766
+  - P1767
+  - P1769
+  - P1771
+  - P1772
+  - P1773
+  - P1774
+  - P1775
+  - P1776
+  - P1777
+  - P1778
+  - P1779
+  - P1780
+  - P1781
+  - P1782
+  - P1783
+  - P1784
+  - P1785
+  - P1787
+  - P1789
+  - P1790
+  - P1792
+  - P1794
+  - P1796
+  - P1797
+  - P1798
+  - P1799
+  - P1800
+  - P1801
+  - P1803
+  - P1804
+  - P1805
+  - P1807
+  - P1808
+  - P1809
+  - P1811
+  - P1812
+  - P1813
+  - P1814
+  - P1815
+  - P1816
+  - P1817
+  - P1818
+  - P1819
+  Empty geometry in source STEP:
+  - P391
+  - P459
+  - P460
+  - P767
+  - P811
+  - P854
+  - P897
+  - P974
+  - P975
+  - P976
+  - P977
   - P1116
   - P1117
+  - P1125
+  - P1129
+  - P1130
+  - P1131
+  - P1133
+  - P1134
+  - P1135
+  - P1151
+  - P1155
+  - P1156
+  - P1157
+  - P1159
+  - P1160
+  - P1161
+  - P1172
+  - P1173
+  - P1185
+  - P1186
+  - P1196
+  - P1200
+  - P1201
+  - P1202
+  - P1204
+  - P1205
+  - P1206
+  - P1212
+  - P1213
+  - P1220
+  - P1224
+  - P1225
+  - P1226
+  - P1228
+  - P1229
+  - P1230
+  - P1324
+  - P1325
+  - P1346
+  - P1357
+  - P1378
+  - P1407
+  - P1485
+  - P1486
+  - P1505
+  - P1506
+  - P1515
+  - P1516
+  - P1530
+  - P1531
+  - P1545
+  - P1546
+  - P1560
+  - P1561
+  - P1575
+  - P1576
+  - P1590
+  - P1591
+  - P1605
+  - P1606
+  - P1620
+  - P1621
+  - P1635
+  - P1636
+  - P1650
+  - P1651
+  - P1665
+  - P1666
+  - P1680
+  - P1681
+  - P1695
+  - P1696
+  Detector internals; retain housing and sensor envelope:
+  - P207
+  - P208
+  - P210
+  - P211
+  - P212
+  - P217
+  - P218
+  - P219
+  - P220
+  - P238
+  - P239
+  - P241
+  - P242
+  - P243
+  - P245
+  - P248
+  - P262
+  - P286
+  - P300
+  - P1109
+  - P1113
+  - P1115
   - P1118
   - P1119
   - P1120
   - P1121
   - P1122
-  - P1123
   - P1124
-  - P1125
   - P1126
   - P1127
   - P1128
-  - P1129
-  - P1130
-  - P1131
   - P1132
-  - P1133
-  - P1134
-  - P1135
-  - P1136
-  - P1192
+  - P1137
+  - P1138
+  - P1150
+  - P1152
+  - P1153
+  - P1154
+  - P1158
+  - P1169
+  - P1171
+  - P1174
+  - P1175
+  - P1176
+  - P1177
+  - P1182
+  - P1184
+  - P1187
+  - P1188
+  - P1189
+  - P1190
   - P1195
+  - P1197
+  - P1198
   - P1199
   - P1203
-  - P1207
-  Parker reed switches and small control hardware:
-  - P800
-  - P801
-  - P806
-  - P807
-  - P816
-  - P825
-  - P832
-  - P833
-  - P838
-  - P839
-  - P848
-  - P857
-  Diffractometer omitted by request:
-  - P1095
-  Flexible chamber boots around the slit blade rods; not rigid collision geometry:
-  - P515
-  - P528
+  - P1209
+  - P1211
+  - P1214
+  - P1215
+  - P1216
+  - P1217
+  - P1219
+  - P1221
+  - P1222
+  - P1223
+  - P1227
+  - P1231
+  - P1232
+  - P1233
+  - P1234
+  - P1235
+  - P1236
+  - P1237
+  - P1238
+  - P1239
+  - P1240
+  - P1241
+  - P1242
+  - P1243
+  - P1244
+  - P1245
+  - P1246
+  - P1247
+  - P1248
+  - P1249
+  - P1250
+  - P1251
+  - P1252
+  - P1253
+  - P1254
+  - P1255
+  - P1256
+  - P1260
+  - P1261
+  - P1262
+  - P1263
+  - P1264
+  - P1265
+  - P1266
+  - P1267
+  - P1268
+  - P1269
+  - P1270
+  - P1271
+  - P1272
+  - P1273
+  - P1274
+  - P1275
+  - P1276
+  - P1277
+  - P1278
+  - P1279
+  - P1280
+  - P1281
+  - P1282
+  - P1283
+  - P1284
+  - P1285
+  - P1286
+  - P1287
+  - P1291
+  - P1292
+  - P1304
+  - P1305
+  - P1317
+  - P1320
+  - P1322
+  - P1323
+  - P1326
+  - P1327
+  - P1328
+  - P1329
+  - P1330
+  - P1331
+  - P1332
+  - P1409
+  - P1410
+  - P1431
+  - P1438
+  - P1440
+  - P1459
+  - P1469
+  - P1474
+  - P1475
+  - P1476
+  - P1477
+  - P1478
+  - P1479
+  - P1482
+  - P1483
+  - P1484
+  - P1487
+  - P1488
+  - P1489
+  - P1490
+  - P1491
+  - P1492
+  - P1493
+  - P1494
+  - P1495
+  - P1496
+  - P1497
+  - P1498
+  - P1499
+  - P1500
+  - P1501
+  - P1502
+  - P1503
+  - P1504
+  - P1507
+  - P1508
+  - P1509
+  - P1510
+  - P1511
+  - P1512
+  - P1513
+  - P1514
+  - P1517
+  - P1518
+  - P1519
+  - P1520
+  - P1521
+  - P1522
+  - P1523
+  - P1524
+  - P1525
+  - P1526
+  - P1527
+  - P1528
+  - P1529
+  - P1532
+  - P1533
+  - P1534
+  - P1535
+  - P1536
+  - P1537
+  - P1538
+  - P1539
+  - P1540
+  - P1541
+  - P1542
+  - P1543
+  - P1544
+  - P1547
+  - P1548
+  - P1549
+  - P1550
+  - P1551
+  - P1552
+  - P1553
+  - P1554
+  - P1555
+  - P1556
+  - P1557
+  - P1558
+  - P1559
+  - P1562
+  - P1563
+  - P1564
+  - P1565
+  - P1566
+  - P1567
+  - P1568
+  - P1569
+  - P1570
+  - P1571
+  - P1572
+  - P1573
+  - P1574
+  - P1577
+  - P1578
+  - P1579
+  - P1580
+  - P1581
+  - P1582
+  - P1583
+  - P1584
+  - P1585
+  - P1586
+  - P1587
+  - P1588
+  - P1589
+  - P1592
+  - P1593
+  - P1594
+  - P1595
+  - P1596
+  - P1597
+  - P1598
+  - P1599
+  - P1600
+  - P1601
+  - P1602
+  - P1603
+  - P1604
+  - P1607
+  - P1608
+  - P1609
+  - P1610
+  - P1611
+  - P1612
+  - P1613
+  - P1614
+  - P1615
+  - P1616
+  - P1617
+  - P1618
+  - P1619
+  - P1622
+  - P1623
+  - P1624
+  - P1625
+  - P1626
+  - P1627
+  - P1628
+  - P1629
+  - P1630
+  - P1631
+  - P1632
+  - P1633
+  - P1634
+  - P1637
+  - P1638
+  - P1639
+  - P1640
+  - P1641
+  - P1642
+  - P1643
+  - P1644
+  - P1645
+  - P1646
+  - P1647
+  - P1648
+  - P1649
+  - P1652
+  - P1653
+  - P1654
+  - P1655
+  - P1656
+  - P1657
+  - P1658
+  - P1659
+  - P1660
+  - P1661
+  - P1662
+  - P1663
+  - P1664
+  - P1667
+  - P1668
+  - P1669
+  - P1670
+  - P1671
+  - P1672
+  - P1673
+  - P1674
+  - P1675
+  - P1676
+  - P1677
+  - P1678
+  - P1679
+  - P1682
+  - P1683
+  - P1684
+  - P1685
+  - P1686
+  - P1687
+  - P1688
+  - P1689
+  - P1690
+  - P1691
+  - P1692
+  - P1693
+  - P1694
+  - P1697
+  - P1698
+  - P1699
+  - P1700
+  - P1701
+  - P1702
+  - P1703
+  - P1704
+  - P1705
+  - P1706
+  - P1707
+  - P1708
+  - P1721
+  - P1724
+  - P1731
+  - P1736
+  - P1754
+  - P1795
+  - P1802
+  - P1806
+  - P1810
+  Construction or optical reference geometry: [P326, P803]
+  Floor anchoring and table understructure omitted:
+  - P520
+  - P521
+  - P522
+  - P523
+  - P525
+  - P529
+  - P533
+  - P534
+  - P535
+  - P537
+  - P538
+  - P539
+  - P540
+  - P541
+  - P542
+  - P543
+  - P552
+  - P553
+  - P554
+  - P555
+  - P583
+  - P584
+  - P585
+  - P586
+  - P587
+  - P588
+  - P589
+  - P590
+  - P591
+  - P592
+  - P593
+  - P594
+  - P595
+  - P596
+  - P597
+  - P598
+  - P603
+  - P604
+  - P605
+  - P606
+  - P607
+  - P608
+  - P609
+  - P610
+  - P611
+  - P612
+  - P613
+  - P614
+  - P615
+  - P616
+  - P617
+  - P618
+  - P619
+  - P620
+  - P621
+  - P622
+  - P623
+  - P624
+  - P625
+  - P626
+  - P627
+  - P628
+  - P629
+  - P630
+  - P631
+  - P632
+  - P633
+  - P634
+  - P978
+  - P979
+  - P980
+  - P981
+  - P982
+  - P983
+  - P984
+  - P985
+  - P986
+  - P987
+  - P988
+  - P989
+  - P990
+  - P991
+  - P992
+  - P993
+  - P994
+  - P995
+  - P996
+  - P997
+  - P998
+  - P999
+  - P1000
+  - P1001
+  - P1002
+  - P1003
+  - P1004
+  - P1005
+  - P1006
+  - P1062
+  - P1065
+  - P1069
+  - P1073
+  - P1077
+  Parker reed switches and small control hardware: [P635, P636, P641, P642, P651, P660, P667, P668,
+    P673, P674, P683, P692]
+  Flexible chamber boots around the slit blade rods; not rigid collision geometry: [P345, P358]
 fixed_subsystems:
   cage:
-    assembly_ref: A047
+    assembly_ref: A035
     parts:
-    - P680
-    - P681
-    - P682
-    - P683
-    - P716
-    - P712
-    - P684
-    - P713
-    - P709
-    - P689
-    - P714
-    - P691
-    - P692
-    - P693
-    - P695
-    - P696
-    - P697
-    - P710
-    - P701
-    - P721
-    - P722
-    - P723
-    - P724
-    - P725
-    - P726
-    - P727
-    - P728
-    - P729
-    - P730
-    - P731
-    - P732
-    - P733
-    - P734
-    - P735
-    - P736
-    - P737
-    - P738
-    - P739
-    - P740
-    - P741
-    - P742
-    - P743
-    - P744
-    - P745
-    - P746
-    - P747
-    - P764
-    - P765
-    - P766
-    - P767
-    - P711
-    - P715
+    - P515
+    - P516
+    - P517
+    - P518
+    - P551
+    - P547
+    - P519
+    - P548
+    - P544
+    - P524
+    - P549
+    - P526
+    - P527
+    - P528
+    - P530
+    - P531
+    - P532
+    - P545
+    - P536
+    - P556
+    - P557
+    - P558
+    - P559
+    - P560
+    - P561
+    - P562
+    - P563
+    - P564
+    - P565
+    - P566
+    - P567
+    - P568
+    - P569
+    - P570
+    - P571
+    - P572
+    - P573
+    - P574
+    - P575
+    - P576
+    - P577
+    - P578
+    - P579
+    - P580
+    - P581
+    - P582
+    - P599
+    - P600
+    - P601
+    - P602
+    - P546
+    - P550
     reason: Outer structural cage restored for visual and interference review.

@@ -883,6 +883,105 @@ def test_home_ignored_pairs_return_to_collision_checks_after_motion(tmp_path):
     )
 
 
+BRANCHED_STAGE_SDF = """\
+<?xml version="1.0"?>
+<sdf version="1.9">
+    <model name="rig">
+        <link name="assembly_base">
+            <collision name="chamber_p001_collision">
+                <geometry><box><size>0.1 0.1 0.1</size></box></geometry>
+            </collision>
+            <collision name="port_p007_collision">
+                <pose>0 0 0.3 0 0 0</pose>
+                <geometry><box><size>0.1 0.1 0.1</size></box></geometry>
+            </collision>
+        </link>
+        <link name="jet_x">
+            <inertial><mass>1</mass>
+                <inertia><ixx>1</ixx><iyy>1</iyy><izz>1</izz></inertia>
+            </inertial>
+        </link>
+        <link name="jet_y">
+            <inertial><mass>1</mass>
+                <inertia><ixx>1</ixx><iyy>1</iyy><izz>1</izz></inertia>
+            </inertial>
+            <collision name="adapter_p002_collision">
+                <pose>0.09 0 0 0 0 0</pose>
+                <geometry><box><size>0.1 0.1 0.1</size></box></geometry>
+            </collision>
+            <collision name="nozzle_p008_collision">
+                <pose>0 0 0.402 0 0 0</pose>
+                <geometry><box><size>0.1 0.1 0.1</size></box></geometry>
+            </collision>
+        </link>
+        <link name="detector">
+            <inertial><mass>1</mass>
+                <inertia><ixx>1</ixx><iyy>1</iyy><izz>1</izz></inertia>
+            </inertial>
+            <collision name="sensor_p003_collision">
+                <pose>1 0 0 0 0 0</pose>
+                <geometry><box><size>0.1 0.1 0.1</size></box></geometry>
+            </collision>
+        </link>
+        <joint name="jet_x_joint" type="prismatic">
+            <parent>assembly_base</parent><child>jet_x</child>
+            <axis><xyz>1 0 0</xyz><limit><lower>-1</lower><upper>1</upper></limit></axis>
+        </joint>
+        <joint name="jet_y_joint" type="prismatic">
+            <parent>jet_x</parent><child>jet_y</child>
+            <axis><xyz>0 0 1</xyz><limit><lower>-1</lower><upper>1</upper></limit></axis>
+        </joint>
+        <joint name="detector_joint" type="prismatic">
+            <parent>assembly_base</parent><child>detector</child>
+            <axis><xyz>0 1 0</xyz><limit><lower>-1</lower><upper>1</upper></limit></axis>
+        </joint>
+        <joint name="assembly_base_to_world" type="fixed">
+            <parent>world</parent><child>assembly_base</child>
+        </joint>
+    </model>
+</sdf>
+"""
+
+
+def test_home_baseline_follows_relative_pose_not_unrelated_motion(tmp_path):
+    from twin_lab.collision import CollisionModel
+    from twin_lab.scene import load_scene
+
+    inventory = tmp_path / "inventory.yaml"
+    inventory.write_text(
+        "home_ignored_pairs:\n"
+        "  - pair: [P007, P008]\n"
+        "    reason: reviewed home clearance\n",
+        encoding="utf-8",
+    )
+    path = tmp_path / "branched.sdf"
+    path.write_text(BRANCHED_STAGE_SDF, encoding="utf-8")
+    model = CollisionModel(
+        load_scene(path), home_ignored_pairs=read_home_ignored_pairs(inventory)
+    )
+    home = {"jet_x_joint": 0.0, "jet_y_joint": 0.0, "detector_joint": 0.0}
+    model.set_reviewed_home(home)
+
+    def pairs():
+        return {frozenset(clearance.parts) for clearance in model.report(warn_m=0.005).clearances}
+
+    raw = {
+        frozenset((part_of(item.a), part_of(item.b)))
+        for item in model.scene.signed_distances(model.context, max_distance_m=0.005)
+    }
+    assert {frozenset({"P001", "P002"}), frozenset({"P007", "P008"})} <= raw
+    assert pairs() == set()
+
+    model.set_positions({"detector_joint": 0.2})
+    assert pairs() == set()
+
+    model.set_positions({"detector_joint": 0.0, "jet_y_joint": 0.001})
+    assert pairs() == {frozenset({"P001", "P002"}), frozenset({"P007", "P008"})}
+
+    model.set_positions({"jet_y_joint": 0.0, "jet_x_joint": 0.001})
+    assert frozenset({"P001", "P002"}) in pairs()
+
+
 def test_camera_stage_base_to_breadboard_is_a_reviewed_ignored_pair(tmp_path):
     inventory = tmp_path / "inventory.yaml"
     inventory.write_text(

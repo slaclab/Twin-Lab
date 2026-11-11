@@ -3,19 +3,22 @@
 The original STEP is preserved. Source reference assignments come from its
 generated `manifest.json`; every leaf is explicitly retained or omitted.
 
-The lower upright Parker is `A073` (`P849` fixed, `P850` moving). Its carriage
-carries adapter `P866`, bracket `P831`, and the horizontal Parker `A070`.
-The latter has `P817` fixed and `P818` moving. Its moving bracket is
-`P863/P864/P865`, which carries the Huber fixed body and motor. Both Parker
+The lower upright Parker is `A061` (`P684` fixed, `P685` moving). Its carriage
+carries adapter `P701`, bracket `P666`, and the horizontal Parker `A058`.
+The latter has `P652` fixed and `P653` moving. Its moving bracket is
+`P698/P699/P700`, which carries the Huber fixed body and motor. Both Parker
 travel axes are local +Z in this particular vendor CAD, established by the
 long slide-base direction. Both imported carriages are provisionally treated
 as centered in their 100 mm travel.
 
-The Huber rotates around local +Y. Its top carries `P1058`, the three long
-posts `P1063/P1064/P1069`, and front plate `P923`. The three crystal stacks
-branch from that plate. Each chain is XA07A translation → RA04A rotation →
-SA04B tilt → crystal adapter and payload. The touching mounting planes, from
-the front plate toward the crystals, establish this order.
+The Huber rotates around local +Y. Its top carries `P936`, the three long
+posts `P941/P942/P947`, and front plate `P758`. The four crystal stacks
+branch from that plate. Each chain is XA07A translation → `LIB-000032444`
+rotation → SA04B tilt → crystal adapter and payload. The touching mounting
+planes, from the front plate toward the crystals, establish this order. Since
+the 2026-11-04 revision the rotation stage `LIB-000032444` (which replaced the
+RA04A-W) has no solids in the STEP. Its axis is carried with the adapter
+`mo39185433` above it, unchanged from the RA04A review.
 
 The vendor STEP fuses some moving interfaces into single solids. These are
 partitioned using masks at the visible mechanical seams:
@@ -23,9 +26,12 @@ partitioned using masks at the visible mechanical seams:
 | Stage | Moving region | Local motion |
 | --- | --- | --- |
 | XA07A-L201 | 70 mm upper table, carriage blocks and nut; fixed rail/screw envelopes excluded | +X translation |
-| RA04A-W | Exposed 40 mm rotor above Z=24.25 mm; hidden bearing detail left fixed | +Z rotation through origin |
+| RA04A-W (no longer in the design; template kept) | Exposed 40 mm rotor above Z=24.25 mm; hidden bearing detail left fixed | +Z rotation through origin |
 | SA04B-RM01 | Curved saddle, using stepped cylindrical cuts between mating bearing surfaces | +Y rotation through (0, 0, 74) mm |
 | Huber 410 | 138 mm rotor above Y=49.7 mm | +Y rotation through origin |
+| IMS300CC | Carriage top plate; in the 2026-11-04 STEP the lower slide's plate is offset 80.1151 mm along local −Z to sit under its payload | +Z translation |
+| LIB-000000725 (ePix100 linear stage) | Carriage plate, guide block, flag skirt and hex drive nut at local Z 59.0–133.1 mm, lead screw excluded; offset 61.19 mm along +Z to sit under its payload | +Z translation |
+| LIB-000005430 (old Kohzu 70 mm manual X stage) | Inverted-U table: top plate above Z 12.5 mm and skirts at abs(X) 26.8–35 mm down to Z 7.1 mm | ±Y translation |
 
 The Kohzu manufacturer drawing puts the SA04B-RM01 rotation center 57 mm
 above its 17 mm-high moving table. The source CAD contains a spherical datum
@@ -44,7 +50,7 @@ original CAD millimetres. Occurrence transforms place each selected region
 back into the original assembly pose before meshing; a shared parent then
 moves all descendants together.
 
-The outer structural cage `A047` is retained as 52 separate non-fastener
+The outer structural cage `A035` is retained as 52 separate non-fastener
 occurrences on `assembly_base`. Its open interior is preserved by decomposing
 each member separately. It stays fixed when either Parker slide or the inner
 analyzer frame moves. The two slit towers described in auxiliary-stages.md

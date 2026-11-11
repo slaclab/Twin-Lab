@@ -21,9 +21,8 @@ from twin_lab.paths import CACHE_ROOT
 HERE = Path(__file__).resolve().parent
 ACTIVE_CACHE = CACHE_ROOT / "convex-collision" / "reviews"
 DEFAULT_OUTPUT = CACHE_ROOT / "95835-redecomposition"
-HOME_CONTACT_REFS = {
-    "P1055", "P1058", "P817", "P863", "P976", "P975", "P1019", "P1018", "P932", "P931",
-}
+# Huber/end-plate and Parker slide-base/bracket pairs overlap as hulls at the CAD home.
+HOME_CONTACT_REFS = {"P933", "P936", "P652", "P698"}
 
 
 def write_json(path, value):
