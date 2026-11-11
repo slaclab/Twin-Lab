@@ -1,3 +1,23 @@
+# LJ y Centred (2026-11-11)
+
+Same STEP revision (`b1c34cc1…`).
+
+- LJ y ran 0 to +8 mm with home at its lower end. That came from the 43841 review,
+  which treats the jet lift as assembled fully down. The user confirmed the lift is
+  at mid-travel at home, so LJ y is now ±4 mm about the CAD pose, the ZA05A-W101's
+  specified travel.
+- The geometry agrees. In this STEP the jet lift `LIB-000032469` (`A005`) and both
+  slit lifts `LIB-000032451` place their carriage at the library's zero offset on
+  the base. Translated down alone, the jet carriage meets its base solidly between
+  −5 and −6 mm, the same as the slit carriages (a constant ~60 mm³ sliding
+  feature overlaps at every offset and is a reviewed bearing pair). In the older
+  43841 STEP every `LIB-000032469` carriage, including the three polycapillary
+  lifts, sits 3.105 mm lower. That model was not changed.
+- Both packages validate 28 bodies and 27 joints, max pose error 5.55e-16, with no
+  geometry rebuilt. CAD-verified home is clear.
+- LJ y is clear over ±4 mm in both the hull sweep with CAD confirmation and the CAD
+  conservative-advancement check (10 candidate pairs, bearing pair excluded).
+
 # ePix100 Housing (2026-11-06)
 
 Same STEP revision (`b1c34cc1…`).

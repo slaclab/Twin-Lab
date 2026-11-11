@@ -57,7 +57,10 @@ notes:
   slits upstream at world +Y and the ePix10k centred on world Y downstream.
 - Liquid jet DSG-000007948 is a three-axis chain, as in the 43841 review. Kohzu XA05A-L202-R A007
   runs along the jet (x, 50 mm), XA05A-R202 A006 carries z (15 mm), then the ZA05A lift A005 carries
-  y (8 mm, assembled fully down). The jet adapter DSG-000000506 P011, holder DSG-000108486 P507 and
+  y (+/-4 mm). The lift is at mid-travel in this STEP. Its carriage sits at the library's zero
+  offset on its base, as both slit lifts do, and drops more than 5 mm before bottoming. The older
+  43841 STEP drew every LIB-000032469 carriage 3.105 mm lower, so that review modelled the jet lift
+  as fully down. The jet adapter DSG-000000506 P011, holder DSG-000108486 P507 and
   tube DSG-000005121 P514 ride the lift. The long jet DSG-000022427 left the design in the
   2026-11-04 revision.
 - Bottom and top slits A009/A015 each stack a LIB-000032451 vertical lift (y, 8 mm) under an XA05A-R202
@@ -751,14 +754,14 @@ joints:
   home: 0.0
   bearing_parts: [[P021], [P022]]
 - name: lj_y_joint
-  stack: Liquid jet y (Kohzu ZA05A-W101-BM, 8 mm, CAD pose fully down)
+  stack: Liquid jet y (Kohzu ZA05A-W101-BM, +/-4 mm, CAD pose mid-travel)
   stage_ref: P019
   type: prismatic
   parent: lj_z
   child: lj_y
   axis_xyz: [0.0, 0.0, 1.0]
   origin_m: [0.1396517, 0.0, -0.165979]
-  limits: [0.0, 0.008]
+  limits: [-0.004, 0.004]
   home: 0.0
   bearing_parts: [[P019], [P020]]
 - name: bottom_slit_y_joint

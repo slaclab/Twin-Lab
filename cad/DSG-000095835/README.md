@@ -46,9 +46,12 @@ The model has 28 rigid bodies and 27 active joints:
 - The outer structural cage (`A035`, 52 non-fastener members) is fixed geometry
   included in interference checks. The inner analyzer cage rotates with the Huber.
 - **LJ x/z/y** drive the liquid jet `DSG-000007948`: Kohzu XA05A-L202-R along the
-  jet (x, ±25 mm), XA05A-R202 (z, ±7.5 mm), then the ZA05A lift (y, 0 to +8 mm,
-  assembled fully down). The jet adapter `P011`, holder `DSG-000108486` (`P507`)
-  and tube `DSG-000005121` (`P514`) ride the lift.
+  jet (x, ±25 mm), XA05A-R202 (z, ±7.5 mm), then the ZA05A lift (y, ±4 mm). The
+  lift is at mid-travel in this STEP: its carriage sits at the library's zero
+  offset on its base, as both slit lifts do, and can drop more than 5 mm before
+  bottoming. (The older 43841 STEP drew it 3.105 mm lower, so that review treats
+  it as fully down.) The jet adapter `P011`, holder `DSG-000108486` (`P507`) and
+  tube `DSG-000005121` (`P514`) ride the lift.
 - **Bottom slit y/x** and **Top slit y/x** drive the two slit towers (`A009`,
   `A015`): a LIB-000032451 vertical lift (±4 mm) carrying an XA05A-R202 (±7.5 mm)
   that holds the blade rod. The blade holder `DSG-000000720` and its two blade
@@ -278,7 +281,7 @@ Everything else is clear over its full travel:
 - the horizontal Parker slide
 - the analyzer rotation (±45°)
 - all crystal translations and tilts
-- LJ y
+- LJ y (±4 mm)
 - both slit X stages
 - ePix10k x
 - ePix100 z (±6.5 mm)

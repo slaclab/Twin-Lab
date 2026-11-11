@@ -355,6 +355,31 @@ def test_jet_slit_and_detector_stages_are_driven_in_beamline_axes():
     assert "lj" not in review["fixed_subsystems"]
 
 
+def test_za05a_lifts_are_drawn_at_mid_travel_and_move_four_mm_each_way():
+    review = _review()
+    entries = _manifest()
+    joints = {joint["name"]: joint for joint in review["joints"]}
+    lifts = [
+        entry for entry in entries
+        if entry["is_assembly"]
+        and entry["name"].split("_oa_")[0] in {"LIB-000032469", "LIB-000032451"}
+    ]
+    assert len(lifts) == 3
+    for lift in lifts:
+        parts = {
+            entry["name"].split("_oa_")[0]: np.asarray(entry["transform_to_parent"])
+            for entry in entries if entry["parent_id"] == lift["id"]
+        }
+        (base,) = [pose for name, pose in parts.items() if name.startswith("REF-0004")]
+        (carriage,) = [pose for name, pose in parts.items() if not name.startswith("REF-0004")]
+        # The library's zero carriage offset is mid-travel; the older 43841 STEP drew
+        # the jet lift 3.105 mm lower, which is why that review treats it as fully down.
+        assert np.linalg.inv(base) @ carriage == pytest.approx(np.eye(4), abs=1e-9)
+    for name in ("lj_y_joint", "bottom_slit_y_joint", "top_slit_y_joint"):
+        assert joints[name]["limits"] == pytest.approx([-0.004, 0.004]), name
+        assert joints[name]["home"] == 0.0
+
+
 @pytest.fixture
 def cad_model(monkeypatch):
     pytest.importorskip("OCP")
