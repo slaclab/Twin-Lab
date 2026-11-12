@@ -2,12 +2,15 @@
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
 
 import yaml
 
 from twin_lab.collision_viewer import SliderJoint, read_joint_metadata
+
+RECIPE = Path(__file__).resolve().parent / "reviews" / "assembly.yaml"
 
 
 class AssemblySliderJoint(SliderJoint):
@@ -25,8 +28,10 @@ class AssemblySliderJoint(SliderJoint):
             "top_slit_x_joint": "Top slit x",
             "top_slit_y_joint": "Top slit y",
             "detector_x_joint": "ePix10k x",
+            "detector_y_joint": "ePix10k y",
             "detector_z_joint": "ePix10k z",
             "epix100_x_joint": "ePix100 x",
+            "epix100_y_joint": "ePix100 y",
             "epix100_z_joint": "ePix100 z",
             "epix100_tilt_joint": "ePix100 tilt",
         }
@@ -36,13 +41,39 @@ class AssemblySliderJoint(SliderJoint):
         return f"{names.get(self.joint_name, self.joint_name)} ({self.unit})"
 
 
+def read_followers() -> dict[str, tuple[str, float]]:
+    """Map each slaved joint to the joint it follows and its fixed ratio, from the recipe."""
+    recipe = yaml.safe_load(RECIPE.read_text())
+    return {
+        joint["name"]: (joint["follows"]["joint"], float(joint["follows"]["ratio"]))
+        for joint in recipe["joints"]
+        if "follows" in joint
+    }
+
+
+def with_followers(
+    positions: Mapping[str, float], followers: Mapping[str, tuple[str, float]], prefix: str = ""
+) -> dict[str, float]:
+    """Return positions with every follower set from its leader, overriding stale values."""
+    result = dict(positions)
+    for follower, (leader, ratio) in followers.items():
+        if prefix + leader in result:
+            result[prefix + follower] = ratio * float(result[prefix + leader])
+    return result
+
+
 def read_controls(package: Path) -> list[AssemblySliderJoint]:
-    recipe = Path(__file__).resolve().parent / "reviews" / "assembly.yaml"
+    template = RECIPE.parent / yaml.safe_load(RECIPE.read_text())["split_templates"]
     record = json.loads((package / "build.json").read_text())
-    template = recipe.parent / yaml.safe_load(recipe.read_text())["split_templates"]
     if (
-        record["recipe_sha256"] != hashlib.sha256(recipe.read_bytes()).hexdigest()
+        record["recipe_sha256"] != hashlib.sha256(RECIPE.read_bytes()).hexdigest()
         or record.get("split_templates_sha256") != hashlib.sha256(template.read_bytes()).hexdigest()
     ):
         raise ValueError("This package is stale. Run build.py --view to load the updated assembly.")
-    return [AssemblySliderJoint(**asdict(joint)) for joint in read_joint_metadata(package)]
+    followers = read_followers()
+    # Followers have no slider; the viewers derive them from their leader.
+    return [
+        AssemblySliderJoint(**asdict(joint))
+        for joint in read_joint_metadata(package)
+        if joint.joint_name not in followers
+    ]

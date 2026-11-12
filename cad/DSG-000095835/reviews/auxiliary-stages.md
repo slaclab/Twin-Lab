@@ -113,8 +113,15 @@ omitted as nonphysical. There is no controller mapping for this adjustment.
 ## ePix100 stack (`DSG-000042618`)
 
 The upward-facing ePix100 module `mo39154223` rides this chain, base to payload.
-The fixed column `P302`/`P328`/`P202` stands on breadboard `P193`, then:
+Fixed block `P302` stands on breadboard `P193`, then:
 
+0. A manual Newport M-EL80 lab jack (`P328`, `DSG-000044951`), confirmed by the
+   user on 2026-11-11. The STEP draws only its bottom and top plates (solids 1
+   and 2, 120 × 80 × 8 mm, 71.775 mm overall), matching the 80 × 120 mm platform.
+   The top plate carries adapter `P202` and everything below. Newport specifies a
+   53 mm minimum height and 60 mm travel, so `epix100_y_joint` runs −18.775 to
+   +41.225 mm along world +Z, assuming the plates are drawn at the jack's set
+   height.
 1. `LIB-000000725` (`P197`), a lead-screw linear stage along world X. Its motor
    is at the outer end, and it is one fused solid. Cross-sections give a fixed
    channel with a central guide rail (local X −15…9, Y up to 1.0). The carriage

@@ -27,7 +27,8 @@ Generated geometry lives in `.cache/twin_lab/`; SDF and MATLAB exports live in
 
 ## Included motion
 
-The model has 28 rigid bodies and 27 active joints:
+The model has 31 rigid bodies and 30 joints. 29 have sliders; the ZA16A's wedge
+joint follows ePix10k y:
 
 - **Spectrometer vertical** and **Spectrometer horizontal** control the two
   large 100 mm Parker/Daedal slides. Both sliders run from −50 to +50 mm.
@@ -61,19 +62,37 @@ The model has 28 rigid bodies and 27 active joints:
   Parker vertical lift plate (`P666`) and participate in interference checks. This
   STEP revision replaces the earlier `DSG-000108873` XCS Von Hamos Controls
   assembly with that single envelope.
-- **ePix10k z/x** drive the detector assembly `LCL5005-008450` on its two Newport
-  IMS300CC slides. Each fused slide is split at its carriage plate, and its 300 mm
-  travel is assumed centred on the carriage position the fused slide models.
+- **ePix10k z/x/y** drive the detector assembly `LCL5005-008450` on its two Newport
+  IMS300CC slides and a Kohzu ZA16A-W2C01 wedge Z stage. Each fused slide is
+  split at its carriage plate, and its 300 mm travel is assumed centred on the
+  carriage position the fused slide models.
   - In the 2026-11-04 STEP, everything on the lower (z) carriage sits 80.1151 mm
     along world −Y from that carriage. The carriage's moving region is offset by
     that much (`moving_offset_mm` in the recipe's `stage_splits`) so it sits under
     the payload.
   - z therefore runs from −69.9 to +230.1 mm about the CAD pose; x keeps ±150 mm.
+  - **y:** the ZA16A (`P1106`, Kohzu's own nine-solid STEP) sits on adapter
+    `P1770` above the x carriage and lifts the detector along world +Z, ±8 mm.
+    Its table (solid 1) carries frame `LCL5010-008490` (`P1719`) and everything
+    on it. It is a wedge actuator: the 1/4 wedge (solids 6–7) slides 4 mm
+    forward (world +Y, towards the chamber) for every 1 mm the table rises. At
+    +8 mm it sticks 29 mm out of the stage's front, as in Kohzu's drawing. The
+    wedge has its own joint, `detector_y_wedge_joint`, with no slider. Both
+    viewers and validation set it from ePix10k y, so the table never separates
+    from or sinks into the wedge. The base, feet and motor stay on the x slide.
+    Kohzu's drawing puts the table 80 ± 8 mm above the mounting face, and the CAD
+    table face is at 80.0 mm, so the CAD pose is mid-travel.
   - The detector keeps its parts at least 100 mm across, including the new front
     plate `mo39134025` (`P1342`); smaller parts and electronics are omitted.
-- **ePix100 x/z/tilt** drive the smaller, upward-facing ePix100 (module
+- **ePix100 y/x/z/tilt** drive the smaller, upward-facing ePix100 (module
   `mo39154223` in `DSG-000042618`, sensor `P209`). The stack, from its fixed
-  column up, is:
+  column `P302` up, is:
+  - **y:** a manual Newport M-EL80 lab jack (`P328`) along world +Z. The STEP
+    draws it as two 8 mm plates of its 80 × 120 mm platform, 71.775 mm overall.
+    The bottom plate stays fixed and the top plate carries adapter `P202` and the
+    whole linear stage. Newport gives a 53 mm minimum height and 60 mm travel, so
+    y runs −18.8/+41.2 mm about the CAD pose. The scissor mechanism is not drawn
+    and is not collision-checked.
   - **x:** a lead-screw linear stage `LIB-000000725` (`P197`) along world −X.
     Its travel comes from the stage's end blocks, −92.2/+101.7 mm for the
     carriage the fused part models. In this STEP the payload adapter `P199` sits
@@ -284,6 +303,11 @@ Everything else is clear over its full travel:
 - LJ y (±4 mm)
 - both slit X stages
 - ePix10k x
+- ePix10k y (±8 mm), with the ZA16A wedge sliding ±32 mm under the table. At
+  −8 mm the frame `P1719` is 0.79 mm above the wedge, so the bottom of travel
+  leaves little margin. That pair's inflated hulls touch from −5 mm and are a
+  reviewed `ignored_pairs` entry, as is the table-on-wedge bearing itself.
+- ePix100 y (−18.8/+41.2 mm). The M-EL80's scissor mechanism is not in the STEP.
 - ePix100 z (±6.5 mm)
 
 These are single-joint sweeps. Combined poses, such as a crystal rotated toward its

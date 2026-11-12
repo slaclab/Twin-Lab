@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import yaml
-from controls import read_controls
+from controls import read_controls, read_followers, with_followers
 from OCP.BRep import BRep_Builder
 from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
 from OCP.BRepExtrema import BRepExtrema_DistShapeShape
@@ -53,10 +53,15 @@ class AssemblyCollisionModel(CollisionModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.ignored_pairs = self.ignored_pairs | read_ignored_pairs(RECIPE)
+        self.followers = read_followers()
         self._cad_shapes = {}
         self._cad_gaps = {}
         self._cad_review = None
         self._cad_stats = None
+
+    def set_positions(self, positions):
+        """Slaved joints, such as the ZA16A wedge, always follow their leader."""
+        super().set_positions(with_followers(positions, self.followers))
 
     @property
     def supports_verification(self):

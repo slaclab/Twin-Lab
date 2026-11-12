@@ -1,3 +1,73 @@
+# ZA16A Wedge Follows ePix10k y (2026-11-11)
+
+Same STEP revision (`b1c34cc1…`). The user pointed out that the ZA16A is a wedge
+actuator: the bottom wedge slides forward (up to 29 mm) and is never separated
+from the table. The previous entry kept the wedge on the base, so raising y
+opened a gap and lowering it drove the table into the wedge.
+
+- The wedge (solid 6) and the rail fixed to it (solid 7, touching it) now form
+  body `detector_y_wedge` on `detector_y_wedge_joint`. That joint is prismatic
+  along world +Y (local −X), limits ±32 mm, with `follows: {joint:
+  detector_y_joint, ratio: 4.0}`.
+  - The ratio is the 1/4 wedge: 14.04° incline faces, tan = 0.25.
+  - Raising the table drives the wedge forward. At +8 mm its tip (local X −77)
+    reaches −109, exactly the "(29)" overhang past the −80 front face that
+    Kohzu's drawing dimensions.
+- Followers have no slider. `controls.read_followers` and `with_followers` derive
+  them from their leader in the motion viewer, and in
+  `AssemblyCollisionModel.set_positions`, which the collision viewer, validation
+  and its regressions all use. `validate_review` rejects a follower whose leader
+  is missing or itself a follower, or whose limits are not ratio × the leader's.
+- CAD with the wedge coupled, stepping y over ±8 mm:
+  - table-to-wedge and wedge-to-base stay at the drawn 0.500 mm at every height.
+    With the wedge held still, the table went to 0 mm (interference) below home
+    and opened to 1.4 mm above.
+  - `P1719` vs the wedge is 0.787 mm at −8 mm, table vs base 1.4 mm; nothing
+    else comes within 2 mm.
+- Table and wedge are sibling bodies, so no joint filter covers their bearing;
+  `[P1106, P1106]` is a reviewed ignored pair. A hull sweep at 0.5 mm steps
+  shows no contacts. New collision regressions put ePix10k y at +8 and −8 mm,
+  and both are CAD-verified clear.
+- Both packages validate 31 bodies and 30 joints (29 sliders), with 60
+  individual endpoints. CoACD ran only for the two re-split ZA16A selections.
+
+# ePix y Stages (2026-11-11)
+
+Same STEP revision (`b1c34cc1…`). The user identified both detectors' vertical
+stages.
+
+- ePix10k y, `detector_y_joint`: a Kohzu ZA16A-W2C01 (`P1106`, "L-000000533")
+  sits on adapter `P1770` above the upper IMS300CC carriage.
+  - The part is Kohzu's own STEP: same bounds and nine solid volumes as the
+    vendor download. 14.04° (1/4 wedge) faces identify solid 1 as the table
+    (facing down) and solid 6 as the wedge (facing up).
+  - The table's top face is at local Z 80.0, the vendor drawing's "80 ± 8", so
+    the CAD pose is mid-travel. Limits are ±8 mm along world +Z, with the joint
+    origin at the table-top centre (0.02, −474.108, −188.353) mm.
+  - Contact walking from the table reaches all 37 other parts that were on
+    detector x (frame `P1719` and everything on it); none comes within 1 mm of
+    the slide, adapter or ZA16A base. They moved to `detector_y` with the table;
+    the base, wedge, roller retainer and feet stay on detector x.
+- ePix100 y, `epix100_y_joint`: a manual Newport M-EL80 lab jack (`P328`,
+  `DSG-000044951`), drawn as two 8 mm plates of its 80 × 120 mm platform,
+  71.775 mm overall.
+  - The bottom plate (solid 1) stays fixed; the top plate (solid 2) carries
+    adapter `P202` and the whole linear stage. Nothing else touches those parts.
+  - Newport lists a 53 mm minimum height and 60 mm travel (113 mm maximum), so
+    the limits are −18.775/+41.225 mm along world +Z, assuming the plates are
+    drawn at the jack's set height.
+- Both packages validate 30 bodies and 29 joints, with 58 individual endpoints,
+  max pose error 5.55e-16. CoACD ran for the 43 new or re-bodied selections; the
+  convex package has 7,162 geometries. CAD-verified home is clear.
+- Single-joint checks, hull sweep with CAD confirmation and CAD conservative
+  advancement:
+  - ePix10k y: clear over ±8 mm. `P1719` is 8.787 mm above the ZA16A wedge and
+    roller retainer at home and 0.787 mm at −8 mm. The wedge's top height does
+    not change as it slides, so the margin holds even though the model keeps the
+    wedge still. Their hulls touch from −5 mm; `[P1106, P1719]` is a reviewed
+    ignored pair.
+  - ePix100 y: clear over −18.775/+41.225 mm, with no hull-only contacts.
+
 # LJ y Centred (2026-11-11)
 
 Same STEP revision (`b1c34cc1…`).

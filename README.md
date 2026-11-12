@@ -9,7 +9,7 @@ Two models are currently runnable:
 | Key | Model | Joints |
 | --- | --- | --- |
 | `43841` | Subassembly `*43841` from drawing `DSG-000040389`: an EPIX detector stage, three crystal stacks, and three polycapillary stacks | 27 |
-| `95835` | Offline assembly `DSG-000095835`: Parker lift and slide, Huber rotation, four crystal stacks, liquid jet, two slit towers, the ePix10k slides, and the ePix100's linear stage, manual Kohzu translation and swivel. See [its README](cad/DSG-000095835/README.md) | 27 |
+| `95835` | Offline assembly `DSG-000095835`: Parker lift and slide, Huber rotation, four crystal stacks, liquid jet, two slit towers, the ePix10k slides and ZA16A lift, and the ePix100's lab jack, linear stage, manual Kohzu translation and swivel. See [its README](cad/DSG-000095835/README.md) | 30 (29 sliders; the ZA16A wedge follows its lift) |
 
 In `43841`, the two Thorlabs LX10 detector stages are manual-only because they
 are not powered and have no EPICS archive data.

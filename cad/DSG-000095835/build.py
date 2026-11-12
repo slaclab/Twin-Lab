@@ -371,6 +371,17 @@ def validate_review(review: dict, stats: dict) -> None:
             raise ValueError(f"Invalid limits/frame for {joint['name']}")
         if not low <= joint.get("home", 0.0) <= high or not low <= 0 <= high:
             raise ValueError(f"CAD/home pose outside limits: {joint['name']}")
+    joints = {joint["name"]: joint for joint in review["joints"]}
+    for joint in joints.values():
+        if "follows" not in joint:
+            continue
+        leader = joints.get(joint["follows"]["joint"])
+        ratio = float(joint["follows"]["ratio"])
+        if leader is None or "follows" in leader or not np.isfinite(ratio) or ratio == 0.0:
+            raise ValueError(f"{joint['name']} must follow an independent joint by a finite ratio")
+        # A follower's whole travel is its leader's travel scaled, so neither clamps the other.
+        if not np.allclose(sorted(ratio * np.asarray(leader["limits"])), joint["limits"]):
+            raise ValueError(f"{joint['name']} limits must be {ratio} x {leader['name']} limits")
     if reached != set(bodies):
         raise ValueError(f"Disconnected bodies: {set(bodies) - reached}")
 

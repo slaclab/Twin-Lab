@@ -20,6 +20,15 @@ collision_regressions:
 - name: Return from cage contact to home
   positions: {}
   expect_clear: true
+# The ZA16A wedge follows ePix10k y, sticking 29 mm out of the stage's front at the top.
+- name: ePix10k y top, wedge 29 mm out of the ZA16A front
+  positions:
+    detector_y_joint: 0.008
+  expect_clear: true
+- name: ePix10k y bottom, wedge drawn back
+  positions:
+    detector_y_joint: -0.008
+  expect_clear: true
 # Reviewed hull false positives that cannot close within travel. The convex hulls of chamber
 # port P403 fill the bores the slit blade rods pass through; source CAD keeps clearance around
 # each rod at every corner of its +/-4 mm y and +/-7.5 mm x travel.
@@ -28,6 +37,13 @@ ignored_pairs:
   reason: Bottom slit rod passes through the port bore with >= 2.786 mm CAD clearance over travel.
 - pair: [P403, P123]
   reason: Top slit rod passes through the port bore with >= 2.729 mm CAD clearance over travel.
+- pair: [P1106, P1106]
+  reason: The ZA16A table and wedge are sibling bodies coupled by detector_y_wedge_joint; the
+    1/4 incline keeps their drawn 0.5 mm roller clearance at every height, so no Drake joint
+    filter covers this always-touching bearing.
+- pair: [P1106, P1719]
+  reason: ePix10k frame P1719 clears the ZA16A wedge by 8.787 mm at home and 0.787 mm at the bottom
+    of +/-8 mm y travel, measured in CAD with the wedge sliding 4 mm per mm (1 mm steps).
 notes:
 - Offline provisional kinematic model; CAD pose is q=0 for every joint.
 - Axes and attachment order inferred from bearing geometry and coincident mounting planes.
@@ -46,8 +62,8 @@ notes:
 - The STEP holds four mo39154771 crystal stacks A064-A067. Stack 4 joint frames are stack 1 frames
   carried by the stack placement transform; the same transform reproduces stacks 2 and 3 to 0.022 mm.
 - Jet stage parts are present in this STEP revision.
-- Manual stages remain fixed, except the ePix100's manual Kohzu translation and swivel. Beam
-  construction geometry and communication configuration omitted.
+- Manual stages remain fixed, except the ePix100's M-EL80 lab jack, manual Kohzu translation and
+  swivel. Beam construction geometry and communication configuration omitted.
 - Analyzer (Huber 410) and crystal rotations are limited to +/-45 degrees about the CAD pose by
   request.
 - Split outputs discard inverted and disconnected solids below 100 cubic millimetres; external stage
@@ -72,7 +88,15 @@ notes:
   along x. Each fused slide is split at its carriage, and 300 mm travel is assumed centred on the
   carriage position the fused slide models. In the 2026-11-04 STEP everything on the lower carriage
   sits 80.1151 mm along world -Y from that carriage, so its moving region is offset to sit under
-  the payload and z travel is -69.885/+230.115 mm about the CAD pose.
+  the payload and z travel is -69.885/+230.115 mm about the CAD pose. Above the upper slide's adapter
+  P1770, a Kohzu ZA16A-W2C01 wedge Z stage P1106 (the vendor's STEP, nine solids) lifts the detector
+  along world +Z (y, +/-8 mm). Its table, solid 1, rides with everything above it from frame P1719
+  up. Its 1/4 wedge, solids 6-7, slides under the table 4 mm along world +Y per mm of lift
+  (detector_y_wedge_joint follows detector_y_joint), keeping the drawn 0.5 mm roller clearance to
+  the table and base at every height and sticking 29 mm out of the stage's front at +8 mm, as in
+  Kohzu's drawing. The base, feet and motor stay on the x slide. The vendor drawing gives the
+  table 80 +/-8 mm above the mounting face, and the CAD table face sits at 80.0 mm, so the CAD pose
+  is mid-travel.
 - Outer cage A035 is fixed collision geometry. Large spectrometer controls are the two 100 mm Parker
   slides.
 - The user-supplied controls envelope P702 and its support posts ride the Parker lift plate P666;
@@ -88,7 +112,8 @@ notes:
   DSG-000008836 (understructure, floor anchors) stays omitted.
 - Camera stages LIB-000032933/LIB-000032929 have no geometry in this STEP; the camera stays fixed.
 - The upward-facing ePix100 (module mo39154223 in DSG-000042618 A021) rides, from the fixed column
-  P302/P328/P202, a lead-screw linear stage LIB-000000725 P197 along world X, an old 70 mm manual
+  P302, a manual Newport M-EL80 lab jack P328 along world +Z (y), a lead-screw linear stage
+  LIB-000000725 P197 along world X, an old 70 mm manual
   Kohzu cross-roller X stage LIB-000005430 P313 along world Y, and a Kohzu SH05B-RM manual swivel
   LIB-000013709 A031 about world X through datum sphere P326. A 10 degree wedge adapter P196 under
   the swivel gives the detector's CAD tilt; the swivel itself is centred. Both stages are fused
@@ -99,7 +124,11 @@ notes:
   equivalent. The module's front/rear covers P266/P222 and cooling block P249/P250 have solids since
   the 2026-11-04 14:01 export (empty before), so they are retained with the external coolant fittings
   and tubes P251-P258/P288 and the transceiver P240 and ribbon cable P247 that protrude from the
-  rear face; the parts fully enclosed by the covers stay omitted as internals.
+  rear face; the parts fully enclosed by the covers stay omitted as internals. The STEP draws the
+  M-EL80 as two 8 mm plates of its 80 x 120 mm platform, 71.775 mm overall; the bottom plate
+  (solid 1) stays fixed and the top plate (solid 2) carries adapter P202 and the whole linear stage.
+  Newport gives 53 mm minimum height and 60 mm travel, so ePix100 y runs -18.775/+41.225 mm
+  about the CAD pose.
 stage_splits:
   P933: P1177
   P760: P1047
@@ -204,10 +233,8 @@ bodies:
     - P185
     - P186
     - P193
-    - {ref: P197, region: fixed}
-    - P202
     - P302
-    - P328
+    - {ref: P328, solids: [1]}
     - P421
     - P426
     - P427
@@ -510,7 +537,16 @@ bodies:
     parts:
     - {ref: P1723, region: moving}
     - P1770
-    - P1106
+    # ZA16A-W2C01 base, feet and motor detail; solid 1 is its table, solids 6-7 its wedge.
+    - {ref: P1106, solids: [2, 3, 4, 5, 8, 9]}
+  detector_y_wedge:
+    rgba: [0.18, 0.72, 0.62, 1.0]
+    parts:
+    - {ref: P1106, solids: [6, 7]}
+  detector_y:
+    rgba: [0.22, 0.64, 0.84, 1.0]
+    parts:
+    - {ref: P1106, solids: [1]}
     - P1719
     - P1727
     - P1737
@@ -548,6 +584,13 @@ bodies:
     - P1445
     - P1446
     - P1342
+  epix100_y:
+    rgba: [0.47, 0.4, 0.68, 1.0]
+    parts:
+    # M-EL80 lab jack, drawn as its bottom (solid 1) and top (solid 2) plates.
+    - {ref: P328, solids: [2]}
+    - P202
+    - {ref: P197, region: fixed}
   epix100_x:
     rgba: [0.55, 0.45, 0.75, 1.0]
     parts:
@@ -830,11 +873,47 @@ joints:
   limits: [-0.15, 0.15]
   home: 0.0
   bearing_parts: [[P1723], [P1723, P1770]]
+- name: detector_y_joint
+  stack: ePix10k y (Kohzu ZA16A-W2C01 wedge Z stage, +/-8 mm)
+  stage_ref: P1106
+  type: prismatic
+  parent: detector_x
+  child: detector_y
+  axis_xyz: [0.0, 0.0, 1.0]
+  origin_m: [0.0000237, -0.474108, -0.1883528]
+  limits: [-0.008, 0.008]
+  home: 0.0
+  bearing_parts: [[P1106], [P1106]]
+# The ZA16A's 1/4 wedge slides 4 mm along world +Y (forward, towards the chamber) for every
+# 1 mm the table rises, so it has no slider of its own; viewers set it from detector_y_joint.
+- name: detector_y_wedge_joint
+  stack: ePix10k y wedge (Kohzu ZA16A-W2C01 1/4 wedge, follows ePix10k y)
+  stage_ref: P1106
+  type: prismatic
+  parent: detector_x
+  child: detector_y_wedge
+  axis_xyz: [0.0, 1.0, 0.0]
+  origin_m: [0.0000237, -0.474108, -0.2283528]
+  limits: [-0.032, 0.032]
+  home: 0.0
+  bearing_parts: [[P1106], [P1106]]
+  follows: {joint: detector_y_joint, ratio: 4.0}
+- name: epix100_y_joint
+  stack: ePix100 y (manual Newport M-EL80 lab jack, 53-113 mm high)
+  stage_ref: P328
+  type: prismatic
+  parent: assembly_base
+  child: epix100_y
+  axis_xyz: [0.0, 0.0, 1.0]
+  origin_m: [-0.1816, 0.018821, -0.158344]
+  limits: [-0.018775, 0.041225]
+  home: 0.0
+  bearing_parts: [[P328], [P328]]
 - name: epix100_x_joint
   stack: ePix100 x (lead-screw stage LIB-000000725, mechanical end stops)
   stage_ref: P197
   type: prismatic
-  parent: assembly_base
+  parent: epix100_y
   child: epix100_x
   axis_xyz: [-1.0, 0.0, 0.0]
   origin_m: [-0.15966, 0.00654, -0.1233]

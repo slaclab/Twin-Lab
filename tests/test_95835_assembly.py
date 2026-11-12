@@ -169,14 +169,14 @@ def test_epix100_rides_linear_stage_manual_kohzu_and_swivel():
         }
 
     # Each fused stage is split between the body it is bolted to and the body it carries.
-    assert regions("assembly_base", linear) == {"fixed"}
+    assert regions("epix100_y", linear) == {"fixed"}
     assert regions("epix100_x", linear) == {"moving"}
     assert regions("epix100_x", kohzu) == {"fixed"}
     assert regions("epix100_z", kohzu) == {"moving"}
     assert owners[swivel_base] == "epix100_z" and owners[swivel_top] == "epix100_tilt"
     assert owners[sensor] == "epix100_tilt"
-    chain = [("epix100_x_joint", "prismatic"), ("epix100_z_joint", "prismatic"),
-             ("epix100_tilt_joint", "revolute")]
+    chain = [("epix100_y_joint", "prismatic"), ("epix100_x_joint", "prismatic"),
+             ("epix100_z_joint", "prismatic"), ("epix100_tilt_joint", "revolute")]
     parent = "assembly_base"
     for name, kind in chain:
         joint = joints[name]
@@ -210,6 +210,112 @@ def test_epix100_housing_and_rear_plumbing_ride_the_swivel():
     ]
     assert len(housing) == 4 and len(plumbing) == 8
     assert {owners[ref] for ref in housing + plumbing} == {"epix100_tilt"}
+
+
+def _solid_owners(review, ref):
+    return {
+        body: part.get("solids")
+        for body, spec in review["bodies"].items()
+        for part in spec["parts"]
+        if isinstance(part, dict) and part["ref"] == ref
+    }
+
+
+def test_both_epix_detectors_ride_vertical_stages():
+    review = _review()
+    entries = _manifest()
+    owners = _owners(review)
+    joints = {joint["name"]: joint for joint in review["joints"]}
+    # ePix10k: Kohzu ZA16A-W2C01 (vendor STEP, nine solids) above the upper IMS300CC.
+    # Solid 1 is the table, solids 6-7 the 1/4 wedge that slides under it, the rest the base.
+    (za16a,) = _refs("L-000000533", entries)
+    assert _solid_owners(review, za16a) == {
+        "detector_x": [2, 3, 4, 5, 8, 9], "detector_y": [1], "detector_y_wedge": [6, 7],
+    }
+    (frame,) = _refs("LCL5010-008490", entries)
+    (front_plate,) = _refs("mo39134025", entries)
+    assert owners[frame] == owners[front_plate] == "detector_y"
+    (adapter_10k,) = _refs("DSG-000007275", entries)
+    slides = _refs("Newport__StageLinear_300mmTravelDCMotor__IMS300CC", entries)
+    lower = [
+        part if isinstance(part, str) else part["ref"]
+        for part in review["bodies"]["detector_x"]["parts"]
+    ]
+    assert len(lower) == 3 and lower[0] in slides and lower[1:] == [adapter_10k, za16a]
+    ten_k = joints["detector_y_joint"]
+    assert (ten_k["parent"], ten_k["child"], ten_k["axis_xyz"]) == (
+        "detector_x", "detector_y", [0.0, 0.0, 1.0])
+    assert ten_k["limits"] == pytest.approx([-0.008, 0.008])
+    # ePix100: Newport M-EL80 lab jack, drawn as its bottom and top plates (71.775 mm overall);
+    # 53 mm minimum height and 60 mm travel.
+    (jack,) = _refs("DSG-000044951", entries)
+    assert _solid_owners(review, jack) == {"assembly_base": [1], "epix100_y": [2]}
+    (adapter,) = _refs("DSG-000046550", entries)
+    assert owners[adapter] == "epix100_y"
+    one_hundred = joints["epix100_y_joint"]
+    assert (one_hundred["parent"], one_hundred["child"], one_hundred["axis_xyz"]) == (
+        "assembly_base", "epix100_y", [0.0, 0.0, 1.0])
+    assert one_hundred["limits"] == pytest.approx([53e-3 - 71.775e-3, 113e-3 - 71.775e-3])
+
+
+def test_za16a_wedge_follows_the_table_four_to_one(monkeypatch):
+    monkeypatch.syspath_prepend(str(ASSEMBLY))
+    controls = import_module("controls")
+    joints = {joint["name"]: joint for joint in _review()["joints"]}
+    wedge = joints["detector_y_wedge_joint"]
+    # 1/4 wedge: the wedge slides 4 mm forward (world +Y) per 1 mm of table lift, and is
+    # 29 mm out of the stage's front at +8 mm.
+    assert controls.read_followers() == {"detector_y_wedge_joint": ("detector_y_joint", 4.0)}
+    assert (wedge["parent"], wedge["axis_xyz"]) == ("detector_x", [0.0, 1.0, 0.0])
+    assert wedge["limits"] == pytest.approx([4 * v for v in joints["detector_y_joint"]["limits"]])
+    followers = controls.read_followers()
+    assert controls.with_followers(
+        {"detector_y_joint": -0.002, "detector_y_wedge_joint": 0.5}, followers
+    ) == {"detector_y_joint": -0.002, "detector_y_wedge_joint": -0.008}
+    assert controls.with_followers(
+        {"m::detector_y_joint": 0.001}, followers, prefix="m::"
+    ) == {"m::detector_y_joint": 0.001, "m::detector_y_wedge_joint": 0.004}
+    assert controls.with_followers({"lj_y_joint": 0.001}, followers) == {"lj_y_joint": 0.001}
+
+
+def test_collision_model_moves_followers_with_their_leader(cad_model, monkeypatch):
+    model, _, _ = cad_model
+    applied = []
+    monkeypatch.setattr(
+        type(model).__mro__[1], "set_positions", lambda self, positions: applied.append(positions)
+    )
+    model.set_positions({"detector_y_joint": 0.008})
+    assert applied == [{"detector_y_joint": 0.008, "detector_y_wedge_joint": 0.032}]
+
+
+@pytest.mark.parametrize("defect", ["limits", "chained", "missing"])
+def test_build_rejects_inconsistent_followers(monkeypatch, defect):
+    monkeypatch.syspath_prepend(str(ASSEMBLY))
+    build = import_module("build")
+    stats = {ref: {"local": {"solids": [{}]}} for ref in ("P1", "P2", "P3")}
+    joint = {"type": "prismatic", "axis_xyz": [0.0, 0.0, 1.0], "origin_m": [0.0, 0.0, 0.0]}
+    review = {
+        "bodies": {"assembly_base": {"parts": ["P1"]}, "lift": {"parts": ["P2"]},
+                   "wedge": {"parts": ["P3"]}},
+        "omitted_occurrences": {build.EMPTY_GEOMETRY: []},
+        "stage_splits": {},
+        "joints": [
+            {**joint, "name": "lift_joint", "parent": "assembly_base", "child": "lift",
+             "limits": [-0.008, 0.008]},
+            {**joint, "name": "wedge_joint", "parent": "assembly_base", "child": "wedge",
+             "limits": [-0.032, 0.032], "follows": {"joint": "lift_joint", "ratio": 4.0}},
+        ],
+    }
+    build.validate_review(review, stats)
+    follower = review["joints"][1]
+    if defect == "limits":
+        follower["limits"] = [-0.03, 0.032]
+    elif defect == "chained":
+        review["joints"][0]["follows"] = {"joint": "wedge_joint", "ratio": 0.25}
+    else:
+        follower["follows"]["joint"] = "nowhere_joint"
+    with pytest.raises(ValueError, match="follow|limits must be"):
+        build.validate_review(review, stats)
 
 def test_diffractometer_base_is_fixed_geometry_and_its_empty_parts_stay_omitted():
     review = _review()
@@ -334,7 +440,7 @@ def test_jet_slit_and_detector_stages_are_driven_in_beamline_axes():
         "lj": ["x", "z", "y"],
         "bottom_slit": ["y", "x"],
         "top_slit": ["y", "x"],
-        "detector": ["z", "x"],
+        "detector": ["z", "x", "y"],
     }
     for prefix, axes in chains.items():
         parent = "assembly_base"

@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 import numpy as np
-from controls import read_controls
+from controls import read_controls, read_followers, with_followers
 from pydrake.geometry import Meshcat
 
 from twin_lab.collision_viewer import isometric_camera
@@ -21,6 +21,7 @@ def view(package: Path, *, once: bool = False) -> None:
     scene = load_scene(package / "DSG-000095835.sdf", meshcat=meshcat)
     context = scene.create_context()
     joints = read_controls(package)
+    followers = read_followers()
     for joint in joints:
         low, high, home = joint.slider_bounds()
         meshcat.AddSlider(joint.label, low, high, 0.05, home)
@@ -69,7 +70,9 @@ def view(package: Path, *, once: bool = False) -> None:
                 positions[f"DSG-000095835::{joint.joint_name}"] = value
             if now - last_push >= 0.2:
                 last_push = now
-            scene.set_joint_positions(context, positions)
+            scene.set_joint_positions(
+                context, with_followers(positions, followers, prefix="DSG-000095835::")
+            )
             scene.diagram.ForcedPublish(context)
             meshcat.Flush()
             if once:
