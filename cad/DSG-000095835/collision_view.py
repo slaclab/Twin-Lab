@@ -2,6 +2,7 @@
 
 import json
 from dataclasses import replace
+from itertools import combinations
 from pathlib import Path
 
 import numpy as np
@@ -20,6 +21,20 @@ from twin_lab import collision_viewer
 from twin_lab.collision import CollisionModel, part_of, read_ignored_pairs
 
 RECIPE = Path(__file__).resolve().parent / "reviews" / "assembly.yaml"
+
+
+def read_ignored_groups(path):
+    """Expand reviewed ``ignored_groups`` into every pair of parts within each group.
+
+    A group is a mechanism whose own drawn clearances are not faithful, such as a lab jack;
+    its members stay checked against everything outside the group.
+    """
+    groups = (yaml.safe_load(Path(path).read_text()) or {}).get("ignored_groups", [])
+    return frozenset(
+        tuple(sorted((first.upper(), second.upper())))
+        for group in groups
+        for first, second in combinations(sorted(set(group["parts"])), 2)
+    )
 
 
 def cad_gap_m(shapes):
@@ -52,7 +67,9 @@ class AssemblyCollisionModel(CollisionModel):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.ignored_pairs = self.ignored_pairs | read_ignored_pairs(RECIPE)
+        self.ignored_pairs = (
+            self.ignored_pairs | read_ignored_pairs(RECIPE) | read_ignored_groups(RECIPE)
+        )
         self.followers = read_followers()
         self._cad_shapes = {}
         self._cad_gaps = {}

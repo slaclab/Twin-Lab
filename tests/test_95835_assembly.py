@@ -140,39 +140,33 @@ def test_analyzer_and_crystal_rotations_are_limited_to_45_degrees():
         assert joints[name]["limits"] == pytest.approx([-np.pi / 4, np.pi / 4]), name
 
 
-def test_epix_z_travel_follows_the_payload_offset_from_its_fused_carriage():
+def test_epix_z_travel_is_centred_on_its_carriage():
     review = _review()
     joint = next(joint for joint in review["joints"] if joint["name"] == "detector_z_joint")
     split = review["stage_splits"][joint["stage_ref"]]
-    offset_m = -split["moving_offset_mm"][2] / 1000.0
-    # 300 mm of travel stays centred on the carriage the fused slide models.
-    assert joint["limits"] == pytest.approx([-0.15 + offset_m, 0.15 + offset_m])
-    assert joint["limits"][0] < 0.0 < joint["limits"][1]
+    # The 2026-11-12 export puts the payload back on the carriage the fused slide models, as in
+    # the 93ae4dc6 export; only the 14:01 export needed a moving_offset_mm.
+    assert split == {"template": "IMS300CC"}
+    assert joint["limits"] == pytest.approx([-0.15, 0.15])
 
 
-def test_epix100_rides_linear_stage_manual_kohzu_and_swivel():
+def test_epix100_rides_vt50l_manual_stage_and_swivel():
     review = _review()
     entries = _manifest()
     owners = _owners(review)
-    bodies = review["bodies"]
     joints = {joint["name"]: joint for joint in review["joints"]}
-    (linear,) = _refs("LIB-000000725", entries)
-    (kohzu,) = _refs("LIB-000005430", entries)
+    (vt_base,) = _refs("REF__Micronix_VT-50L-13316__StageLinear_Base", entries)
+    (vt_carriage,) = _refs("LIB-000033067", entries)
+    manual_base, manual_table, micrometer = (
+        _refs(f"REF-00043201{n}", entries)[0] for n in (2, 3, 4)
+    )
     (swivel_base,) = _refs("LIB-000013710", entries)
     (swivel_top,) = _refs("LIB-000013712", entries)
     (sensor,) = _refs("REF__Chip__sa39154207", entries)
-
-    def regions(body, ref):
-        return {
-            part["region"] for part in bodies[body]["parts"]
-            if isinstance(part, dict) and part["ref"] == ref and "region" in part
-        }
-
-    # Each fused stage is split between the body it is bolted to and the body it carries.
-    assert regions("epix100_y", linear) == {"fixed"}
-    assert regions("epix100_x", linear) == {"moving"}
-    assert regions("epix100_x", kohzu) == {"fixed"}
-    assert regions("epix100_z", kohzu) == {"moving"}
+    # Multi-part stage CAD since the 2026-11-12 export: no stage needs a split mask.
+    assert owners[vt_base] == "epix100_y" and owners[vt_carriage] == "epix100_x"
+    assert owners[manual_base] == owners[micrometer] == "epix100_x"
+    assert owners[manual_table] == "epix100_z"
     assert owners[swivel_base] == "epix100_z" and owners[swivel_top] == "epix100_tilt"
     assert owners[sensor] == "epix100_tilt"
     chain = [("epix100_y_joint", "prismatic"), ("epix100_x_joint", "prismatic"),
@@ -182,10 +176,13 @@ def test_epix100_rides_linear_stage_manual_kohzu_and_swivel():
         joint = joints[name]
         assert (joint["parent"], joint["type"]) == (parent, kind)
         parent = joint["child"]
+    # VT-50L-13316 is the 198 mm version, drawn 73.8 mm from mid-travel.
+    low, high = joints["epix100_x_joint"]["limits"]
+    assert high - low == pytest.approx(0.198)
     assert joints["epix100_z_joint"]["limits"] == pytest.approx([-0.0065, 0.0065])
     assert joints["epix100_tilt_joint"]["limits"] == pytest.approx([-np.pi / 18, np.pi / 18])
     templates = yaml.safe_load((ASSEMBLY / "reviews" / "stage-splits.yaml").read_text())
-    assert {"LIB-000000725", "LIB-000005430"} <= set(templates)
+    assert not {"LIB-000000725", "LIB-000005430"} & set(templates)
 
 
 def test_epix100_housing_and_rear_plumbing_ride_the_swivel():
@@ -246,16 +243,55 @@ def test_both_epix_detectors_ride_vertical_stages():
     assert (ten_k["parent"], ten_k["child"], ten_k["axis_xyz"]) == (
         "detector_x", "detector_y", [0.0, 0.0, 1.0])
     assert ten_k["limits"] == pytest.approx([-0.008, 0.008])
-    # ePix100: Newport M-EL80 lab jack, drawn as its bottom and top plates (71.775 mm overall);
-    # 53 mm minimum height and 60 mm travel.
-    (jack,) = _refs("DSG-000044951", entries)
-    assert _solid_owners(review, jack) == {"assembly_base": [1], "epix100_y": [2]}
-    (adapter,) = _refs("DSG-000046550", entries)
-    assert owners[adapter] == "epix100_y"
-    one_hundred = joints["epix100_y_joint"]
-    assert (one_hundred["parent"], one_hundred["child"], one_hundred["axis_xyz"]) == (
-        "assembly_base", "epix100_y", [0.0, 0.0, 1.0])
-    assert one_hundred["limits"] == pytest.approx([53e-3 - 71.775e-3, 113e-3 - 71.775e-3])
+
+
+def test_lab_jack_scissor_keeps_its_pins_together(monkeypatch):
+    monkeypatch.syspath_prepend(str(ASSEMBLY))
+    controls = import_module("controls")
+    review = _review()
+    entries = _manifest()
+    owners = _owners(review)
+    joints = {joint["name"]: joint for joint in review["joints"]}
+    plate, base, arm_a, arm_b, drive, top_block, bottom_block, centre = (
+        _refs(f"REF-0004{n}", entries)[0]
+        for n in ("31998", "31999", "32000", "32001", "32002", "32003", "32004", "32005")
+    )
+    assert owners[base] == "assembly_base" and owners[plate] == owners[drive] == "epix100_y"
+    assert owners[arm_a] == owners[centre] == "epix100_jack_arm_a"
+    assert owners[arm_b] == "epix100_jack_arm_b"
+    assert owners[top_block] == "epix100_jack_top_slider"
+    assert owners[bottom_block] == "epix100_jack_bottom_slider"
+    lift = joints["epix100_y_joint"]
+    # Newport M-EL80: 53-113 mm high; the CAD jack is drawn 112.211 mm high.
+    assert lift["limits"] == pytest.approx([0.053 - 0.1122112, 0.113 - 0.1122112])
+    followers = controls.read_followers()
+
+    def point(name):
+        return np.asarray(joints[name]["origin_m"], dtype=float)
+
+    def rotate(name, angle, vector):
+        axis = np.asarray(joints[name]["axis_xyz"], dtype=float)
+        # Rodrigues' rotation about the joint axis.
+        return (vector * np.cos(angle) + np.cross(axis, vector) * np.sin(angle)
+                + axis * axis.dot(vector) * (1.0 - np.cos(angle)))
+
+    a_pivot, b_pivot = point("epix100_jack_arm_a_joint"), point("epix100_jack_arm_b_joint")
+    top_pin, bottom_pin = point("epix100_jack_top_slider_joint"), point(
+        "epix100_jack_bottom_slider_joint")
+    for q in np.linspace(*lift["limits"], 9):
+        values = controls.with_followers({"epix100_y_joint": q}, followers)
+        lifted = np.array([0.0, 0.0, q])
+        a = rotate("epix100_jack_arm_a_joint", values["epix100_jack_arm_a_joint"],
+                   top_pin - a_pivot)
+        b = rotate("epix100_jack_arm_b_joint", values["epix100_jack_arm_b_joint"],
+                   bottom_pin - b_pivot)
+        slide_top = values["epix100_jack_top_slider_joint"] * np.array([1.0, 0.0, 0.0])
+        slide_bottom = values["epix100_jack_bottom_slider_joint"] * np.array([1.0, 0.0, 0.0])
+        # Arm A's free end rides the top block, arm B's the bottom block, and they cross at
+        # their midpoints, the centre pin.
+        assert a_pivot + a == pytest.approx(top_pin + lifted + slide_top, abs=1e-9)
+        assert b_pivot + lifted + b == pytest.approx(bottom_pin + slide_bottom, abs=1e-9)
+        assert a_pivot + a / 2 == pytest.approx(b_pivot + lifted + b / 2, abs=1e-9)
 
 
 def test_za16a_wedge_follows_the_table_four_to_one(monkeypatch):
@@ -265,15 +301,16 @@ def test_za16a_wedge_follows_the_table_four_to_one(monkeypatch):
     wedge = joints["detector_y_wedge_joint"]
     # 1/4 wedge: the wedge slides 4 mm forward (world +Y) per 1 mm of table lift, and is
     # 29 mm out of the stage's front at +8 mm.
-    assert controls.read_followers() == {"detector_y_wedge_joint": ("detector_y_joint", 4.0)}
+    followers = controls.read_followers()
+    assert followers["detector_y_wedge_joint"] == ("detector_y_joint", {"ratio": 4.0})
     assert (wedge["parent"], wedge["axis_xyz"]) == ("detector_x", [0.0, 1.0, 0.0])
     assert wedge["limits"] == pytest.approx([4 * v for v in joints["detector_y_joint"]["limits"]])
-    followers = controls.read_followers()
+    wedge_only = {"detector_y_wedge_joint": followers["detector_y_wedge_joint"]}
     assert controls.with_followers(
-        {"detector_y_joint": -0.002, "detector_y_wedge_joint": 0.5}, followers
+        {"detector_y_joint": -0.002, "detector_y_wedge_joint": 0.5}, wedge_only
     ) == {"detector_y_joint": -0.002, "detector_y_wedge_joint": -0.008}
     assert controls.with_followers(
-        {"m::detector_y_joint": 0.001}, followers, prefix="m::"
+        {"m::detector_y_joint": 0.001}, wedge_only, prefix="m::"
     ) == {"m::detector_y_joint": 0.001, "m::detector_y_wedge_joint": 0.004}
     assert controls.with_followers({"lj_y_joint": 0.001}, followers) == {"lj_y_joint": 0.001}
 
@@ -288,7 +325,9 @@ def test_collision_model_moves_followers_with_their_leader(cad_model, monkeypatc
     assert applied == [{"detector_y_joint": 0.008, "detector_y_wedge_joint": 0.032}]
 
 
-@pytest.mark.parametrize("defect", ["limits", "chained", "missing"])
+@pytest.mark.parametrize(
+    "defect", ["limits", "chained", "missing", "folded", "scissor_limits", "two_rules"]
+)
 def test_build_rejects_inconsistent_followers(monkeypatch, defect):
     monkeypatch.syspath_prepend(str(ASSEMBLY))
     build = import_module("build")
@@ -308,14 +347,39 @@ def test_build_rejects_inconsistent_followers(monkeypatch, defect):
     }
     build.validate_review(review, stats)
     follower = review["joints"][1]
+    scissor = {"arm_m": 0.1, "rise_m": 0.05, "output": "angle"}
     if defect == "limits":
         follower["limits"] = [-0.03, 0.032]
     elif defect == "chained":
         review["joints"][0]["follows"] = {"joint": "wedge_joint", "ratio": 0.25}
-    else:
+    elif defect == "missing":
         follower["follows"]["joint"] = "nowhere_joint"
+    elif defect == "folded":
+        # +8 mm would lift the arm past vertical.
+        follower["follows"] = {"joint": "lift_joint", "scissor": {**scissor, "rise_m": 0.095}}
+    elif defect == "scissor_limits":
+        follower["follows"] = {"joint": "lift_joint", "scissor": scissor}
+    else:
+        follower["follows"] = {"joint": "lift_joint", "ratio": 4.0, "scissor": scissor}
     with pytest.raises(ValueError, match="follow|limits must be"):
         build.validate_review(review, stats)
+
+
+def test_ignored_groups_cover_every_pair_inside_a_mechanism_only(cad_model, tmp_path, monkeypatch):
+    model, _, _ = cad_model
+    module = import_module("collision_view")
+    recipe = tmp_path / "recipe.yaml"
+    recipe.write_text("ignored_groups:\n- parts: [P3, P1, P2]\n  reason: test\n")
+    assert module.read_ignored_groups(recipe) == {("P1", "P2"), ("P1", "P3"), ("P2", "P3")}
+    jack = {
+        ref for number in range(431998, 432012) for ref in _refs(f"REF-000{number}", _manifest())
+    }
+    assert len(jack) == 14
+    inside = {pair for pair in model.ignored_pairs if set(pair) <= jack}
+    assert len(inside) == 14 * 13 // 2
+    # The jack still collides with the rest of the assembly.
+    assert not any(len(set(pair) & jack) == 1 for pair in model.ignored_pairs)
+
 
 def test_diffractometer_base_is_fixed_geometry_and_its_empty_parts_stay_omitted():
     review = _review()
@@ -459,6 +523,32 @@ def test_jet_slit_and_detector_stages_are_driven_in_beamline_axes():
             assert set(moving) <= owned[joint["child"]]
             parent = joint["child"]
     assert "lj" not in review["fixed_subsystems"]
+
+
+def test_long_jet_is_back_on_the_jet_lift():
+    review = _review()
+    entries = _manifest()
+    owners = _owners(review)
+    # The 2026-11-12 export restores the long jet DSG-000022427 that the 14:01 export swapped
+    # for jet holder DSG-000108486 and tube DSG-000005121.
+    jet = [ref for name in ("DSG-000011652", "DSG-000003909", "DSG-000015264", "DSG-000010737")
+           for ref in _refs(name, entries)]
+    assert len(jet) == 4 and {owners[ref] for ref in jet} == {"lj_y"}
+    assert not _refs("DSG-000108486", entries) and not _refs("DSG-000005121", entries)
+
+
+def test_followers_stay_inside_their_limits_over_the_whole_leader_travel(monkeypatch):
+    monkeypatch.syspath_prepend(str(ASSEMBLY))
+    controls = import_module("controls")
+    joints = {joint["name"]: joint for joint in _review()["joints"]}
+    followers = controls.read_followers()
+    assert len(followers) == 5
+    for name, (leader, rule) in followers.items():
+        low, high = joints[name]["limits"]
+        # Viewers set followers from slider values right up to the leader's limits, and the
+        # scene rejects anything past a joint limit.
+        for q in np.linspace(*joints[leader]["limits"], 101):
+            assert low <= controls.follower_position(rule, float(q)) <= high, (name, q)
 
 
 def test_za05a_lifts_are_drawn_at_mid_travel_and_move_four_mm_each_way():

@@ -6,7 +6,7 @@ below are in the STEP assembly frame and millimeters unless stated otherwise.
 
 ## Stage identities and motion
 
-`A012` and `A018` are `LIB-000032451` with `REF-000222635` as the moving
+`A014` and `A020` are `LIB-000032451` with `REF-000222635` as the moving
 Z carriage and `REF-000423701` as the fixed body/motor. The top carriage is the
 **first** leaf in this library, unlike many fixed-first stage libraries. Its
 geometry matches the Kohzu ZA05A wedge-lift family; exact library-to-vendor
@@ -15,7 +15,7 @@ variant identification remains provisional. The manufacturer specifies a
 [ZA05A-W101](https://www.kohzuprecision.com/products/positioning-stages/item/za05a-w101/).
 Use ±0.004 m as provisional local-simulation limits.
 
-`A014` and `A020` are `LIB-000032478`, mapped to XA05A-R202 by the existing
+`A016` and `A022` are `LIB-000032478`, mapped to XA05A-R202 by the existing
 DSG-000040389 stage inventory and matching child reference names/geometry.
 `REF-000423699` is the fixed motor/base and `REF-000226205` is the moving top.
 The manufacturer specifies a 50 × 50 mm table, ±7.5 mm travel, and 5 mm/s maximum
@@ -33,20 +33,20 @@ motor/controller polarity claim.
 
 | Chain | Fixed mount | Z stage | X stage | Moving payload |
 | --- | --- | --- | --- | --- |
-| Lower | `P166`, top Z = −165.354 | `A012`, top Z = −109.354 | `A014`, top Z = −89.354 | `A010`: `P073`, `P074`, `P077`; blade holder `P497`, blades `P424/P425` |
-| Upper | `P068`, top Z = −63.754 | `A018`, top Z = −7.754 | `A020`, top Z = 12.246 | `A016`: `P122`, `P123`; blade holder `P194`, blades `P422/P423` |
+| Lower | `P192`, top Z = −165.354 | `A014`, top Z = −109.354 | `A016`, top Z = −89.354 | `A012`: `P099`, `P100`, `P103`; blade holder `P537`, blades `P461/P462` |
+| Upper | `P094`, top Z = −63.754 | `A020`, top Z = −7.754 | `A022`, top Z = 12.246 | `A018`: `P148`, `P149`; blade holder `P220`, blades `P459/P460` |
 
 The exact matching horizontal mating planes establish the order **fixed mount
-→ Z lift → X translation → payload**, independently for each chain. `P068`,
-`P166`, the pedestal posts, and `P176` remain fixed to the assembly.
+→ Z lift → X translation → payload**, independently for each chain. `P094`,
+`P192`, the pedestal posts, and `P202` remain fixed to the assembly.
 
-The slit blades are not inside `A009/A015`. The STEP places each blade holder
-`DSG-000000720` (`P497` lower, `P194` upper) and its two 3.2 mm blade plates
-`mo39143619/mo39143620` (`P424/P425` lower, `P422/P423` upper) directly under the
-chamber assembly `A003`. Each holder sits on the tip of its blade rod (`P077`
-spans X −144.8…19.0 at Z −26.7…−14.0; `P497` spans X 6.7…18.7 at Z −26.3…−14.4;
-`P123` and `P194` match the same way at Z +14), and four 5-40 × 1.5 in screws
-(`P450/P453/P495/P496` lower, `P491/P498/P499/P502` upper) pass through the
+The slit blades are not inside `A011/A017`. The STEP places each blade holder
+`DSG-000000720` (`P537` lower, `P220` upper) and its two 3.2 mm blade plates
+`mo39143619/mo39143620` (`P461/P462` lower, `P459/P460` upper) directly under the
+chamber assembly `A003`. Each holder sits on the tip of its blade rod (`P103`
+spans X −144.8…19.0 at Z −26.7…−14.0; `P537` spans X 6.7…18.7 at Z −26.3…−14.4;
+`P149` and `P220` match the same way at Z +14), and four 5-40 × 1.5 in screws
+(`P487/P491/P535/P536` lower, `P531/P538/P539/P542` upper) pass through the
 holder and both blades. Holder and blades therefore ride the X stage with the rod.
 Earlier reviews left them on the fixed assembly, which reported every slit
 motion as rod-to-holder contact.
@@ -56,34 +56,34 @@ pruned by the assembly recipe should simply be removed from these lists.
 
 | Body | Occurrences |
 | --- | --- |
-| Lower fixed | `P086 P087 P088 P094 P099 P100 P101` |
-| Lower Z carriage, child of fixed | `P085 P091 P097 P103 P106 P107 P110` |
-| Lower X carriage, child of lower Z | `P104 P105 P111 P073 P074 P077 P497 P424 P425` |
-| Upper fixed | `P135 P136 P137 P143 P148 P149 P150` |
-| Upper Z carriage, child of fixed | `P134 P140 P146 P152 P155 P156 P159` |
-| Upper X carriage, child of upper Z | `P153 P154 P160 P122 P123 P194 P422 P423` |
+| Lower fixed | `P112 P113 P114 P120 P125 P126 P127` |
+| Lower Z carriage, child of fixed | `P111 P117 P123 P129 P132 P133 P136` |
+| Lower X carriage, child of lower Z | `P130 P131 P137 P099 P100 P103 P537 P461 P462` |
+| Upper fixed | `P161 P162 P163 P169 P174 P175 P176` |
+| Upper Z carriage, child of fixed | `P160 P166 P172 P178 P181 P182 P185` |
+| Upper X carriage, child of upper Z | `P179 P180 P186 P148 P149 P220 P459 P460` |
 
 The sensor bodies stay on the fixed side of their own stage. In particular,
-minimum BREP distance is zero for `P094`–`P088` and `P107`–`P106`; the former is
-2.506 mm from the moving bracket `P091`, and the latter 2.515 mm from moving
-bracket `P105`. `P110` touches `P106` and is assigned to that fixed X-stage
-support. `P091` touches the Z carriage `P085`. Thin pieces `P097/P111` (repeated
-as `P146/P160`) follow the respective moving bracket and appear to be encoder
+minimum BREP distance is zero for `P120`–`P114` and `P133`–`P132`; the former is
+2.506 mm from the moving bracket `P117`, and the latter 2.515 mm from moving
+bracket `P131`. `P136` touches `P132` and is assigned to that fixed X-stage
+support. `P117` touches the Z carriage `P111`. Thin pieces `P123/P137` (repeated
+as `P172/P186`) follow the respective moving bracket and appear to be encoder
 targets/shims. Exact sensor model names are not claimed.
 
-The moving brackets `P091/P140` keep a constant 0.787 mm source-CAD gap to their
-lift bodies `P086/P135` over the full ±4 mm travel, which the inflated hulls fill.
+The moving brackets `P117/P166` keep a constant 0.787 mm source-CAD gap to their
+lift bodies `P112/P161` over the full ±4 mm travel, which the inflated hulls fill.
 They are listed with the carriage as bearing parts so that running clearance is
-not reported as contact. Likewise the X-stage sensor brackets `P106/P155` keep
-0.498 mm to the X carriage `P104/P153` over ±7.5 mm and are listed with the fixed
-X-stage body; the moving bracket `P105/P154` is still checked against them.
+not reported as contact. Likewise the X-stage sensor brackets `P132/P181` keep
+0.498 mm to the X carriage `P130/P179` over ±7.5 mm and are listed with the fixed
+X-stage body; the moving bracket `P131/P180` is still checked against them.
 Downward lift travel ends at real stops, which stay reported. The Z carriage
-`P085/P134` reaches the fixed bracket `P087/P136` after 1.725 mm, and `P094`
-would reach the X-stage base `P103` after 1.83 mm (source CAD). The chamber port `P403` hulls fill the bores the blade
+`P111/P160` reaches the fixed bracket `P113/P162` after 1.725 mm, and `P120`
+would reach the X-stage base `P129` after 1.83 mm (source CAD). The chamber port `P439` hulls fill the bores the blade
 rods pass through; the CAD keeps at least 2.73 mm around each rod at every corner
 of its y/x travel, so those two pairs are reviewed `ignored_pairs`.
 
-`P100/P101` and their upper copies `P149/P150` are small pin-shaped
+`P126/P127` and their upper copies `P175/P176` are small pin-shaped
 `LIB-000027156` hardware and may be pruned. The thin encoder targets may also be
 pruned for a simpler display. Keep the substantial moving brackets and payload.
 
@@ -94,9 +94,9 @@ The previous STEP revision included a Kohzu RM07A-C1 manual rotary stage; the
 coarse 360° and fine ±3°; see the separately recorded source in
 `stage-research.md`.
 
-`A031` / `LIB-000013709` is a manual swivel stage, not an XY translation stage.
-Rendered `P325` has curved guideways and a handwheel; `P327` is its matching
-curved-underside top plate. `P326` is a separate 10 mm sphere with volume
+`A024` / `LIB-000013709` is a manual swivel stage, not an XY translation stage.
+Rendered `P245` has curved guideways and a handwheel; `P247` is its matching
+curved-underside top plate. `P246` is a separate 10 mm sphere with volume
 523.5988 mm³. Its center lies on the stage normal, 86 mm above the base and
 68 mm above the top mounting plane; it is a remote-center datum marker.
 
@@ -104,43 +104,62 @@ The 50 mm table, 18 mm height, 68 mm work distance, and handwheel strongly
 match [Kohzu SH05B-RM](https://www.kohzuprecision.com/products/positioning-stages/item/sh05b-rm/),
 whose manufacturer specifies manual ±10° adjustment. The user confirmed this
 model on 2026-11-05. It is modelled as the manual joint `epix100_tilt_joint`
-(±10°): `P325` rides the Kohzu table below, and `P327` carries the ePix100 arm.
+(±10°): `P245` rides the Kohzu table below, and `P247` carries the ePix100 arm.
 Every guideway arc on both parts (radii 73.5–81.3 mm) shares one axis along
-world X through (y 29.308, z −5.162) mm, and the datum sphere `P326` is centred
-on that axis at x −159.657 mm, which is the joint pivot. `P326` itself stays
+world X through (y 29.308, z −5.162) mm, and the datum sphere `P246` is centred
+on that axis at x −159.657 mm, which is the joint pivot. `P246` itself stays
 omitted as nonphysical. There is no controller mapping for this adjustment.
 
 ## ePix100 stack (`DSG-000042618`)
 
 The upward-facing ePix100 module `mo39154223` rides this chain, base to payload.
-Fixed block `P302` stands on breadboard `P193`, then:
+Fixed block `P229` stands on breadboard `P219`, then:
 
-0. A manual Newport M-EL80 lab jack (`P328`, `DSG-000044951`), confirmed by the
-   user on 2026-11-11. The STEP draws only its bottom and top plates (solids 1
-   and 2, 120 × 80 × 8 mm, 71.775 mm overall), matching the 80 × 120 mm platform.
-   The top plate carries adapter `P202` and everything below. Newport specifies a
-   53 mm minimum height and 60 mm travel, so `epix100_y_joint` runs −18.775 to
-   +41.225 mm along world +Z, assuming the plates are drawn at the jack's set
-   height.
-1. `LIB-000000725` (`P197`), a lead-screw linear stage along world X. Its motor
-   is at the outer end, and it is one fused solid. Cross-sections give a fixed
-   channel with a central guide rail (local X −15…9, Y up to 1.0). The carriage
-   plate, guide block, right-side flag skirt and hex drive nut sit at local Z
-   59.0–133.1 mm and move. The screw (r 3.17 mm) stays fixed. The end-block faces
-   at local Z −33.2 and +234.8 allow −92.2/+101.7 mm of carriage travel.
-2. Adapter `P199`. Its M3 counterbores (32 × 40 mm) sit 61.19 mm along +Z from
-   the matching tapped holes in the modelled carriage, so the payload is not on
-   the carriage the fused part shows. The carriage region is offset by that much
-   (`moving_offset_mm`).
-3. `LIB-000005430` (`P313`), an old Kohzu 70 mm manual cross-roller X stage along
-   world Y. It is also fused, as one part rather than a base and table assembly.
-   The inverted-U table (top plate above local Z 12.5, skirts at |X| 26.8–35 down
-   to Z 7.1) moves. The base, its rails (|X| 19–25.2, up to Z 12.0), micrometer
-   and lock stay. Travel is ±6.5 mm, from the current Kohzu XM07A-S1 datasheet
-   (70 × 70 mm, cross-roller, 13 mm micrometer).
-4. The 10° wedge adapter `P196`, with `P329`, then the SH05B-RM swivel above.
-5. Arm `P330`, end plate `P204` with `P201`, and the module parts
-   `P205`/`P206`/`P209`/`P298`/`P299`/`P301`, front and rear covers `P266`/`P222`
-   and cooling block `P249`/`P250`. The coolant fittings and tubes
-   `P251`–`P258`/`P288`, transceiver `P240` and ribbon cable `P247` protrude from
+Since the 2026-11-12 export every stage here is a multi-part library model, so no
+split masks are needed.
+
+1. A manual Newport M-EL80 lab jack `LIB-000033108` (`A035`), confirmed by the
+   user on 2026-11-11, drawn 112.211 mm high. It is a single scissor.
+   - Base plate `P349` (fixed) and top plate `P348` carry the fixed pivots at
+     x −233.969 mm, z −217.074 (bottom) and −130.963 (top), with pins `P357` and
+     `P356`.
+   - Arm A `P350` runs from the bottom pivot to top block `P353`, which slides in
+     the top plate's channel. Arm B `P351` runs from the top pivot to bottom block
+     `P354`. The blocks' pins at x −176.403 carry bushings `P358`–`P361`.
+   - The arms are 103.581 mm between pivots and cross at their midpoints on
+     centre pin `P355`.
+   - Knob and screw `P352` run along world X through the top plate into `P353`,
+     which is the nut.
+   - `epix100_y_joint` lifts the top plate. Four follower joints set arm A and arm
+     B (rotation about their pivots) and the two blocks (sliding along world X)
+     from it by the scissor relation. Over the stroke, every pin stays seated, in
+     contact with zero overlap.
+   - The user asked for Newport's full 53–113 mm, so the joint runs −59.211 to
+     +0.789 mm. The library CAD is drawn tighter than the real jack:
+     - At 112.2 mm the arms' sliding ends cut 1.5 mm (36.5 mm³) into the plates'
+       channels.
+     - Below 72.8 mm arm B sweeps into the top plate's underside beside its pivot.
+     - At 60.0 mm the top block meets its channel end.
+
+     The jack's 14 parts are therefore an `ignored_groups` entry. They are not
+     checked against each other, but they are still checked against everything
+     else.
+2. Adapter `P226`, then a Micronix VT-50L-13316 stepper stage `LIB-000033066`
+   (base `P248`, carriage `P249`) along world X. -13316 is the 198 mm,
+   digital-encoder, high-vacuum version.
+   - The carriage can run 175.5 mm towards the motor, where its nut housing meets
+     the motor mount, and 28.0 mm to the far end block (inner face at
+     x −91.6 mm), 203.5 mm in all.
+   - With the 198 mm limit-switch travel centred in that, the carriage is drawn
+     73.8 mm from mid-travel, and `epix100_x_joint` (beamline x, world −X) runs
+     −25.22/+172.78 mm.
+3. Adapter `P223`, then the manual stage `LIB-000033109`: base `P365`, table `P366`
+   and micrometer `P367` along world +Y. It replaces the earlier fused Kohzu
+   model. The table touches the micrometer tip and slides only along world Y, but
+   the CAD has no end stops, so it keeps that model's ±6.5 mm (Kohzu XM07A-S1).
+4. The 10° wedge adapter `P222`, then the SH05B-RM swivel above.
+5. Arm `P250`, end plate `P228` with `P225`, and the module parts
+   `P251`/`P252`/`P255`/`P344`/`P345`/`P347`, front and rear covers `P312`/`P268`
+   and cooling block `P295`/`P296`. The coolant fittings and tubes
+   `P297`–`P304`/`P334`, transceiver `P286` and ribbon cable `P293` protrude from
    the rear face and are retained; everything the covers enclose is omitted.

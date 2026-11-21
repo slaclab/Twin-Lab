@@ -371,17 +371,38 @@ def validate_review(review: dict, stats: dict) -> None:
             raise ValueError(f"Invalid limits/frame for {joint['name']}")
         if not low <= joint.get("home", 0.0) <= high or not low <= 0 <= high:
             raise ValueError(f"CAD/home pose outside limits: {joint['name']}")
+    from controls import follower_position
+
     joints = {joint["name"]: joint for joint in review["joints"]}
     for joint in joints.values():
         if "follows" not in joint:
             continue
         leader = joints.get(joint["follows"]["joint"])
-        ratio = float(joint["follows"]["ratio"])
-        if leader is None or "follows" in leader or not np.isfinite(ratio) or ratio == 0.0:
-            raise ValueError(f"{joint['name']} must follow an independent joint by a finite ratio")
-        # A follower's whole travel is its leader's travel scaled, so neither clamps the other.
-        if not np.allclose(sorted(ratio * np.asarray(leader["limits"])), joint["limits"]):
-            raise ValueError(f"{joint['name']} limits must be {ratio} x {leader['name']} limits")
+        rule = {key: value for key, value in joint["follows"].items() if key != "joint"}
+        if leader is None or "follows" in leader or len(rule) != 1:
+            raise ValueError(f"{joint['name']} must follow an independent joint by one rule")
+        if "ratio" in rule:
+            ratio = float(rule["ratio"])
+            if not np.isfinite(ratio) or ratio == 0.0:
+                raise ValueError(f"{joint['name']} must follow its leader by a finite ratio")
+        elif "scissor" in rule:
+            arm, rise = float(rule["scissor"]["arm_m"]), float(rule["scissor"]["rise_m"])
+            reach = [(rise + q) / arm for q in leader["limits"]]
+            if rule["scissor"]["output"] not in {"angle", "slide"} or not (
+                arm > 0.0 and all(0.0 < value < 1.0 for value in reach)
+            ):
+                raise ValueError(f"{joint['name']} must follow a scissor that stays unfolded")
+        else:
+            raise ValueError(f"{joint['name']} must follow its leader by a ratio or scissor rule")
+        # Both rules are monotonic, so a follower's travel is its leader's end positions mapped,
+        # and neither joint clamps the other. The SDF rejects positions even 1e-13 past a limit,
+        # so the mapped ends must also fall inside the follower's limits.
+        ends = sorted(follower_position(rule, q) for q in leader["limits"])
+        low, high = joint["limits"]
+        if not np.allclose(ends, joint["limits"], rtol=0.0, atol=1e-9) or not (
+            low <= ends[0] and ends[1] <= high
+        ):
+            raise ValueError(f"{joint['name']} limits must be {ends}, {leader['name']}'s mapped")
     if reached != set(bodies):
         raise ValueError(f"Disconnected bodies: {set(bodies) - reached}")
 

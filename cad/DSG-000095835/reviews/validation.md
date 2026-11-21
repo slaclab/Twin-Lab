@@ -1,3 +1,92 @@
+# STEP Revision of 2026-11-12 (SHA-256 `2f9a4891…`)
+
+The review was migrated from the `b1c34cc1…` STEP. References below use the new
+manifest; earlier entries use the references of their own revision.
+
+- Mapping: 1,930 occurrences map parent by parent (CAD name without `_oa_`,
+  placement within the parent, rigid-shift pairing of moved duplicates). 27 left
+  the design and 66 are new. The recipe text was remapped in one pass, keeping its
+  comments. Split-template names and history entries were not remapped.
+- What moved, in world coordinates:
+  - Everything outside chamber assembly `DSG-000102548` moved −67.818 mm in z:
+    spectrometer, cage, table and the ePix10k assembly. Every joint frame was
+    carried with its stage part's placement change.
+  - The ePix10k payload moved +80.115 mm along world Y relative to the lower
+    IMS300CC. That restores its 93ae4dc6 placement on the carriage, so
+    `moving_offset_mm` is gone and ePix10k z is back to ±150 mm.
+  - The ePix100 moved +40.4 mm in z, because its lab jack is now drawn 112.2 mm
+    high.
+- The long jet `DSG-000022427` is back on the jet adapter, replacing the 14:01 jet
+  holder and tube. Its 17 non-fastener parts ride LJ y, as in the 93ae4dc6
+  review. `DSG-000004430`, `LIB-000000641`, `LIB-000000666` and the KB1X1 base are
+  fixed again.
+- The camera rotation stage `LIB-000032933` (`P497`/`P498`) now has solids. It is a
+  rotary platform (concentric bearings r 27/34 mm) between camera plates
+  `P501` and `P506`, held fixed. `LIB-000032929` is still empty.
+- ePix100 stages are multi-part models, so their split templates were removed.
+  - **M-EL80 lab jack `LIB-000033108`, a single scissor:**
+    - Arms are 103.581 mm between pivots, at 56.24° as drawn.
+    - Fixed pivots are at x −233.969 (z −217.074 bottom, −130.963 top); the sliding
+      pins at x −176.403; the centre pin at their midpoint.
+    - Four follower joints set the arms and blocks from the top plate by the
+      scissor relation. The `follows` rule gained `scissor: {arm_m, rise_m,
+      output: angle|slide}`, shared by the viewers, collision model and build.
+    - Posed in CAD at 53, ~83, 112.2 and 113 mm, every pin stays touching with
+      zero overlap.
+    - The user asked for Newport's full 53–113 mm, so ePix100 y runs
+      −59.211/+0.789 mm.
+    - The library CAD is tighter than the real jack:
+      - Arm ends cut 36.5 mm³ into the plates' channels at the drawn height
+        (clear below −19.68 mm).
+      - Arm B meets the top plate below 72.8 mm.
+      - The top block meets its channel end at 60.0 mm.
+
+      The 14 parts are an `ignored_groups` entry, a new recipe key that ignores
+      every pair inside a group but keeps checking the group against
+      everything else.
+    - Follower limits are rounded outwards. The scene rejected the arm angle at
+      the bottom stop, 2×10⁻¹³ rad past a limit rounded to 12 decimals. The build
+      now requires mapped leader limits to fall inside follower limits, and a test
+      checks this over every follower's whole leader travel.
+  - **VT-50L-13316, the 198 mm version:**
+    - The carriage has 203.5 mm between hard stops: 175.5 mm towards the motor,
+      where the nut housing meets the motor mount, and 28.0 mm to the far end
+      block.
+    - With the 198 mm assumed centred in that, it is drawn 73.8 mm from
+      mid-travel, and ePix100 x runs −25.22/+172.78 mm.
+  - **Manual stage `LIB-000033109`** (base, table, micrometer along world +Y) has
+    no end stops in CAD and keeps ±6.5 mm.
+  - **Swivel pivot:** the base's guideway arcs and datum sphere `P246` share the
+    axis through (y 29.304, z 35.225). The top's arcs sit 0.30 mm lower, a mating
+    offset left as drawn.
+- Both packages validate 35 bodies and 34 joints (29 sliders), with 68 individual
+  endpoints and max pose error 5.55e-16. The convex package has 7,579 geometries;
+  CoACD re-ran for 378 of 420 meshes because most parts moved.
+- **Home is not clear.** The ePix10k frame `P1751` and plate `P1759` overlap chamber
+  part `REF-000062451` `P464` by 4.3 and 1.0 cm³, and the frame's underside is
+  15.5 mm below its top. The front plate `P1374` is 0.91 mm from the chamber
+  `P546`. The home and ePix10k regressions list the two pairs as `allowed_pairs`,
+  and the user was asked whether the 67.8 mm drop is intended.
+- Single-joint sweep, with followers coupled and CAD-confirmed onsets bisected
+  on their part pairs:
+  - Spectrometer vertical: +39.70 mm, Huber base `P965` against ePix100 end
+    plate `P228` (new). −37.5 mm as before.
+  - Analyzer rotation: +33.03°, ePix10k front plate `P1374` against analyzer post
+    `P974`, back now that the payload is upstream again.
+  - Crystal rotations: +23°, −35°, −40°, +21°, unchanged.
+  - LJ x: +11 mm, unchanged. LJ z: −6.48 mm, long jet `P077` against `P369`.
+  - Slit y: −1.72 mm, unchanged.
+  - ePix10k z/x/y: blocked from home by the interference. z must move −104.1 mm
+    to clear `P464`, and +5 mm reaches the chamber. At y −8 mm the frame also
+    drops into the ePix100 breadboard `DSG-000025045` (`P219`), and the mounting
+    ribs `P1475`/`P1476` reach `P464`.
+  - ePix100 x: −7.05 mm (rear cover against chamber port) and +157.52 mm (manual
+    stage base against the VT-50L motor end).
+  - ePix100 tilt: −4.96°/+5.09°, arm `P250` against swivel base `P245`, 1.96 mm
+    apart at home (2.25 mm before the 0.3 mm swivel offset).
+  - Clear: Parker horizontal, crystal translations and tilts, LJ y, slit x,
+    ePix100 y (environment only) and ePix100 z.
+
 # ZA16A Wedge Follows ePix10k y (2026-11-11)
 
 Same STEP revision (`b1c34cc1…`). The user pointed out that the ZA16A is a wedge
