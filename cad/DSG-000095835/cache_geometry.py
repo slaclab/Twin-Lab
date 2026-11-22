@@ -94,9 +94,15 @@ def prepare_geometry(*, force: bool = False) -> dict[str, Any]:
     assert document is not None  # Owns the shape labels used below.
     manifest = json.loads(MANIFEST.read_text())
     by_ref = {item["ref"]: item for item in manifest["occurrences"]}
+    leaves = leaf_occurrences(roots)
+    if set(leaves) != {ref for ref in by_ref if ref.startswith("P")}:
+        raise SystemExit(
+            f"{MANIFEST.name} does not describe {SOURCE.name} ({len(leaves)} STEP leaves); "
+            "regenerate it and migrate the review for this STEP revision."
+        )
     CACHE.mkdir(parents=True, exist_ok=True)
     stats = {}
-    for ref, occurrence in leaf_occurrences(roots).items():
+    for ref, occurrence in leaves.items():
         local = XCAFDoc_ShapeTool.GetShape_s(occurrence.label)
         placed = placed_shape(occurrence)
         BRepTools.Write_s(local, str(CACHE / f"{ref}-local.brep"))

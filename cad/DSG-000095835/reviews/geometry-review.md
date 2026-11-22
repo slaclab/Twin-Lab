@@ -29,26 +29,27 @@ partitioned using masks at the visible mechanical seams:
 | RA04A-W (no longer in the design; template kept) | Exposed 40 mm rotor above Z=24.25 mm; hidden bearing detail left fixed | +Z rotation through origin |
 | SA04B-RM01 | Curved saddle, using stepped cylindrical cuts between mating bearing surfaces | +Y rotation through (0, 0, 74) mm |
 | Huber 410 | 138 mm rotor above Y=49.7 mm | +Y rotation through origin |
-| IMS300CC | Carriage top plate. Only the 2026-11-04 14:01 STEP needed the lower slide's plate offset (80.1151 mm along local −Z) to sit under its payload | +Z translation |
 
 The fused ePix100 stages `LIB-000000725` and `LIB-000005430` had masks too. They
 left the design in the 2026-11-12 export, replaced by multi-part models, and their
-templates were removed.
+templates were removed. The fused ePix10k IMS300CC slides and Kohzu ZA16A-W2C01
+followed in the 2026-11-21 export, and the IMS300CC template went with them.
 
-The ePix10k's ZA16A needs no mask, because its moving parts are already separate
-solids, selected by index in the recipe:
+The ePix10k stages need no masks, because their moving parts are separate parts:
 
-- The ePix10k's Kohzu ZA16A-W2C01 (`P1138`) is Kohzu's own STEP: same bounds and
-  nine solid volumes as the vendor download. Solid 1, the 160 mm table, has the
-  downward-facing 14.04° faces of the 1/4 wedge. Solid 6 is the wedge (upward
-  14.04° faces) and solid 7 a rail fixed to it (touching it, 0.5 mm below the
-  table); solid 8 is the base and motor, and solids 2–5 the feet. The table rises
-  1 mm for every 4 mm the wedge slides towards local −X (world +Y), so the wedge
-  joint follows the table joint at a ratio of 4. That keeps the drawn 0.5 mm
-  table-to-wedge and wedge-to-base clearances at every height. At +8 mm the wedge
-  tip, at local X −77, reaches −109, which is the "(29)" overhang past the −80
-  front face in the vendor drawing. The table face is at local Z 80.0, the
-  "80 ± 8" of the vendor drawing, so the CAD pose is mid-travel.
+- Each Newport IMS300CC (`LIB-000033136`) is a base and a 179 mm carriage. The
+  base's carriage channel is open from local Z 0 to 513.5 mm and the library
+  places the carriage at 167 mm, mid-channel, taken as mid-travel. The upper (x)
+  carriage `P2151` is drawn there; the lower (z) carriage `P2149` is drawn
+  134.378 mm towards world +Y.
+- The Kohzu ZA16A-W2C01 (`LIB-000033137`) is a base `P2144` with pin `P2143`, a
+  wedge `P2146` with retainer `P2145`, and a 160 mm table `P2147`. The table's
+  downward and the wedge's upward incline faces have normal (0, 0.2425, 0.9701)
+  in world, a 1/4 slope: the table rises 1 mm for every 4 mm the wedge slides
+  along world +Y, so the wedge joint follows the table joint at a ratio of 4.
+  The faces stay in contact, without overlap, at every height. The table face is
+  80.01 mm above the base's mounting face, the "80 ± 8" of the vendor drawing,
+  so the CAD pose is mid-travel.
 
 The ePix100's M-EL80 lab jack is a 14-part model since the 2026-11-12 export.
 Its scissor arms and sliding blocks follow the top plate by the exact scissor

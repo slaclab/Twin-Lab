@@ -52,58 +52,65 @@ and two sliding blocks follow ePix100 y:
   lift is at mid-travel in this STEP: its carriage sits at the library's zero
   offset on its base, as both slit lifts do, and can drop more than 5 mm before
   bottoming. (The older 43841 STEP drew it 3.105 mm lower, so that review treats
-  it as fully down.) The jet adapter `P011` carries the long jet
-  `DSG-000022427` (`A008`). The 2026-11-04 14:01 export had swapped it for jet
-  holder `DSG-000108486` and tube `DSG-000005121`; the 2026-11-12 export restores
-  it, and its 17 non-fastener parts ride the lift as in the earlier review.
+  it as fully down.) The jet adapter `P011` carries jet holder `DSG-000108486`
+  (`P520`) and tube `DSG-000005121` (`P521`), which ride the lift. The
+  2026-11-12 export had the long jet `DSG-000022427` there instead; the
+  2026-11-21 export swaps it back for the holder and tube, as in the 14:01 export.
 - **Bottom slit y/x** and **Top slit y/x** drive the two slit towers (`A011`,
   `A017`): a LIB-000032451 vertical lift (±4 mm) carrying an XA05A-R202 (±7.5 mm)
-  that holds the blade rod. The blade holder `DSG-000000720` and its two blade
-  plates are clamped to each rod tip and ride the X stage (`P537/P461/P462`
-  bottom, `P220/P459/P460` top), although the STEP files them under the chamber.
+  that holds the blade rod. The blade holder `DSG-000000720` and its blade
+  plates are clamped to each rod tip and ride the X stage (`P511/P436` bottom,
+  `P195/P434/P435` top), although the STEP files them under the chamber. The
+  bottom holder's second plate `mo39143620` is not in the 2026-11-21 export.
 - The user-supplied controls envelope (`P734`) and its four support posts ride the
   Parker vertical lift plate (`P698`) and participate in interference checks. This
   STEP revision replaces the earlier `DSG-000108873` XCS Von Hamos Controls
   assembly with that single envelope.
 - **ePix10k z/x/y** drive the detector assembly `LCL5005-008450` on its two Newport
-  IMS300CC slides and a Kohzu ZA16A-W2C01 wedge Z stage. Each fused slide is
-  split at its carriage plate, and its 300 mm travel is assumed centred on the
-  carriage position the fused slide models.
-  - The 2026-11-04 14:01 STEP moved everything on the lower (z) carriage
-    80.1151 mm along world −Y, which needed a `moving_offset_mm` on the carriage.
-    The 2026-11-12 STEP puts the payload back where the earlier 93ae4dc6 STEP had
-    it, on the carriage, so no offset is needed and z and x both run ±150 mm.
-  - **y:** the ZA16A (`P1138`, Kohzu's own nine-solid STEP) sits on adapter
-    `P1802` above the x carriage and lifts the detector along world +Z, ±8 mm.
-    Its table (solid 1) carries frame `LCL5010-008490` (`P1751`) and everything
-    on it. It is a wedge actuator: the 1/4 wedge (solids 6–7) slides 4 mm
-    forward (world +Y, towards the chamber) for every 1 mm the table rises. At
-    +8 mm it sticks 29 mm out of the stage's front, as in Kohzu's drawing. The
+  IMS300CC slides and a Kohzu ZA16A-W2C01 wedge Z stage. Since the 2026-11-21
+  export all three are multi-part library models, so no split masks are needed.
+  - **z/x:** each IMS300CC (`LIB-000033136`) is a base and a 179 mm carriage. The
+    base's carriage channel is open from 0 to 513.5 mm along its travel, and the
+    library places the carriage at 167 mm, mid-channel, taken as mid-travel of the
+    300 mm stroke. The upper (x) carriage `P2151` is drawn there, so x runs
+    ±150 mm. The lower (z) carriage `P2149` is drawn 134.378 mm towards world +Y
+    (the chamber), so z runs −284.378/+15.622 mm.
+  - **y:** the ZA16A (`LIB-000033137`) sits on adapter `P2102` above the x
+    carriage and lifts the detector along world +Z, ±8 mm. Its table `P2147`
+    carries frame `LCL5010-008490` (`P2054`) and everything on it. It is a wedge
+    actuator: the 1/4 wedge `P2146`, with its retainer `P2145`, slides 4 mm
+    forward (world +Y, towards the chamber) for every 1 mm the table rises. The
     wedge has its own joint, `detector_y_wedge_joint`, with no slider. Both
-    viewers and validation set it from ePix10k y, so the table never separates
-    from or sinks into the wedge. The base, feet and motor stay on the x slide.
-    Kohzu's drawing puts the table 80 ± 8 mm above the mounting face, and the CAD
-    table face is at 80.0 mm, so the CAD pose is mid-travel.
-  - The detector keeps its parts at least 100 mm across, including the new front
-    plate `mo39134025` (`P1374`); smaller parts and electronics are omitted.
+    viewers and validation set it from ePix10k y; the table's and wedge's incline
+    faces stay in contact, without overlap, at every height. The base `P2144` and
+    its pin `P2143` stay on the x slide. Kohzu's drawing puts the table 80 ± 8 mm
+    above the mounting face, and the CAD table face is at 80.01 mm, so the CAD
+    pose is mid-travel.
+  - The detector keeps its parts at least 100 mm across; smaller parts and
+    electronics are omitted, except the 16 sensor modules `DSG-000006659` (frame,
+    carrier PCB, four ASICs and sensor chip each) behind the shield window, which
+    are retained so the sensor layout is visible. Their Samtec connectors stay
+    omitted behind the carrier PCBs. The front plate `mo39134025` is not in the
+    2026-11-21 export.
 - **ePix100 y/x/z/tilt** drive the smaller, upward-facing ePix100 (module
   `mo39154223` in `DSG-000042618`, sensor `P255`). Since the 2026-11-12 export
   every stage is a multi-part model. The stack, from fixed block `P229` up, is:
   - **y:** a manual Newport M-EL80 lab jack (`LIB-000033108`) along world +Z,
-    covering Newport's full 53–113 mm (−59.2/+0.8 mm about the CAD pose). The
-    jack is drawn 112.2 mm high, near the top of its travel.
-    - It is a single scissor. Arm A (`P350`) is pinned to the base plate (`P349`)
-      and its other end rides top block `P353`. Arm B (`P351`) is pinned to the top
-      plate (`P348`) and rides bottom block `P354`. The arms cross at centre pin
-      `P355`.
-    - The knob and screw (`P352`) ride the top plate and drive `P353` as a nut.
-    - The arms are 103.581 mm between pivots, at 56.24° as drawn. The arms and
+    covering Newport's full 53–113 mm (±30.0 mm about the CAD pose). The
+    2026-11-21 export draws the jack 83.0 mm high, mid-stroke, and turned 180°
+    about world Z from the 2026-11-12 export.
+    - It is a single scissor. Arm A (`P325`) is pinned to the base plate (`P324`)
+      and its other end rides top block `P328`. Arm B (`P326`) is pinned to the top
+      plate (`P323`) and rides bottom block `P329`. The arms cross at centre pin
+      `P330`.
+    - The knob and screw (`P327`) ride the top plate and drive `P328` as a nut.
+    - The arms are 103.581 mm between pivots, at 33.32° as drawn. The arms and
       blocks follow the top plate by the exact scissor relation: each arm turns by
-      asin((rise + y)/arm) − 56.24°, and each block slides by the change in
+      asin((rise + y)/arm) − 33.32°, and each block slides by the change in
       arm·cos.
     - Every pin stays seated over the whole stroke. The library CAD is drawn
-      tighter than the real jack, though. At the drawn height the arms' sliding
-      ends already cut 1.5 mm into the plates' channels. Below 72.8 mm arm B
+      tighter than the real jack, though. At 112.2 mm the arms' sliding
+      ends cut 1.5 mm into the plates' channels. Below 72.8 mm arm B
       sweeps into the top plate's underside, and the top block reaches its
       channel end at 60.0 mm. So the jack's 14 parts form a reviewed
       `ignored_groups` entry: they are not checked against each other, only
@@ -135,8 +142,8 @@ travels along −z (world −Y), so z is world +Y and x is world −X. The beam 
 is inferred from the slits sitting upstream at world +Y and the ePix10k centred on
 world Y downstream. Positive slider values move along the positive beamline axis.
 
-The retained model uses 403 of the 1,851 leaf occurrences, with fused
-stage geometry split into fixed and moving regions. The 1,448 omitted occurrences
+The retained model uses 499 of the 2,158 leaf occurrences, with fused
+stage geometry split into fixed and moving regions. The 1,659 omitted occurrences
 are listed by reason in [assembly.yaml](reviews/assembly.yaml). This removes
 fasteners, detector internals, construction geometry, the table understructure
 of `DSG-000008836` with its floor anchors, and the two flexible
@@ -172,9 +179,15 @@ STL package carry each selection's largest-area colour. Collision meshes and
 their cached decompositions are unaffected. Set `visual_colors` to anything other
 than `step` in the recipe to return to the flat `visual_rgba` grey.
 
-The chamber `P546` is red in the STEP, the same hue as a contact highlight.
-Highlights are drawn on the part's collision hulls, which bulge slightly beyond
-the CAD surface.
+Red and yellow are reserved for the clearance viewer's interference and
+near-clearance highlights. Saturated STEP paint inside a `visual_reserved_hues`
+band (red within 12 degrees, yellow 40-65 degrees: the ePix10k housing, the
+Thorlabs posts, brass thumb nuts) is drawn in that band's colour (white) instead,
+keeping its transparency. `visual_part_rgba` paints whole leaves, named by CAD
+name without the `_oa_` suffix, to their real finish; the ePix10k ring set and
+back plate, which the STEP draws yellow and olive, are black anodized, the 16
+ePix10k2M sensor chips are blue, and the shield window in front of them is
+smoked translucent grey. Remove either key to show the STEP colours again.
 
 ## A new STEP revision
 
@@ -198,12 +211,19 @@ reviewed by their CAD contacts.
 ## Mounting configurations
 
 The supplied STEP places `DSG-000095826` on `DSG-000097481` in the 10 degree
-mounting configuration. The physical mounting holes also permit 5 and 0 degrees.
-Those alternative placements have not been verified or exposed as viewer options.
-STEP exports of the 0 and 5 degree configurations, with the same assembly frame
-and unchanged motor-stage positions, can establish the exact rigid placements
-for a discrete selector. No hole constraint solver is required once those
-placements are known; both rotation and translation must be preserved.
+mounting configuration (`A058`). The physical mounting holes also permit 5 and 0
+degrees, and since the 2026-11-21 export the STEP carries both: a full 0 degree
+copy of the spectrometer (`A075`) and a solid-less 5 degree placement (`P523`).
+Both are omitted from the model, under their own `omitted_occurrences` entry.
+Relative to the 10 degree placement, in world millimetres:
+
+| Mounting | Rigid placement change |
+| --- | --- |
+| 0° | 10° about world −X through (y 0.000, z −19.053) |
+| 5° | 5° about world −X through (y −1.260, z −18.831) |
+
+The two axes are 1.26 mm apart, so the three mountings are discrete placements,
+not positions of one hinge. They are not yet exposed as viewer options.
 
 ## Evidence and edits
 
@@ -288,45 +308,49 @@ pending until paused. These are discrete pose checks, not swept-motion collision
 detection, so fast motion between checked poses can cross an obstacle.
 
 The collision validator uses CAD verification to exercise a known cage contact at vertical lift -50 mm
-(`P558` against the controls envelope `P734`), and checks that returning home clears it.
+(`P534` against the controls envelope `P702`), and checks that returning home clears it.
 
-**The 2026-11-12 STEP is not clear at home.** Everything outside chamber assembly
-`DSG-000102548` (spectrometer, cage, table and the ePix10k assembly) sits
-67.818 mm lower than in the 14:01 STEP. That puts the ePix10k frame
-`LCL5010-008490` (`P1751`) and plate `DSG-000007278` (`P1759`) into chamber part
-`REF-000062451` (`P464`, under `DSG-000000413`). The overlap is 4.3 cm³ and 1.0
-cm³; the frame's underside is now 15.5 mm below that part's top, where the 14:01
-STEP had it 52 mm above. The ePix10k front plate `P1374` is 0.91 mm from the
-chamber `P546`. The viewer shows this contact. The home regressions list the two
-pairs as `allowed_pairs` until the CAD is confirmed or corrected.
+**The 2026-11-21 STEP is clear at home**, with nothing within 1 mm. The 2026-11-12
+STEP had put the ePix10k frame `LCL5010-008490` and plate `DSG-000007278` 2.3 mm
+into chamber part `REF-000062451`; this export raises the ePix10k payload
+61.67 mm relative to the chamber, so the home regressions no longer allow any
+contact.
 
 Each joint was swept alone from home toward both limits, with the other joints at
 home and followers coupled. Steps were 1° for rotations, 0.5 mm for the jet,
-slits and ePix100 y, 2.5 mm for the Parker, crystal and ePix100 x slides, and 5 mm
-for the ePix10k. Each new hull contact was checked against source CAD, and the
-first CAD-confirmed contacts were then bisected on the reported part pairs:
+slits and ePix100 y, 1 mm for ePix10k y, 2.5 mm for the Parker, crystal and
+ePix100 x slides, and 5 mm for ePix10k z and x. Every pose was checked against
+source CAD, and each first contact was bisected to 0.01 mm or 0.01°:
 
 | Joint | Usable travel from home | First contact |
 | --- | --- | --- |
-| Spectrometer vertical | above −37.5 mm (clear at −25 mm) to +39.70 mm | down: cage `P558` against controls envelope `P734`; up (+ is down along the tilted lift): Huber base `P965` against the ePix100 end plate `P228` |
-| Analyzer rotation | −45° to +33.03° | ePix10k front plate `P1374` (and front ring `P1477` at +33.25°) against analyzer post `P974` |
-| Crystal 1 rotation | −45° to below +23° | SA04B `P797` against Thorlabs post `P973` |
-| Crystal 2 rotation | above −35° to +45° | SA04B `P841` against post `P973` |
-| Crystal 3 rotation | above −40° to +45° | SA04B `P884` against post `P973` |
-| Crystal 4 rotation | −45° to below +21° | SA04B `P927` against post `P973` |
-| LJ x | −25 mm to below +11 mm | jet adapter `P011` against port flange `P438` |
-| LJ z | −6.48 mm to +7.5 mm | long jet part `DSG-000011652` (`P077`) against `P369` |
-| Bottom / top slit y | above −1.72 mm to +4 mm | Z carriage `P111`/`P160` against bracket `P113`/`P162` |
-| ePix10k z, x, y | none from home | the home interference with `P464` above; at +5 mm z the front plate also reaches the chamber `P546`, and z must move −104.1 mm to clear `P464`; at y −8 mm the frame drops into the ePix100 breadboard `P219` |
-| ePix100 x | −7.05 mm to +157.52 mm | inward: rear cover `P268` against chamber port parts `P453`/`P455`; outward: the manual stage base `P365` against the VT-50L base `P248` at its motor end |
-| ePix100 tilt | −4.96° to +5.09° | arm `P250` against the swivel base `P245` (1.96 mm apart at home) |
+| Spectrometer vertical | −31.38 mm to +50 mm | down: cage `P534` against controls envelope `P702` |
+| Analyzer rotation | −45° to +33.43° | ePix10k `mo39152625` (`P1776`) against analyzer post `P942` |
+| Crystal 1 rotation | −45° to +17.23° | SA04B `P765` against Thorlabs post `P941` |
+| Crystal 2 rotation | −34.27° to +45° | SA04B `P809` against post `P941` |
+| Crystal 3 rotation | −35.60° to +44.86° | SA04B `P852` against post `P941` (down) and post `P942` (up) |
+| Crystal 4 rotation | −45° to +16.87° | SA04B `P895` against post `P941` |
+| Crystal 1–4 tilt | −9.93° (−9.94° for crystal 3) to +10° | adapter `mo39154776` against the same adapter in the neighbouring stack: `P800`/`P887` (stacks 1 and 3), `P844`/`P930` (stacks 2 and 4) |
+| LJ x | −25 mm to +9.52 mm | jet adapter `P011` against port flange `P413` |
+| LJ z | −6.19 mm to +7.5 mm | jet tube `DSG-000005121` (`P521`) against port flange `P413` |
+| Bottom / top slit y | −1.62 mm to +4 mm | Z carriage `P104`/`P153` against bracket `P095`/`P144` |
+| ePix100 x | −6.32 mm to +157.51 mm | inward: `mo39154292` (`P319`) against chamber port part `P429`; outward: the manual stage base `P340` against the VT-50L base `P223` at its motor end |
+| ePix100 tilt | −4.95° to +5.09° | arm `P225` against the swivel base `P220` |
+
+Exact CAD distances confirm the crystal 1 rotation and tilt onsets (0.094 mm at
++17.2°, touching at +17.3°; 0.020 mm at −9.9° tilt, touching at −9.95°). The
+2026-11-12 table gave +23° and a clear tilt for the same parts, which moved
+rigidly with the spectrometer. The old STEP is no longer available to re-measure,
+so the difference is unexplained.
 
 Everything else is clear over its full travel:
 - the horizontal Parker slide
-- all crystal translations and tilts
+- all crystal translations
 - LJ y (±4 mm)
 - both slit X stages
-- ePix100 y (Newport's 53–113 mm, −59.2/+0.8 mm), with the M-EL80's arms and
+- ePix10k z (−284.4/+15.6 mm), x (±150 mm) and y (±8 mm), with the ZA16A wedge
+  following
+- ePix100 y (Newport's 53–113 mm, ±30.0 mm), with the M-EL80's arms and
   blocks following. Its 14 parts are not checked against each other
   (`ignored_groups`).
 - ePix100 z (±6.5 mm)

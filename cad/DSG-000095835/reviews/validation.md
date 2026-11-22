@@ -1,3 +1,72 @@
+# STEP Revision of 2026-11-21 (SHA-256 `ac9d89fe…`)
+
+The review was migrated from the `2f9a4891…` STEP. References below use the new
+manifest; earlier entries use the references of their own revision.
+
+- Mapping: 1,946 occurrences map parent by parent (CAD name without `_oa_`,
+  placement within the parent). Duplicates are paired against the parent's
+  dominant shift, so identical parts that moved together keep their partners.
+  47 leaves left the design and 354 are new. The recipe text was remapped in one
+  pass, keeping its comments; split-template names were not remapped. Every joint
+  frame was carried with its stage part's world placement change.
+- What moved, in world coordinates:
+  - Everything outside chamber assembly `DSG-000102548` moved +48.766 mm in z
+    and the spectrometer +0.257 mm in x, back up most of the 11-12 drop.
+  - The ePix10k payload moved (+0.01, +45.26, +61.67) mm. Home is now clear:
+    the 11-12 interference with chamber part `REF-000062451` is gone, and the
+    regressions no longer allow it.
+  - The ePix100 group moved −29.211 mm in z. Its M-EL80 lab jack is drawn
+    83.000 mm high and turned 180° about world Z: fixed pivots now at
+    x −129.231, sliding pins at x −215.784. The four scissor followers were
+    re-derived (rise 56.900 mm, 33.32°), their axes turned with the jack, and
+    ePix100 y runs ±30.000 mm for Newport's 53–113 mm. The top plate `P323`,
+    arms and blocks match those pivots to 1e-6 mm.
+- Restructured:
+  - ePix10k stages are multi-part library models: two IMS300CC `LIB-000033136`
+    (base and carriage) and the ZA16A-W2C01 `LIB-000033137` (base `P2144` with
+    pin `P2143`, wedge `P2146` with retainer `P2145`, table `P2147`). The
+    IMS300CC split template was removed.
+    - Each IMS300CC channel is open from 0 to 513.5 mm and the library carriage
+      sits at 167 mm, mid-channel. The upper carriage is drawn there (x ±150 mm);
+      the lower is 134.378 mm towards world +Y (z −284.378/+15.622 mm).
+    - The ZA16A incline faces have normal (0, 0.2425, 0.9701), a 1/4 slope, so
+      the wedge follower keeps its ratio of 4. Table and wedge stay in contact at
+      every height (Boolean overlap ≤ 0.015 mm³); the table face is 80.01 mm
+      above the mounting face. Frame `P2054` clears the wedge by 9.297 mm at home
+      and 1.297 mm at −8 mm. The table/wedge, table/retainer and frame/wedge
+      pairs are `ignored_pairs`.
+    - Plates `DSG-000007302` now hang under fixed base plate `P2124` and moved to
+      `assembly_base`, with the lower IMS300CC base `P2148` on the risers.
+  - Jet holder `DSG-000108486` (`P520`, on jet adapter `P011`) and tube
+    `DSG-000005121` (`P521`, on the holder) replace the long jet and ride LJ y.
+  - `LIB-000023751` `P343` and `SL201303-02982` `P430`, filed directly under the
+    chamber, touch fixed chamber parts and are fixed.
+  - Left the design: the long jet, the bottom slit's second blade plate
+    `mo39143620`, the ePix10k front plate `mo39134025`, chamber parts
+    `DSG-000099332` and `DSG-000052397`, cage parts `DSG-000005038` and
+    `LCL5010-008054`.
+  - The STEP adds a 0 degree spectrometer copy `A075` and a solid-less 5 degree
+    placement `P523`. Relative to the 10 degree mounting they are 10° about world
+    −X through (y 0.000, z −19.053) mm and 5° through (y −1.260, z −18.831) mm.
+    Both are omitted under their own entry; no viewer selector yet.
+- Both packages validate 35 bodies and 34 joints (29 sliders) with 68
+  individual endpoints and max pose error 5.55e-16. The convex package has
+  7,195 geometries from 400 meshes. CAD-verified home is clear with nothing
+  within 1 mm; the cage contact appears at lift −50 mm and clears at home.
+- Single-joint sweep, with followers coupled and every pose CAD-verified, onsets
+  bisected to 0.01 mm/0.01°; see the README table:
+  - Spectrometer vertical −31.38 mm (cage `P534` against envelope `P702`).
+  - Analyzer rotation +33.43° (`P1776` against post `P942`).
+  - Crystal rotations +17.23°, −34.27°, −35.60°/+44.86°, +16.87°; tilts
+    −9.93° (adjacent stacks' `mo39154776` adapters). Exact CAD distances confirm
+    crystal 1: 0.094 mm at +17.2°, touching at +17.3°; 0.020 mm at −9.9° tilt.
+    The 11-12 table had +23° and clear tilts for the same rigidly moved parts.
+  - LJ x +9.52 mm (`P011` against `P413`), LJ z −6.19 mm (tube `P521` against
+    `P413`). Slit y −1.62 mm.
+  - ePix100 x −6.32/+157.51 mm, tilt −4.95°/+5.09°.
+  - Clear: Parker horizontal, crystal translations, LJ y, slit x, all three
+    ePix10k stages, ePix100 y and z.
+
 # STEP Revision of 2026-11-12 (SHA-256 `2f9a4891…`)
 
 The review was migrated from the `b1c34cc1…` STEP. References below use the new

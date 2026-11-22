@@ -12,6 +12,7 @@ import yaml
 from twin_lab.collision import Clearance
 
 ASSEMBLY = Path(__file__).resolve().parents[1] / "cad" / "DSG-000095835"
+ALTERNATIVE_MOUNTINGS = "Alternative spectrometer mountings (0 and 5 degree copies)"
 
 
 def _review():
@@ -19,7 +20,21 @@ def _review():
 
 
 def _manifest():
-    return json.loads((ASSEMBLY / "manifest.json").read_text())["occurrences"]
+    """Manifest occurrences, without the omitted 0 and 5 degree spectrometer copies.
+
+    The STEP repeats the whole spectrometer for each mounting, so names alone would be
+    ambiguous; tests look parts up in the reviewed 10 degree configuration.
+    """
+    alternatives = set(_review()["omitted_occurrences"][ALTERNATIVE_MOUNTINGS])
+    entries = json.loads((ASSEMBLY / "manifest.json").read_text())["occurrences"]
+    # Each copy is a top-level occurrence; drop its assemblies along with its leaves.
+    tops = {
+        "/".join(entry["id"].split("/")[:3]) for entry in entries if entry["ref"] in alternatives
+    }
+    return [
+        entry for entry in entries
+        if not any(entry["id"] == top or entry["id"].startswith(top + "/") for top in tops)
+    ]
 
 
 def _refs(name, entries=None):
@@ -44,6 +59,21 @@ def _owners(review):
 
 def _omitted(review):
     return {ref for refs in review["omitted_occurrences"].values() for ref in refs}
+
+
+def test_epix10k_sensor_modules_ride_the_detector_without_their_connectors():
+    review = _review()
+    entries = _manifest()
+    owners = _owners(review)
+    chips = _refs("REF__mo39152608__DetectorChip", entries)
+    asics = _refs("REF__mo39152608__ASIC", entries)
+    connectors = [
+        entry["ref"] for entry in entries
+        if ":DSG-000006659" in entry["id"] and entry["name"].startswith("Samtec__")
+    ]
+    assert len(chips) == 16 and len(asics) == 64 and len(connectors) == 16
+    assert {owners[ref] for ref in [*chips, *asics]} == {"detector_y"}
+    assert set(connectors) <= _omitted(review)
 
 
 def test_controls_envelope_and_posts_ride_the_lift_and_are_not_omitted():
@@ -103,6 +133,29 @@ def test_all_imported_crystal_stacks_have_reviewed_payloads():
     assert review["visual_colors"] == "step"
 
 
+def test_step_paint_is_not_mistaken_for_clearance_highlights(monkeypatch):
+    monkeypatch.syspath_prepend(str(ASSEMBLY))
+    build = import_module("build")
+    review = _review()
+    white = review["visual_reserved_hues"][0]["rgba"]
+    post, flex, nut, orange, grey = (
+        [0.698, 0.118, 0.118, 1.0], [0.62, 0.0, 0.0, 0.3], [0.749, 0.623, 0.298, 1.0],
+        [0.7, 0.453, 0.325, 1.0], [0.618, 0.638, 0.651, 1.0],
+    )
+    leaf = {"faces": [0, 1, 2, 3, 4], "palette": [post, flex, nut, orange, grey]}
+    assert build.repaint(leaf, "LIB-000001008", review)["palette"] == [
+        [*white[:3], 1.0], [*white[:3], 0.3], [*white[:3], 1.0], orange, grey,
+    ]
+    ring = {"faces": [0], "palette": [[0.577, 0.577, 0.0, 0.3]]}
+    black = review["visual_part_rgba"]["REF__sa39152641__Epix10k_MountingRib"]
+    assert build.repaint(ring, "REF__sa39152641__Epix10k_MountingRib_oa_67", review) == {
+        "faces": [0], "palette": [black],
+    }
+    assert build.repaint(leaf, "x", {}) is leaf
+    names = {entry["name"].split("_oa_")[0] for entry in _manifest()}
+    assert set(review["visual_part_rgba"]) <= names
+
+
 def test_fourth_stack_joints_match_the_first_stack():
     joints = {joint["name"]: joint for joint in _review()["joints"]}
     for axis in ("translation", "rotation", "tilt"):
@@ -122,13 +175,16 @@ def test_slit_blade_holders_and_blades_ride_their_blade_rods():
     owners = _owners(review)
     holders = _refs("DSG-000000720", entries)
     blades = _refs("mo39143619", entries) + _refs("mo39143620", entries)
-    assert len(holders) == 2 and len(blades) == 4
+    assert len(holders) == 2 and len(blades) == 3
     assert _omitted(review).isdisjoint(holders + blades)
-    # Each rod tip clamps one holder DSG-000000720 and two blade plates.
-    for body, rod in (("bottom_slit_x", "DSG-000092551"), ("top_slit_x", "DSG-000092523")):
+    # Each rod tip clamps one holder DSG-000000720 and its blade plates; the bottom holder's
+    # second plate mo39143620 is not in the 2026-11-21 export.
+    for body, rod, plates in (
+        ("bottom_slit_x", "DSG-000092551", 1), ("top_slit_x", "DSG-000092523", 2),
+    ):
         assert {owners[ref] for ref in _refs(rod, entries)} == {body}
         assert sum(owners[ref] == body for ref in holders) == 1
-        assert sum(owners[ref] == body for ref in blades) == 2
+        assert sum(owners[ref] == body for ref in blades) == plates
 
 
 def test_analyzer_and_crystal_rotations_are_limited_to_45_degrees():
@@ -140,14 +196,39 @@ def test_analyzer_and_crystal_rotations_are_limited_to_45_degrees():
         assert joints[name]["limits"] == pytest.approx([-np.pi / 4, np.pi / 4]), name
 
 
-def test_epix_z_travel_is_centred_on_its_carriage():
+def test_epix10k_slide_travel_is_centred_on_the_library_carriage_placement():
     review = _review()
-    joint = next(joint for joint in review["joints"] if joint["name"] == "detector_z_joint")
-    split = review["stage_splits"][joint["stage_ref"]]
-    # The 2026-11-12 export puts the payload back on the carriage the fused slide models, as in
-    # the 93ae4dc6 export; only the 14:01 export needed a moving_offset_mm.
-    assert split == {"template": "IMS300CC"}
-    assert joint["limits"] == pytest.approx([-0.15, 0.15])
+    entries = _manifest()
+    by_ref = {entry["ref"]: entry for entry in entries}
+    by_id = {entry["id"]: entry for entry in entries}
+    joints = {joint["name"]: joint for joint in review["joints"]}
+    owners = _owners(review)
+
+    def world(entry):
+        transform = np.eye(4)
+        while entry is not None:
+            transform = np.asarray(entry["transform_to_parent"]) @ transform
+            entry = by_id.get(entry["parent_id"])
+        return transform
+
+    # Multi-part IMS300CC since the 2026-11-21 export: the library places the carriage
+    # mid-channel, taken as mid-travel of its 300 mm stroke, so each slide's limits are
+    # +/-150 mm shifted by how far the STEP draws its carriage from there.
+    for name in ("detector_z_joint", "detector_x_joint"):
+        joint = joints[name]
+        base = by_ref[joint["stage_ref"]]
+        (carriage,) = joint["bearing_parts"][1]
+        assert by_ref[carriage]["parent_id"] == base["parent_id"]
+        assert owners[carriage] == joint["child"]
+        library_place = world(by_id[base["parent_id"]])[:3, 3]
+        offset = float(np.dot(world(by_ref[carriage])[:3, 3] - library_place, joint["axis_xyz"]))
+        assert joint["limits"] == pytest.approx(
+            [-0.15 - offset / 1000.0, 0.15 - offset / 1000.0], abs=1e-9)
+    assert joints["detector_x_joint"]["limits"] == pytest.approx([-0.15, 0.15])
+    assert joints["detector_z_joint"]["limits"] == pytest.approx([-0.284377924, 0.015622076])
+    assert not review["stage_splits"].keys() & {
+        joints[name]["stage_ref"] for name in ("detector_z_joint", "detector_x_joint")
+    }
 
 
 def test_epix100_rides_vt50l_manual_stage_and_swivel():
@@ -223,22 +304,22 @@ def test_both_epix_detectors_ride_vertical_stages():
     entries = _manifest()
     owners = _owners(review)
     joints = {joint["name"]: joint for joint in review["joints"]}
-    # ePix10k: Kohzu ZA16A-W2C01 (vendor STEP, nine solids) above the upper IMS300CC.
-    # Solid 1 is the table, solids 6-7 the 1/4 wedge that slides under it, the rest the base.
-    (za16a,) = _refs("L-000000533", entries)
-    assert _solid_owners(review, za16a) == {
-        "detector_x": [2, 3, 4, 5, 8, 9], "detector_y": [1], "detector_y_wedge": [6, 7],
-    }
+    # ePix10k: multi-part Kohzu ZA16A-W2C01 above the upper IMS300CC. The table rides the
+    # 1/4 wedge, which slides under it with its retainer; the base and its pin stay below.
+    pin, base, retainer, wedge, table = (
+        _refs(f"REF-0004320{n}", entries)[0] for n in ("45", "46", "48", "49", "50")
+    )
+    assert owners[base] == owners[pin] == "detector_x"
+    assert owners[wedge] == owners[retainer] == "detector_y_wedge"
+    assert owners[table] == "detector_y"
     (frame,) = _refs("LCL5010-008490", entries)
-    (front_plate,) = _refs("mo39134025", entries)
-    assert owners[frame] == owners[front_plate] == "detector_y"
+    assert owners[frame] == "detector_y"
     (adapter_10k,) = _refs("DSG-000007275", entries)
-    slides = _refs("Newport__StageLinear_300mmTravelDCMotor__IMS300CC", entries)
-    lower = [
-        part if isinstance(part, str) else part["ref"]
-        for part in review["bodies"]["detector_x"]["parts"]
-    ]
-    assert len(lower) == 3 and lower[0] in slides and lower[1:] == [adapter_10k, za16a]
+    slide_bases = _refs("REF-000432042", entries)
+    slide_carriages = _refs("REF-000432043", entries)
+    assert {owners.get(ref) for ref in slide_bases} == {"assembly_base", "detector_z"}
+    assert {owners[ref] for ref in slide_carriages} == {"detector_z", "detector_x"}
+    assert owners[adapter_10k] == "detector_x"
     ten_k = joints["detector_y_joint"]
     assert (ten_k["parent"], ten_k["child"], ten_k["axis_xyz"]) == (
         "detector_x", "detector_y", [0.0, 0.0, 1.0])
@@ -262,8 +343,8 @@ def test_lab_jack_scissor_keeps_its_pins_together(monkeypatch):
     assert owners[top_block] == "epix100_jack_top_slider"
     assert owners[bottom_block] == "epix100_jack_bottom_slider"
     lift = joints["epix100_y_joint"]
-    # Newport M-EL80: 53-113 mm high; the CAD jack is drawn 112.211 mm high.
-    assert lift["limits"] == pytest.approx([0.053 - 0.1122112, 0.113 - 0.1122112])
+    # Newport M-EL80: 53-113 mm high; the CAD jack is drawn 83.000 mm high.
+    assert lift["limits"] == pytest.approx([0.053 - 0.08300004, 0.113 - 0.08300004])
     followers = controls.read_followers()
 
     def point(name):
@@ -285,8 +366,10 @@ def test_lab_jack_scissor_keeps_its_pins_together(monkeypatch):
                    top_pin - a_pivot)
         b = rotate("epix100_jack_arm_b_joint", values["epix100_jack_arm_b_joint"],
                    bottom_pin - b_pivot)
-        slide_top = values["epix100_jack_top_slider_joint"] * np.array([1.0, 0.0, 0.0])
-        slide_bottom = values["epix100_jack_bottom_slider_joint"] * np.array([1.0, 0.0, 0.0])
+        slide_top = values["epix100_jack_top_slider_joint"] * np.asarray(
+            joints["epix100_jack_top_slider_joint"]["axis_xyz"])
+        slide_bottom = values["epix100_jack_bottom_slider_joint"] * np.asarray(
+            joints["epix100_jack_bottom_slider_joint"]["axis_xyz"])
         # Arm A's free end rides the top block, arm B's the bottom block, and they cross at
         # their midpoints, the centre pin.
         assert a_pivot + a == pytest.approx(top_pin + lifted + slide_top, abs=1e-9)
@@ -525,16 +608,47 @@ def test_jet_slit_and_detector_stages_are_driven_in_beamline_axes():
     assert "lj" not in review["fixed_subsystems"]
 
 
-def test_long_jet_is_back_on_the_jet_lift():
+def test_jet_holder_and_tube_ride_the_jet_lift():
     review = _review()
     entries = _manifest()
     owners = _owners(review)
-    # The 2026-11-12 export restores the long jet DSG-000022427 that the 14:01 export swapped
-    # for jet holder DSG-000108486 and tube DSG-000005121.
-    jet = [ref for name in ("DSG-000011652", "DSG-000003909", "DSG-000015264", "DSG-000010737")
-           for ref in _refs(name, entries)]
-    assert len(jet) == 4 and {owners[ref] for ref in jet} == {"lj_y"}
-    assert not _refs("DSG-000108486", entries) and not _refs("DSG-000005121", entries)
+    # The 2026-11-21 export swaps the long jet DSG-000022427 back for jet holder DSG-000108486
+    # and tube DSG-000005121, as in the 14:01 export.
+    (holder,) = _refs("DSG-000108486", entries)
+    (tube,) = _refs("DSG-000005121", entries)
+    assert owners[holder] == owners[tube] == "lj_y"
+    assert not [ref for name in ("DSG-000011652", "DSG-000003909", "DSG-000015264")
+                for ref in _refs(name, entries)]
+
+
+def test_alternative_spectrometer_mountings_are_omitted_whole():
+    review = _review()
+    entries = json.loads((ASSEMBLY / "manifest.json").read_text())["occurrences"]
+    by_id = {entry["id"]: entry for entry in entries}
+    copies = [
+        entry for entry in entries
+        if entry["parent_id"] == entries[0]["id"]
+        and entry["name"].split("_oa_")[0] == "DSG-000095826"
+    ]
+    angles = sorted(
+        float(np.degrees(np.arcsin(-np.asarray(entry["transform_to_parent"])[1][0])))
+        for entry in copies
+    )
+    assert angles == pytest.approx([0.0, 5.0, 10.0], abs=1e-6)
+
+    def top(entry):
+        while entry["parent_id"] != entries[0]["id"]:
+            entry = by_id[entry["parent_id"]]
+        return entry["ref"]
+
+    reviewed = {top(by_id[e["id"]]) for e in _manifest() if not e["is_assembly"]}
+    alternatives = set(review["omitted_occurrences"][ALTERNATIVE_MOUNTINGS])
+    empty = set(review["omitted_occurrences"]["Empty geometry in source STEP"])
+    for entry in entries:
+        if not entry["is_assembly"] and entry["parent_id"] != entries[0]["id"]:
+            in_copy = top(entry) not in reviewed
+            assert (entry["ref"] in alternatives) == (in_copy and entry["ref"] not in empty), (
+                entry["ref"])
 
 
 def test_followers_stay_inside_their_limits_over_the_whole_leader_travel(monkeypatch):

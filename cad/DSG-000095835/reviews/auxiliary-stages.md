@@ -118,24 +118,25 @@ Fixed block `P229` stands on breadboard `P219`, then:
 Since the 2026-11-12 export every stage here is a multi-part library model, so no
 split masks are needed.
 
-1. A manual Newport M-EL80 lab jack `LIB-000033108` (`A035`), confirmed by the
-   user on 2026-11-11, drawn 112.211 mm high. It is a single scissor.
-   - Base plate `P349` (fixed) and top plate `P348` carry the fixed pivots at
-     x −233.969 mm, z −217.074 (bottom) and −130.963 (top), with pins `P357` and
-     `P356`.
-   - Arm A `P350` runs from the bottom pivot to top block `P353`, which slides in
-     the top plate's channel. Arm B `P351` runs from the top pivot to bottom block
-     `P354`. The blocks' pins at x −176.403 carry bushings `P358`–`P361`.
+1. A manual Newport M-EL80 lab jack `LIB-000033108` (`A033`), confirmed by the
+   user on 2026-11-11. The 2026-11-21 export draws it 83.000 mm high, mid-stroke,
+   turned 180° about world Z from the 2026-11-12 export. It is a single scissor.
+   - Base plate `P324` (fixed) and top plate `P323` carry the fixed pivots at
+     x −129.231 mm, z −217.074 (bottom) and −160.174 (top), with pins `P332` and
+     `P331`.
+   - Arm A `P325` runs from the bottom pivot to top block `P328`, which slides in
+     the top plate's channel. Arm B `P326` runs from the top pivot to bottom block
+     `P329`. The blocks' pins at x −215.784 carry bushings `P333`–`P336`.
    - The arms are 103.581 mm between pivots and cross at their midpoints on
-     centre pin `P355`.
-   - Knob and screw `P352` run along world X through the top plate into `P353`,
+     centre pin `P330`.
+   - Knob and screw `P327` run along world X through the top plate into `P328`,
      which is the nut.
    - `epix100_y_joint` lifts the top plate. Four follower joints set arm A and arm
      B (rotation about their pivots) and the two blocks (sliding along world X)
      from it by the scissor relation. Over the stroke, every pin stays seated, in
      contact with zero overlap.
-   - The user asked for Newport's full 53–113 mm, so the joint runs −59.211 to
-     +0.789 mm. The library CAD is drawn tighter than the real jack:
+   - The user asked for Newport's full 53–113 mm, so the joint runs −30.000 to
+     +30.000 mm. The library CAD is drawn tighter than the real jack:
      - At 112.2 mm the arms' sliding ends cut 1.5 mm (36.5 mm³) into the plates'
        channels.
      - Below 72.8 mm arm B sweeps into the top plate's underside beside its pivot.

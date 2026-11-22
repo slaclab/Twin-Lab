@@ -266,6 +266,37 @@ def write_colored_obj(
     return list(max(areas, key=areas.__getitem__))
 
 
+def repaint(leaf: dict, name: str, review: dict) -> dict:
+    """Apply the recipe's colour overrides to one leaf's STEP palette.
+
+    ``visual_part_rgba`` paints a whole leaf, by CAD name without the ``_oa_`` suffix, to
+    its real finish. Otherwise each saturated colour inside a ``visual_reserved_hues`` band
+    takes that band's colour and keeps its own alpha, so STEP paint is never mistaken for
+    the clearance viewer's red and yellow highlights.
+    """
+    import colorsys
+
+    part = review.get("visual_part_rgba", {}).get(name.split("_oa_")[0])
+    if part is not None:
+        return {**leaf, "palette": [list(part) for _ in leaf["palette"]]}
+    bands = review.get("visual_reserved_hues", [])
+    if not bands:
+        return leaf
+    palette = []
+    for color in leaf["palette"]:
+        hue, saturation, value = colorsys.rgb_to_hsv(*color[:3])
+        degrees = hue * 360.0
+        for band in bands:
+            low, high = band["hue_deg"]
+            if (low <= degrees <= high or low <= degrees - 360.0 <= high) and (
+                saturation >= 0.5 and value >= 0.3
+            ):
+                color = [*band["rgba"][:3], color[3]]
+                break
+        palette.append(color)
+    return {**leaf, "palette": palette}
+
+
 def step_visual(
     part: str | dict, review: dict, stats: dict, leaf: dict, fallback: list[float],
     mesh: Path, mesh_key: str, *, rebuild: bool,
@@ -411,7 +442,7 @@ def build(
     *, collision: str = "none", workers: int | None = None, rebuild: bool = False,
     refinement_run: Path | None = None, output_dir: Path | None = None,
 ) -> Path:
-    from cache_geometry import prepare_geometry
+    from cache_geometry import ROOT, SOURCE, prepare_geometry, source_stamp
 
     default_name = "DSG-000095835" if collision == "none" else "DSG-000095835.collision"
     output = (output_dir or EXPORT_ROOT / (
@@ -424,15 +455,22 @@ def build(
             "DSG-000095835", "DSG-000095835.collision",
         )} or output.exists():
             raise ValueError("Refinement candidates require a new, separate output directory")
-    prepare_geometry()
     recipe_bytes = RECIPE.read_bytes()
     review = yaml.safe_load(recipe_bytes)
+    # Checked before the slow STEP import, which would fail on the stale manifest anyway.
+    source_sha256 = source_stamp()["sha256"]
+    if source_sha256 != review["source_sha256"]:
+        raise SystemExit(
+            f"{SOURCE.relative_to(ROOT)} (SHA-256 {source_sha256[:8]}…) is not the STEP revision "
+            f"reviewed in {RECIPE.relative_to(ROOT)} ({review['source_sha256'][:8]}…). Restore "
+            "that STEP, or migrate the review as described under 'A new STEP revision' in "
+            f"{(HERE / 'README.md').relative_to(ROOT)}."
+        )
+    prepare_geometry()
     template_bytes = (RECIPE.parent / review["split_templates"]).read_bytes()
     templates = yaml.safe_load(template_bytes)
     review["stage_splits"] = expand_stage_splits(review, templates)
     stats = json.loads((CACHE / "stats.json").read_text())
-    if json.loads((CACHE / "source-stamp.json").read_text())["sha256"] != review["source_sha256"]:
-        raise ValueError("STEP revision differs from this review; re-review CAD references first")
     validate_review(review, stats)
     MESHES.mkdir(parents=True, exist_ok=True)
     output.mkdir(parents=True, exist_ok=True)
@@ -488,8 +526,9 @@ def build(
                 spec.get("part_colors", {}).get(ref, spec.get("rgba", [0.62, 0.66, 0.72, 1.0])),
             )
             if step_colors:
+                leaf = repaint(leaf_colors[ref], stats[ref]["name"], review)
                 color, colored_visuals[mesh] = step_visual(
-                    part, review, stats, leaf_colors[ref], color, mesh, key, rebuild=rebuild
+                    part, review, stats, leaf, color, mesh, key, rebuild=rebuild
                 )
             link.meshes.append((label, mesh, color))
         links.append(link)
