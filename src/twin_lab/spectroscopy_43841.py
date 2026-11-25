@@ -50,7 +50,8 @@ ROOT = "/43841-spectroscopy"
 PAPER = "https://doi.org/10.1021/photonsci.5c00024"
 LINES = (("Pt L\u03b1 (L\u03b11)", 9442.3), ("Fe K\u03b1 (K\u03b11)", 6403.84), *COMMON_LINES)
 DEFAULT_HALF_WIDTH_DEG = 0.1
-DETECTOR_TRIM = (("A205", "Horizontal (u)"), ("A206", "Vertical (v)"))
+# Millimetres of spot motion per millimetre of positive LX10 travel, in u/v order.
+DETECTOR_TARGET_AXES = (("A205", -1), ("A206", 1))
 # These towers' grounded hardware is grouped with unrelated fixed parts in the cached OBJ.
 SLIT_SUPPORT_REFS = frozenset({
     "P232", "P281", "P282", "P283", "P330", "P331", "P340", "P345", "P346", "P347",
@@ -374,7 +375,7 @@ def main() -> None:
     html = detector_panel(
         rig, crystal_labels=model.crystal_labels, reflections=model.reflections,
         root=ROOT, model_note=MODEL_NOTE, lines=LINES, focus_goal_mm=None, ray_guides=True,
-        detector_trim=DETECTOR_TRIM,
+        target_moves_detector=True,
     )
     try:
         with spectroscopy_page(html), ExitStack() as stack:
@@ -382,6 +383,7 @@ def main() -> None:
                 preview = SpectroscopyPreview(
                     meshcat, model, rig, root=ROOT, lines=LINES,
                     default_half_width_deg=DEFAULT_HALF_WIDTH_DEG,
+                    detector_target_axes=DETECTOR_TARGET_AXES,
                 )
                 stack.callback(preview.close)
                 previous: dict[str, tuple[float, ...]] = {}

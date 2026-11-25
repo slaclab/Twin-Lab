@@ -24,13 +24,14 @@ viewer, but their geometry and controls are omitted from spectroscopy mode.
    **Apply to simulator** to load that pose and reflection. **Auto-align
    preview** instead holds the selected reflection and searches for all three
    beams. Neither action updates the stage sliders until you apply the proposal.
-3. **Place the spot on the detector.** Use **Manual detector trim** beside the
-   live image. The upper LX10 (**A205**) moves the sensor along **u**; a
-   positive move shifts the spot left. The lower LX10 (**A206**) moves the
-   sensor along **−v**; a positive move shifts the spot up. Both controls use
-   the modeled ±12.5 mm travel of the existing CAD stages. The motorized
-   **A204** remains a separate detector-depth control. Trimming here also
-   moves the detector in the 3D view.
+3. **Place the spot on the detector.** Once you have a live spot, edit
+   **Target u** or **Target v** and press Enter or leave the field. This moves
+   the existing **A205** (u) or **A206** (v) LX10 slider and the detector in
+   the 3D view, without moving the crystals or the **A204** depth stage.
+   The move uses the current centroid and is limited to ±12.5 mm of stage
+   travel. Near the sensor edge, clipping can shift the centroid; check the
+   live image. If no spot is detected, the detector stays put. You can still
+   drag either LX10 slider directly.
 4. **Check the fluorescence band at that pose.** Enter **Below line** and
    **Above line**, then click **Compare reflections here**. **All 3 ≥80%**
    counts the sampled energies at which each crystal delivers at least 80% of

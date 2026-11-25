@@ -30,10 +30,6 @@
   #vh-align-images figure { flex: 1; min-width: 0; margin: 4px 0; }
   #vh-align-images canvas { margin-top: 2px; }
   #vh-align-moves td:last-child, #vh-align-moves th:last-child { text-align: right; }
-  #vh-detector-trim { margin: 8px 0; border: 1px solid #546783; color-scheme: dark; }
-  #vh-detector-trim label { margin-top: 0; }
-  #vh-detector-trim input { display: block; width: 100%; margin: 2px 0 6px; }
-  #vh-detector-trim output { float: right; font-variant-numeric: tabular-nums; }
 </style>
 <details id="twinlab-spectroscopy" open>
   <summary>ePix100 spectroscopy preview</summary>
@@ -72,6 +68,10 @@
   <div id="vh-target-fields">
     <label>Target u (mm) <input id="vh-target-u" type="number" value="0" required></label>
     <label>Target v (mm) <input id="vh-target-v" type="number" value="0" required></label>
+  </div>
+  <div id="vh-target-motion" hidden>
+    <small>Editing a target moves its LX10 stage to place the live spot.</small>
+    <p id="vh-target-motion-status" role="status" hidden></p>
   </div>
   <small>Gold +: target · cyan ring: centroid. No detector gaps modeled.</small>
   <br><small id="vh-x-floor"></small>
@@ -117,11 +117,6 @@
     <small>Colored marks show where the beam axis would land if reflected, even if it misses the crystal or Bragg window. Edge arrows point off-sensor.</small>
   </div>
   <p id="vh-result" role="status">Waiting for the optical trace.</p>
-  <fieldset id="vh-detector-trim" hidden>
-    <legend>Manual detector trim</legend>
-    <div id="vh-detector-trim-controls"></div>
-    <small>Trim the spot on the sensor without moving the crystals. Simulator only.</small>
-  </fieldset>
   <table>
     <thead><tr><th>Crystal</th><th>Incidence</th><th>Hits / accepted</th></tr></thead>
     <tbody id="vh-crystals"></tbody>
@@ -149,38 +144,7 @@
   const [uSize, vSize] = opt.sizeMm;
   const rayGuides = el("ray-guides");
   el("guide-controls").hidden = !opt.rayGuides;
-  el("detector-trim").hidden = !opt.detectorTrim.length;
-  const trimControls = opt.detectorTrim.map(({key, caption, label, min, max, step}) => {
-    const range = document.createElement("input");
-    range.type = "range";
-    range.id = `vh-detector-trim-${key}`;
-    range.min = min;
-    range.max = max;
-    range.step = step;
-    range.disabled = true;
-    const title = document.createElement("label");
-    title.htmlFor = range.id;
-    title.textContent = `${caption} (${key} LX10)`;
-    const readout = document.createElement("output");
-    readout.setAttribute("for", range.id);
-    el("detector-trim-controls").append(readout, title, range);
-    range.addEventListener("input", () => {
-      if (viewer.connection?.readyState === 1) {
-        viewer.set_control_value(label, range.valueAsNumber, true);
-      }
-      syncTrimControls();
-    });
-    return {range, readout, label};
-  });
-  function syncTrimControls() {
-    trimControls.forEach(({range, readout, label}) => {
-      const controller = viewer.gui_controllers[label];
-      range.disabled = !controller || viewer.connection?.readyState !== 1;
-      if (!controller) return;
-      range.value = controller.getValue();
-      readout.value = `${range.valueAsNumber.toFixed(2)} mm`;
-    });
-  }
+  el("target-motion").hidden = !align.targetMovesDetector;
   const allCrystals = `all ${opt.crystals.length} crystals`;
   el("reflection-caption").textContent = `Reflection for ${allCrystals}`;
   el("all-capture").textContent = `All ${opt.crystals.length} ≥80%`;
@@ -503,7 +467,6 @@
   }
   function draw(data) {
     const [lineId, crystalId, e, d, order, width, theta, u, v, rmsU, rmsV] = data;
-    syncTrimControls();
     line.value = lineId;
     reflection.value = crystalId;
     liveEnergy = e;
@@ -676,20 +639,26 @@
     paintLive();
     refreshAlignmentControls();
   }
+  function showTargetMove(code) {
+    const message = {
+      [align.targetMoveStatus.NO_SIGNAL]: "No detected spot; detector stages did not move.",
+      [align.targetMoveStatus.TRAVEL_LIMIT]: "Requested move exceeds LX10 travel. Check the live centroid.",
+    }[code];
+    const readout = el("target-motion-status");
+    readout.textContent = message || "";
+    readout.hidden = !message;
+  }
   const handle = viewer.handle_command.bind(viewer);
   viewer.handle_command = (command) => {
     if (command.type === "set_property" && command.path === opt.root) {
       if (command.property === "detector_frame") return draw(command.value);
       if (command.property === "alignment_frame") return drawAlignment(command.value);
       if (command.property === "alignment_target") return updateTarget(command.value);
+      if (command.property === "target_move_status") return showTargetMove(command.value);
       if (command.property === "planning_band") return updateBand(command.value);
       if (command.property === "planning_frame") return drawPlanning(command.value);
     }
     handle(command);
-    if ((command.type === "set_control" || command.type === "set_control_value") &&
-        trimControls.some(({label}) => label === command.name)) {
-      syncTrimControls();
-    }
     if (command.type === "set_control") {
       if (command.name === opt.lineLabel) line.disabled = false;
       if (command.name === opt.reflectionLabel) reflection.disabled = false;

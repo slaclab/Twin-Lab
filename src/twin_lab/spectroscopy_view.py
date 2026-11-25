@@ -87,14 +87,19 @@ class PlanningStatus(IntEnum):
     FAILED = 3
 
 
+class TargetMoveStatus(IntEnum):
+    OK = 0
+    NO_SIGNAL = 1
+    TRAVEL_LIMIT = 2
+
+
 def detector_panel[PoseT](
     rig: AlignmentRig[PoseT], *, crystal_labels: tuple[str, ...],
     reflections: tuple[ReflectionPreset, ...], root: str, model_note: str,
     lines: tuple[tuple[str, float], ...] = LINES, focus_goal_mm: float | None = 0.5,
-    ray_guides: bool = False, detector_trim: tuple[tuple[str, str], ...] = (),
+    ray_guides: bool = False, target_moves_detector: bool = False,
 ) -> str:
     axes = rig.axes
-    detector_axes = {axis.key: axis for axis in rig.shared}
     options = {
         "root": root,
         "modelNote": model_note,
@@ -111,14 +116,6 @@ def detector_panel[PoseT](
             "Custom d-spacing / order",
         ],
         "sizeMm": (ACTIVE_SIZE_M * 1000).tolist(),
-        "detectorTrim": [
-            {
-                "key": key, "caption": caption, "label": detector_axes[key].label,
-                "min": detector_axes[key].lower, "max": detector_axes[key].upper,
-                "step": STAGE_STEP,
-            }
-            for key, caption in detector_trim
-        ],
         "cols": COLS,
         "rows": ROWS,
         "colors": [
@@ -137,6 +134,8 @@ def detector_panel[PoseT](
             "targetLabels": [TARGET_U, TARGET_V],
             "targetLimitsMm": TARGET_LIMITS_MM,
             "targetStepMm": TARGET_STEP_MM,
+            "targetMovesDetector": target_moves_detector,
+            "targetMoveStatus": {status.name: status.value for status in TargetMoveStatus},
             "axes": [axis.label for axis in axes],
             "status": {status.name: status.value for status in AlignmentStatus},
         },
@@ -338,11 +337,16 @@ class SpectroscopyPreview[PoseT]:
         *, root: str, point_source_m: Array | None = None,
         lines: tuple[tuple[str, float], ...] = LINES,
         default_half_width_deg: float = 0.05,
+        detector_target_axes: tuple[tuple[str, int], ...] = (),
     ):
         self.meshcat = meshcat
         self.spectrometer = spectrometer
         self.root = root
         self.axes = rig.axes
+        shared = {axis.key: axis for axis in rig.shared}
+        self.detector_target_axes = tuple(
+            (shared[key], gain) for key, gain in detector_target_axes
+        )
         self.colors = COLORS[:len(spectrometer.crystal_labels)]
         self.reflections = spectrometer.reflections
         self.lines = lines
@@ -373,6 +377,33 @@ class SpectroscopyPreview[PoseT]:
 
     def close(self) -> None:
         self.alignment.close()
+
+    def move_detector_to_target(
+        self, context: PoseT, positions: dict[str, float], request: AlignmentRequest,
+        previous: tuple[float, float],
+    ) -> bool:
+        _, _, traces = self.spectrometer.trace(
+            context, request.energy_ev, request.spacing_a, request.order, request.half_width_deg,
+        )
+        _, centroid, _ = detector_image(traces)
+        status = TargetMoveStatus.NO_SIGNAL if centroid is None else TargetMoveStatus.OK
+        moved = False
+        if centroid is not None:
+            for i, (axis, gain) in enumerate(self.detector_target_axes):
+                target = request.target_mm[i]
+                if target == previous[i]:
+                    continue
+                current = axis.to_slider(positions[axis.key])
+                proposed = current + (target - float(centroid[i])) / gain
+                bounded = min(max(proposed, axis.lower), axis.upper)
+                if bounded != proposed:
+                    status = TargetMoveStatus.TRAVEL_LIMIT
+                value = round(round(bounded / STAGE_STEP) * STAGE_STEP, 2)
+                if abs(value - current) > 1e-9:
+                    self.meshcat.SetSliderValue(axis.label, value)
+                    moved = True
+        self.meshcat.SetProperty(self.root, "target_move_status", float(status))
+        return moved
 
     def update_planner(
         self, context: PoseT, energy: float, width: float, pose_key: tuple[float, ...],
@@ -420,13 +451,19 @@ class SpectroscopyPreview[PoseT]:
             order = int(controls.GetSliderValue(ORDER))
         width = controls.GetSliderValue(WIDTH)
         target = (controls.GetSliderValue(TARGET_U), controls.GetSliderValue(TARGET_V))
-        if target != self.last_target:
+        request = AlignmentRequest(energy, spacing, order, width, target)
+        previous = self.last_target
+        if target != previous:
             controls.SetProperty(self.root, "alignment_target", list(target))
             self.last_target = target
+            if previous is not None and self.detector_target_axes and self.move_detector_to_target(
+                context, positions, request, previous,
+            ):
+                # The viewer will read the new sliders before tracing or aligning again.
+                return
         pose_key = tuple(positions[axis.key] for axis in self.axes)
         self.update_planner(context, energy, width, pose_key)
         key = (line, reflection, energy, spacing, order, width, pose_key)
-        request = AlignmentRequest(energy, spacing, order, width, target)
         self.alignment.update(context, positions, key, request=request)
         if key == self.last:
             return

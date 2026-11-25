@@ -15,7 +15,7 @@ from twin_lab.paths import CACHE_ROOT
 from twin_lab.spectroscopy import Detector, bragg_angle, detector_image
 from twin_lab.spectroscopy_43841 import (
     DEFAULT_HALF_WIDTH_DEG,
-    DETECTOR_TRIM,
+    DETECTOR_TARGET_AXES,
     LINES,
     CrystalFace,
     chain_pose,
@@ -26,7 +26,7 @@ from twin_lab.spectroscopy_43841 import (
 )
 from twin_lab.spectroscopy_align import AlignmentRequest, find_alignment, find_starting_poses
 from twin_lab.spectroscopy_plan import compare_reflections
-from twin_lab.spectroscopy_view import detector_panel
+from twin_lab.spectroscopy_view import TARGET_U, TARGET_V, SpectroscopyPreview, TargetMoveStatus
 
 
 def test_launcher_routes_spectroscopy_without_enabling_collision(monkeypatch):
@@ -181,13 +181,57 @@ def test_pt_starting_pose_recovers_all_three_cad_paths_and_scans_the_band():
         for before, after in zip(refined.before.hits, refined.after.hits, strict=True)
     )
 
-    html = detector_panel(
-        rig, crystal_labels=model.crystal_labels, reflections=model.reflections,
-        root="/test", model_note="", detector_trim=DETECTOR_TRIM,
+    assert_target_edits_move_the_detector_only(model, rig, home, proposed)
+
+
+def assert_target_edits_move_the_detector_only(model, rig, home, proposed):
+    controls = Mock()
+    sliders = {}
+    axes = {axis.key: axis for axis in rig.shared}
+    controls.AddSlider.side_effect = lambda name, low, high, step, initial: sliders.update(
+        {name: initial}
     )
-    options = json.loads(html.split("const opt = ", 1)[1].split(";\n", 1)[0])
-    assert [(axis["key"], axis["label"], axis["min"], axis["max"])
-            for axis in options["detectorTrim"]] == [
-        ("A205", "Detector / A205 LX10 (mm)", -12.5, 12.5),
-        ("A206", "Detector / A206 LX10 (mm)", -12.5, 12.5),
-    ]
+    controls.GetSliderValue.side_effect = sliders.__getitem__
+    controls.GetButtonClicks.return_value = 0
+    preview = SpectroscopyPreview(
+        controls, model, rig, root="/test", lines=LINES,
+        default_half_width_deg=DEFAULT_HALF_WIDTH_DEG, detector_target_axes=DETECTOR_TARGET_AXES,
+    )
+    try:
+        preview.update(home, home)
+        sliders[TARGET_U] = 4
+        preview.update(home, home)
+        controls.SetSliderValue.assert_not_called()
+        controls.SetProperty.assert_any_call(
+            "/test", "target_move_status", float(TargetMoveStatus.NO_SIGNAL),
+        )
+
+        # Finding/applying a pose (or dragging a slider) must not reissue an unchanged target.
+        pose = proposed.copy()
+        preview.update(pose, pose)
+        controls.SetSliderValue.assert_not_called()
+        for field, stage, target, i in ((TARGET_U, "A205", 3, 0), (TARGET_V, "A206", 2, 1)):
+            sliders[field] = target
+            preview.update(pose, pose)
+            controls.SetSliderValue.assert_called_once()
+            label, value = controls.SetSliderValue.call_args.args
+            controls.SetSliderValue.reset_mock()
+            assert label == axes[stage].label
+            pose[stage] = axes[stage].from_slider(value)
+            _, _, traces = model.trace(
+                pose, LINES[0][1], model.reflections[0].spacing_a, 1, DEFAULT_HALF_WIDTH_DEG,
+            )
+            _, centroid, _ = detector_image(traces)
+            assert centroid is not None
+            assert centroid[i] == pytest.approx(target, abs=0.03)
+            preview.update(pose, pose)
+            controls.SetSliderValue.assert_not_called()
+
+        sliders[TARGET_U] = -19
+        preview.update(pose, pose)
+        controls.SetSliderValue.assert_called_once_with(axes["A205"].label, 12.5)
+        controls.SetProperty.assert_any_call(
+            "/test", "target_move_status", float(TargetMoveStatus.TRAVEL_LIMIT),
+        )
+    finally:
+        preview.close()
