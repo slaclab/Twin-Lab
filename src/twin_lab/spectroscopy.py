@@ -176,6 +176,7 @@ class CrystalTrace:
     # Optional smooth geometric penalty for a flat, collimated beam that misses or
     # falls outside the Bragg window. It guides search but never counts as signal.
     aim_cost: float | None = None
+    geometric_uv_m: Array | None = None  # Beam axis projected from the infinite crystal plane.
 
 
 class Spectrometer[PoseT](Protocol):

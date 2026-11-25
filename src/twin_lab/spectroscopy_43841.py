@@ -136,29 +136,34 @@ def trace_flat(
     central = source.origin_m + t * direction
     outgoing = direction - 2 * dot * crystal.normal
     detector_dot = float(outgoing @ detector.normal)
-    forwards = detector_dot < -1e-10 and (detector.center_m - central) @ detector.normal < 0
+    detector_distance = float((detector.center_m - central) @ detector.normal)
+    forwards = detector_dot < -1e-10 and detector_distance < 0
     uv_axes = np.column_stack((detector.u, detector.v))
     empty = np.empty((0, 3))
     aim_uv: Array | None = None
     aim_cost: float | None = None
+    axis_uv: Array | None = None
+    front_crossing = front and t > 0
+    if forwards and (front_crossing or (aim and theta is not None)):
+        plane_hit = central + detector_distance / detector_dot * outgoing
+        axis_uv = (plane_hit - detector.center_m) @ uv_axes
+    geometric_uv = axis_uv if front_crossing else None
     if aim and theta is not None:
         gap = incidence_deg - math.degrees(theta)
         miss_mm = np.linalg.norm(central - crystal.center_m) * 1000
         aim_cost = 900 * gap**2 + 8 * miss_mm**2
         if t <= 0:
             aim_cost += 20_000
-        if forwards:
-            delta = detector.center_m - central
-            plane_hit = central + float(delta @ detector.normal) / detector_dot * outgoing
-            uv = (plane_hit - detector.center_m) @ uv_axes
+        if axis_uv is not None:
             # Keep projections near grazing from dominating the search.
-            aim_uv = np.clip(uv, -0.5, 0.5)[None, :]
+            aim_uv = np.clip(axis_uv, -0.5, 0.5)[None, :]
         else:
             aim_cost += 20_000
     incidence = (incidence_deg, incidence_deg) if front else None
     if not front or theta is None or abs(math.radians(incidence_deg) - theta) > half_width_rad:
         return CrystalTrace(
             incidence, 0, empty, empty[:, :2], np.empty(0), empty, empty, aim_uv, empty, aim_cost,
+            geometric_uv_m=geometric_uv,
         )
 
     basis = np.array(perpendicular_basis(direction))
@@ -180,6 +185,7 @@ def trace_flat(
     return CrystalTrace(
         incidence, len(bounce), hits[inside], uv[inside], np.ones(np.count_nonzero(inside)),
         bounce[keep], end[keep], aim_uv, start[keep], aim_cost,
+        geometric_uv_m=geometric_uv,
     )
 
 
@@ -360,7 +366,7 @@ def main() -> None:
     rig = model.rig()
     html = detector_panel(
         rig, crystal_labels=model.crystal_labels, reflections=model.reflections,
-        root=ROOT, model_note=MODEL_NOTE, lines=LINES, focus_goal_mm=None,
+        root=ROOT, model_note=MODEL_NOTE, lines=LINES, focus_goal_mm=None, ray_guides=True,
     )
     try:
         with spectroscopy_page(html), ExitStack() as stack:

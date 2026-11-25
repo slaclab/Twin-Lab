@@ -29,6 +29,12 @@ spectroscopy preview**. This mode does not connect to motors or check clearance.
    South coverage strips and the closest captured ray's edge margin. Rerun the
    check after changing the optical pose or Bragg half-width.
 
+When dragging the detector, crystal, or polycapillary sliders, the live image
+can stay dark if no Bragg rays reach the sensor. Colored aiming guides show the
+beam axes projected onto the sensor plane, even if they miss the crystal or
+are outside the Bragg window. Arrows point toward off-sensor projections. These
+guides never count as hits and can be turned off.
+
 The model starts parallel rays at each reviewed polycapillary exit and clips
 them against the front face of the **70 × 30 mm** plate inside each STEP holder.
 The colored outline and cross mark each plate's boundary and center; the lines

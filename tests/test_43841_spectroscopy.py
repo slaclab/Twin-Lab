@@ -61,6 +61,30 @@ def test_parallel_rays_need_the_front_of_the_flat_crystal_and_active_sensor():
     assert trace_flat(source, back, sensor, offsets, theta, 1e-4).accepted == 0
 
 
+def test_aiming_guide_tracks_detector_without_bragg_hits():
+    x, y, z = np.eye(3)
+    source = Plane(np.zeros(3), z, 0.010)
+    crystal = CrystalFace(
+        z * 0.1 + y * 0.030,
+        np.array([(x + z) / math.sqrt(2), -y, (x - z) / math.sqrt(2)]),
+        (0.020, 0.006),
+    )
+    center = (x + z) * 0.1
+    offsets = disk_offsets(source.radius_m)
+    for angle in (math.pi / 4, math.pi / 4 + 0.01):
+        on_axis = trace_flat(source, crystal, Detector(center, z, y, -x), offsets, angle, 1e-4)
+        shifted = trace_flat(
+            source, crystal, Detector(center + y * 0.040, z, y, -x), offsets, angle, 1e-4,
+        )
+        for trace in (on_axis, shifted):
+            assert trace.accepted == len(trace.weights) == 0
+        np.testing.assert_allclose(on_axis.geometric_uv_m, [0, 0], atol=1e-12)
+        np.testing.assert_allclose(shifted.geometric_uv_m, [0, -0.040], atol=1e-12)
+    behind = trace_flat(source, crystal, Detector(z * 0.1 - x * 0.1, z, y, -x),
+                        offsets, math.pi / 4, 1e-4)
+    assert behind.geometric_uv_m is None
+
+
 def test_plate_face_uses_the_rectangular_solid_not_the_higher_holder_tabs(tmp_path):
     manifest = tmp_path / "manifest.json"
     transform = np.eye(4)

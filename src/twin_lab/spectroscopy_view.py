@@ -90,11 +90,13 @@ def detector_panel[PoseT](
     rig: AlignmentRig[PoseT], *, crystal_labels: tuple[str, ...],
     reflections: tuple[ReflectionPreset, ...], root: str, model_note: str,
     lines: tuple[tuple[str, float], ...] = LINES, focus_goal_mm: float | None = 0.5,
+    ray_guides: bool = False,
 ) -> str:
     axes = rig.axes
     options = {
         "root": root,
         "modelNote": model_note,
+        "rayGuides": ray_guides,
         "crystals": crystal_labels,
         "lineLabel": LINE,
         "reflectionLabel": REFLECTION,
@@ -445,5 +447,7 @@ class SpectroscopyPreview[PoseT]:
         ]
         for trace in traces:
             data.extend((trace.accepted, len(trace.weights), *(trace.incidence_deg or (-1, -1))))
+            guide = trace.geometric_uv_m
+            data.extend((0, 0, 0) if guide is None else (1, *(guide * 1000)))
         data.extend(image_bins(image))
         controls.SetProperty(self.root, "detector_frame", [float(value) for value in data])

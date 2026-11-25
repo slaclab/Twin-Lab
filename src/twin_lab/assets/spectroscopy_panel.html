@@ -108,6 +108,10 @@
   <p id="vh-bragg"></p>
   <canvas id="vh-image" aria-label="Simulated ePix100 hit image; horizontal u and vertical v"></canvas>
   <small id="vh-scale"></small>
+  <div id="vh-guide-controls" hidden>
+    <label><input id="vh-ray-guides" type="checkbox" checked> Show aiming guides when a beam has no hits</label>
+    <small>Colored marks show where the beam axis would land if reflected, even if it misses the crystal or Bragg window. Edge arrows point off-sensor.</small>
+  </div>
   <p id="vh-result" role="status">Waiting for the optical trace.</p>
   <table>
     <thead><tr><th>Crystal</th><th>Incidence</th><th>Hits / accepted</th></tr></thead>
@@ -134,6 +138,8 @@
   const afterImage = initializeImage("align-after");
   const planImage = initializeImage("plan-map");
   const [uSize, vSize] = opt.sizeMm;
+  const rayGuides = el("ray-guides");
+  el("guide-controls").hidden = !opt.rayGuides;
   const allCrystals = `all ${opt.crystals.length} crystals`;
   el("reflection-caption").textContent = `Reflection for ${allCrystals}`;
   el("all-capture").textContent = `All ${opt.crystals.length} ≥80%`;
@@ -473,24 +479,59 @@
     let offset = 11;
     let hits = 0;
     let accepted = 0;
+    const guides = [];
     rows.forEach(([incidence, counts]) => {
-      const [a, h, low, high] = data.slice(offset, offset + 4);
+      const [a, h, low, high, hasGuide, guideU, guideV] = data.slice(offset, offset + 7);
       incidence.textContent = low < 0 ? "—" : `${low.toFixed(1)}–${high.toFixed(1)}°`;
       counts.textContent = `${h} / ${a}`;
       hits += h;
       accepted += a;
-      offset += 4;
+      guides.push(!h && hasGuide ? [guideU, guideV] : null);
+      offset += 7;
     });
     latestTrace = [data.slice(offset), hits, u, v];
-    paint(mainImage, ...latestTrace, detectorTarget);
+    latestGuides = guides;
+    paintLive();
     if (hits) {
       el("result").textContent = `Centroid (${u.toFixed(2)}, ${v.toFixed(2)}) mm · ` +
         `RMS (${rmsU.toFixed(2)}, ${rmsV.toFixed(2)}) mm`;
     } else {
       el("result").textContent = theta < 0 ? "This energy and reflection cannot satisfy Bragg." :
-        accepted ? "Bragg rays miss the active sensor." : "No analyzer samples meet the Bragg window.";
+        accepted ? "Bragg rays miss the active sensor." :
+          opt.rayGuides ? "No crystal-face hits within the Bragg window." :
+          "No analyzer samples meet the Bragg window.";
     }
   }
+  let latestGuides = [];
+  function paintLive() {
+    if (!latestTrace) return;
+    paint(mainImage, ...latestTrace, detectorTarget);
+    if (!opt.rayGuides || !rayGuides.checked) return;
+    const ctx = mainImage;
+    const w = ctx.canvas.width, h = ctx.canvas.height;
+    latestGuides.forEach((point, i) => {
+      if (!point) return;
+      const du = point[0] * w / uSize, dv = -point[1] * h / vSize;
+      const offSensor = Math.abs(du) >= w / 2 || Math.abs(dv) >= h / 2;
+      const scale = offSensor ?
+        Math.max(Math.abs(du) / (w / 2 - 12), Math.abs(dv) / (h / 2 - 12)) : 1;
+      ctx.save();
+      ctx.translate(w / 2 + du / scale, h / 2 + dv / scale);
+      ctx.strokeStyle = `rgb(${opt.colors[i].join(",")})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      if (offSensor) {
+        ctx.rotate(Math.atan2(dv, du));
+        ctx.moveTo(-7, -5); ctx.lineTo(3, 0); ctx.lineTo(-7, 5);
+      } else {
+        ctx.moveTo(-5, 0); ctx.lineTo(0, -5); ctx.lineTo(5, 0); ctx.lineTo(0, 5);
+        ctx.closePath();
+      }
+      ctx.stroke();
+      ctx.restore();
+    });
+  }
+  rayGuides.addEventListener("change", paintLive);
   function paint(ctx, bins, hits, u, v, aim) {
     const w = ctx.canvas.width, h = ctx.canvas.height;
     ctx.fillStyle = "#030916";
@@ -590,7 +631,7 @@
     targetFields.forEach((field, i) => {
       if (field !== document.activeElement) field.value = detectorTarget[i];
     });
-    if (latestTrace) paint(mainImage, ...latestTrace, detectorTarget);
+    paintLive();
     refreshAlignmentControls();
   }
   const handle = viewer.handle_command.bind(viewer);
