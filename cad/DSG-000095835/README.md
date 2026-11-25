@@ -77,22 +77,31 @@ preview, then compare again to assess the new pose.
 
 Ge(620) is documented at XCS for Fe; [Si(440) is a precedent on the LCLS
 16-crystal instrument](https://biology-lcls.slac.stanford.edu/capabilities/spectroscopy).
-Ge(511), Ge(331), and Ge(642) are planning candidates for Mn K&alpha;, Ti K&beta;
-or V K&alpha;, and Ni K&beta; respectively. The comparison assumes the same CAD
-crystal shapes for all reflections. Capture is a geometry fraction, not a
+The Co setup notes name **Si(533)** for K&beta;1,3 (about 7649 eV, 78.11 degrees)
+and **Ge(444)** for valence-to-core K&beta;2,5 (about 7705 eV, 80.13 degrees),
+both with a 250 mm radius. The other Si and Ge presets are geometric candidates.
+Every preset uses the same 250 mm CAD crystal shapes. The 500 mm Ge(111)
+suggestion is not simulated; it needs separate geometry and a specified order.
+Capture is a geometry fraction, not a
 prediction of photon counts or reflectivity. Detector gaps, real analyzer
 availability, and collision clearance still need separate verification.
 
 ### Single-line trace and alignment
 
 If the detector is blank, choose a line and click **Find starting poses**. This
-tries the named reflections at bounded stage poses, not just at the current
-pose. It ranks the simulated candidates by how many crystals have signal
+tries up to four Bragg-compatible reflections at bounded stage poses. It
+shortlists matching Fe/Co references first, then angles closest to 79 degrees,
+a heuristic based on the 250 mm examples, not a reachability test. Select any
+reflection manually and use **Auto-align preview** to search outside the
+shortlist. **Compare reflections here** still evaluates the full catalog at
+the current pose. Starting-pose search ranks results by how many crystals have signal
 (at least 32 modeled hits), then how many capture at least 80% of their accepted
 rays. Partial poses are shown when the search does not land all four crystals.
 Select a candidate to preview its reflection and stage changes, then use
-**Apply to simulator** to try both. Run **Compare reflections here** at that
-pose to check the band; a starting pose is only for the selected line, not a
+**Apply to simulator** to try both. Searches show which compatible reflection
+they are testing and can be cancelled without moving stages. Then open
+**Check band at this pose** and run **Compare reflections here**; a starting
+pose is only for the selected line, not a
 hardware recommendation or evidence that the reflection is in stock.
 
 Drag a crystal, common analyzer, or ePix100 slider to see the image change. As

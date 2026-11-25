@@ -33,9 +33,10 @@
 </style>
 <details id="twinlab-spectroscopy" open>
   <summary>ePix100 spectroscopy preview</summary>
+  <small>Choose a line, find a starting pose, then check its energy band.</small>
   <label>Emission line <select id="vh-line"></select></label>
-  <details id="vh-planner" open>
-    <summary>Experiment planner</summary>
+  <details id="vh-planner">
+    <summary>Check energy band</summary>
     <div id="vh-band-fields">
       <label>Below line (eV) <input id="vh-band-below" type="number" required></label>
       <label>Above line (eV) <input id="vh-band-above" type="number" required></label>
@@ -63,6 +64,7 @@
     </div>
   </details>
   <label>Reflection for all four crystals <select id="vh-reflection"></select></label>
+  <small id="vh-reflection-model"></small>
   <div id="vh-target-fields">
     <label>Target u (mm) <input id="vh-target-u" type="number" value="0" required></label>
     <label>Target v (mm) <input id="vh-target-v" type="number" value="0" required></label>
@@ -73,8 +75,10 @@
     <button id="vh-align-search" type="button" disabled>Find starting poses</button>
     <button id="vh-align-preview" type="button" disabled>Auto-align preview</button>
     <button id="vh-align-apply" type="button" disabled>Apply to simulator</button>
+    <button id="vh-align-cancel" type="button" hidden>Cancel search</button>
   </div>
   <p id="vh-align-status" role="status">Waiting for the optical trace.</p>
+  <button id="vh-check-applied" type="button" hidden>Check band at this pose</button>
   <div id="vh-align-result" hidden>
     <div id="vh-starting-poses" hidden>
       <label>Ranked starting poses <select id="vh-align-candidate"></select></label>
@@ -92,7 +96,7 @@
         <small id="vh-align-after-report"></small>
       </figure>
     </div>
-    <details open>
+    <details>
       <summary>Proposed slider changes</summary>
       <table id="vh-align-moves">
         <thead><tr><th>Simulator slider</th><th>Before &rarr; proposed</th></tr></thead>
@@ -130,11 +134,14 @@
   const afterImage = initializeImage("align-after");
   const planImage = initializeImage("plan-map");
   const [uSize, vSize] = opt.sizeMm;
+  el("reflection-model").textContent =
+    `250 mm CAD geometry. Starting-pose search tests up to ${align.startingPoseLimit} reflections.`;
   el("x-floor").textContent = `ePix100 x cannot go below ${align.xFloor.toFixed(2)} mm.`;
   el("scale").textContent = `${uSize.toFixed(1)} × ${vSize.toFixed(1)} mm · u → v ↑ · 4 × 4 pixel bins`;
 
   function dropdown(id, label, options) {
     const select = el(id);
+    select.disabled = true;
     options.forEach((text, index) => select.add(new Option(text, index)));
     select.addEventListener("change", () => viewer.set_control_value(label, +select.value, true));
     return select;
@@ -323,11 +330,14 @@
   let latestTrace = null;
   let alignStatus = status.IDLE;
   let meetsPreviewGoal = false;
+  let searchProgress = null;
   let startingCount = 0;
   let selectedCandidate = 0;
   const searchButton = el("align-search");
   const previewButton = el("align-preview");
   const applyButton = el("align-apply");
+  const cancelButton = el("align-cancel");
+  const checkApplied = el("check-applied");
   const candidateSelect = el("align-candidate");
   const alignmentResult = el("align-result");
   const alignmentStatus = el("align-status");
@@ -364,6 +374,14 @@
   }
   searchButton.addEventListener("click", () => requestAlignment(align.searchLabel));
   previewButton.addEventListener("click", () => requestAlignment(align.previewLabel));
+  cancelButton.addEventListener("click", () => {
+    viewer.gui_controllers[align.cancelLabel]?.object[align.cancelLabel]();
+  });
+  checkApplied.addEventListener("click", () => {
+    const planner = el("planner");
+    planner.open = true;
+    compareButton.focus();
+  });
   candidateSelect.addEventListener("change", () => {
     viewer.set_control_value(align.candidateLabel, +candidateSelect.value, true);
     refreshAlignmentControls();
@@ -378,17 +396,24 @@
   });
   let braggAllowed = null;
   function readyMessage() {
-    if (startingCount) return "Review a starting pose before applying its reflection and stages.";
+    if (startingCount) {
+      return "Review the proposed signal and spot size. Applying changes the reflection and stages.";
+    }
     return meetsPreviewGoal ?
       "Compact spot near the target in the model. Review the pose before applying." :
       "Best effort only: target error or RMS exceeds 0.5 mm. The stages are unchanged.";
   }
   function refreshAlignmentControls() {
     const pendingTarget = targetFields.some((field, i) => field.valueAsNumber !== detectorTarget[i]);
-    const busy = alignStatus === status.RUNNING || alignStatus === status.SEARCHING;
+    const canCancel = alignStatus === status.RUNNING || alignStatus === status.SEARCHING;
+    const busy = canCancel || alignStatus === status.CANCELLING;
     const valid = targetFields.every((field) => field.validity.valid);
-    searchButton.disabled = liveEnergy === null || busy || !valid;
-    previewButton.disabled = !braggAllowed || busy || !valid;
+    searchButton.disabled = liveEnergy === null || busy || !valid ||
+      !viewer.gui_controllers[align.searchLabel] || line.disabled;
+    previewButton.disabled = !braggAllowed || busy || !valid ||
+      !viewer.gui_controllers[align.previewLabel] || reflection.disabled;
+    cancelButton.hidden = !canCancel;
+    checkApplied.hidden = alignStatus !== status.APPLIED;
     const ready = alignStatus === status.READY;
     const pendingCandidate = startingCount > 0 && +candidateSelect.value !== selectedCandidate;
     applyButton.disabled = !ready || pendingTarget || pendingCandidate;
@@ -398,11 +423,15 @@
         "Find signal across reflections, or refine a shared spot with the selected reflection." :
         "This reflection cannot satisfy Bragg. Find starting poses to try the other reflections.",
       [status.RUNNING]: "Searching simulated poses for all four crystals. The stages are unchanged.",
-      [status.SEARCHING]: "Trying reflections and stage positions for this line. No stages moved.",
+      [status.SEARCHING]: searchProgress ?
+        `Testing ${searchProgress.label} (${searchProgress.step} of ${searchProgress.total}). No stages moved.` :
+        "Shortlisting Bragg-compatible reflections. No stages moved.",
+      [status.CANCELLING]: "Cancelling the search…",
+      [status.CANCELLED]: "Search cancelled. No stages moved.",
       [status.READY]: readyMessage(),
       [status.STALE]: "The pose, optics, or target changed. Run a new preview before applying.",
       [status.NO_IMPROVEMENT]: "Bragg is possible, but this search did not find a better pose with enough hits from all four crystals.",
-      [status.NO_SIGNAL]: `No pose reached ${align.minSignalHits} modeled hits on any crystal in this search. Other poses or reflections may work.`,
+      [status.NO_SIGNAL]: `No shortlisted pose reached ${align.minSignalHits} modeled hits on any crystal. Try a reflection manually.`,
       [status.APPLIED]: "Applied to the simulator.",
       [status.FAILED]: "The alignment search failed. See the viewer log.",
     };
@@ -490,6 +519,12 @@
   }
   function drawAlignment(data) {
     alignStatus = data[0];
+    if (alignStatus === status.SEARCHING && data.length === 4) {
+      const [, step, total, index] = data;
+      searchProgress = { label: plan.presets[index][0], step, total };
+    } else {
+      searchProgress = null;
+    }
     if (alignStatus === status.READY) {
       [startingCount, selectedCandidate] = data.slice(1, 3);
       el("starting-poses").hidden = !startingCount;
@@ -560,10 +595,17 @@
       if (command.property === "planning_frame") return drawPlanning(command.value);
     }
     handle(command);
-    if (command.type === "set_control" &&
-        [align.previewLabel, align.applyLabel, align.searchLabel, align.candidateLabel, ...align.targetLabels,
-          plan.compareLabel, ...plan.bandLabels].includes(command.name)) {
-      showSlider(command.name, false);
+    if (command.type === "set_control") {
+      if (command.name === opt.lineLabel) line.disabled = false;
+      if (command.name === opt.reflectionLabel) reflection.disabled = false;
+      if ([align.previewLabel, align.applyLabel, align.searchLabel, align.cancelLabel,
+        align.candidateLabel, ...align.targetLabels, plan.compareLabel,
+        ...plan.bandLabels].includes(command.name)) {
+        showSlider(command.name, false);
+      }
+      if ([opt.lineLabel, opt.reflectionLabel, align.previewLabel, align.searchLabel].includes(command.name)) {
+        refreshAlignmentControls();
+      }
     }
   };
 })();

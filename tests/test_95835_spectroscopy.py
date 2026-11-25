@@ -30,6 +30,27 @@ def test_second_order_uses_the_same_bragg_angle_as_halved_spacing(optics):
     assert optics.bragg_angle(energy, 1, 2) is None
 
 
+@pytest.mark.parametrize(
+    ("name", "note_energy", "line_energy", "angle", "axial_distance"),
+    [
+        ("Si(533)", 7649, 7649.4, 78.12, 105.22),
+        ("Ge(444)", 7705, 7706.0, 80.13, 86.99),
+    ],
+)
+def test_co_setup_notes_are_reproduced_and_shortlisted(
+    optics, name, note_energy, line_energy, angle, axial_distance,
+):
+    align = import_module("spectroscopy_align")
+    indices = align.starting_reflections(line_energy)
+    assert len(indices) == 4
+    preset = optics.REFLECTIONS[indices[0]]
+    assert preset.label == name
+    theta = optics.bragg_angle(note_energy, preset.spacing_a, 1)
+    assert theta is not None
+    assert math.degrees(theta) == pytest.approx(angle, abs=0.02)
+    assert 2 * 250 / math.tan(theta) == pytest.approx(axial_distance, abs=0.05)
+
+
 def test_concave_surface_focuses_rays_and_sensor_can_clip_them(optics):
     # Source and focus lie on the cylinder axis, equally far apart from the midplane.
     # Every sample on the central arc has the same glancing angle.
@@ -158,8 +179,8 @@ def test_find_starting_pose_recovers_v_signal_from_a_blank_detector(optics, cad_
     poses = align.find_starting_poses(
         scene, context, spectrometer, joints, followers, positions, request, Event(),
     )
-    pose, = poses
-    assert optics.REFLECTIONS[pose.reflection].label == "Ge(331)"
+    assert poses
+    pose = next(pose for pose in poses if optics.REFLECTIONS[pose.reflection].label == "Ge(331)")
     assert pose.alignment.before.hits == (0, 0, 0, 0)
     assert pose.alignment.after.signal_rank() == (4, 4)
     assert pose.alignment.target[align.AXES.index(align.DETECTOR_X)] >= -6.5
@@ -192,10 +213,27 @@ def test_starting_poses_keep_partial_signal_and_rank_complete_coverage_first(opt
         return align.AlignmentResult((), (), request.target_mm, before, after)
 
     monkeypatch.setattr(align, "find_alignment", search)
-    poses = align.find_starting_poses(Mock(), Mock(), Mock(), [], {}, {}, request, Event())
-    assert tested == [p.spacing_a for p in optics.REFLECTIONS[:-1]]
+    progress = []
+    poses = align.find_starting_poses(
+        Mock(), Mock(), Mock(), [], {}, {}, request, Event(), progress=progress.append,
+    )
+    assert progress == [(1, 4, 0), (2, 4, 10), (3, 4, 16), (4, 4, 1)]
+    assert tested == [optics.REFLECTIONS[index].spacing_a for _, _, index in progress]
     assert [pose.reflection for pose in poses] == [1, 0]
     assert [pose.alignment.after.signal_rank() for pose in poses] == [(4, 4), (2, 2)]
+
+    cancel = Event()
+    tested.clear()
+
+    def cancel_during_second_reflection(update):
+        if update[0] == 2:
+            cancel.set()
+
+    assert not align.find_starting_poses(
+        Mock(), Mock(), Mock(), [], {}, {}, request, cancel,
+        progress=cancel_during_second_reflection,
+    )
+    assert len(tested) == 2
 
 
 @pytest.mark.parametrize(
@@ -322,6 +360,6 @@ def test_planner_evaluates_a_single_line_and_does_not_rank_by_hit_count(optics):
     assert energies == (energy,)
     assert optics.REFLECTIONS[rows[0].reflection].label == "Ge(331)"
     assert rows[0].geometry_rank() == pytest.approx((1, 4, 9.2))
-    assert spectrometer.trace.call_count == 1
+    assert spectrometer.trace.call_count == 2  # Ge(331) and Si(400) both satisfy Bragg.
     with pytest.raises(ValueError, match="positive energy interval"):
         plan.compare_reflections(spectrometer, Mock(), energy, -1, 0, 0.05)

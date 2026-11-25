@@ -1,7 +1,7 @@
 """Bounded alignment search for a shared simulated ePix100 spot from four crystals."""
 
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from threading import Event
 
@@ -26,6 +26,8 @@ PREFIX = f"{MODEL}::"
 STAGE_STEP = 0.05
 DETECTOR_X = "epix100_x_joint"
 MIN_SIGNAL_HITS = 32
+STARTING_POSE_LIMIT = 4
+SHORTLIST_BRAGG_DEG = 79.0  # Near the demonstrated 250 mm Fe and Co setups.
 COMMON_AXES = (
     "parker_lift_joint", "parker_cross_joint", "analyzer_rotation_joint",
     DETECTOR_X, "epix100_y_joint", "epix100_z_joint", "epix100_tilt_joint",
@@ -93,6 +95,20 @@ class StartingPose:
     alignment: AlignmentResult
 
 
+def starting_reflections(energy_ev: float) -> list[int]:
+    """Prefer a matching setup reference, then angles near the 250 mm examples."""
+    ranked = []
+    for index, preset in enumerate(REFLECTIONS):
+        theta = bragg_angle(energy_ev, preset.spacing_a, 1)
+        if theta is not None:
+            ranked.append((
+                not preset.matches_reference(energy_ev),
+                abs(math.degrees(theta) - SHORTLIST_BRAGG_DEG),
+                index,
+            ))
+    return [index for _, _, index in sorted(ranked)[:STARTING_POSE_LIMIT]]
+
+
 def find_starting_poses(
     scene: DrakeScene,
     context: Context,
@@ -102,17 +118,21 @@ def find_starting_poses(
     positions: Mapping[str, float],
     request: AlignmentRequest,
     cancel: Event,
+    *,
+    progress: Callable[[tuple[int, int, int]], None] | None = None,
 ) -> list[StartingPose]:
-    """Rank the best bounded single-line pose found for each named reflection."""
+    """Rank the best bounded single-line poses from the reflection shortlist."""
     poses = []
-    for index, preset in enumerate(REFLECTIONS):
+    eligible = starting_reflections(request.energy_ev)
+    for step, index in enumerate(eligible, start=1):
         if cancel.is_set():
             return []
-        if bragg_angle(request.energy_ev, preset.spacing_a, 1) is None:
-            continue
+        if progress is not None:
+            progress((step, len(eligible), index))
         result = find_alignment(
             scene, context.Clone(), spectrometer, joints, followers, positions,
-            replace(request, spacing_a=preset.spacing_a, order=1), cancel, find_signal=True,
+            replace(request, spacing_a=REFLECTIONS[index].spacing_a, order=1),
+            cancel, find_signal=True,
         )
         if result is not None:
             poses.append(StartingPose(index, result))
@@ -120,8 +140,7 @@ def find_starting_poses(
     def rank(pose: StartingPose) -> tuple[int, int, bool, float, int]:
         after = pose.alignment.after
         assert after.rms_mm is not None
-        band = REFLECTIONS[pose.reflection].published_xcs_band_ev
-        precedent = band is not None and band[0] <= request.energy_ev <= band[1]
+        precedent = REFLECTIONS[pose.reflection].matches_reference(request.energy_ev)
         spread = float(np.linalg.norm(after.rms_mm))
         return *after.signal_rank(), precedent, -spread, sum(after.hits)
 

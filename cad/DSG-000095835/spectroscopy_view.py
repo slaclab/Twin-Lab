@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from enum import IntEnum
 from pathlib import Path
+from queue import Empty, SimpleQueue
 from threading import Event
 
 import numpy as np
@@ -30,6 +31,7 @@ from spectroscopy_align import (
     AXES,
     DETECTOR_X,
     MIN_SIGNAL_HITS,
+    STARTING_POSE_LIMIT,
     AlignmentRequest,
     AlignmentResult,
     StartingPose,
@@ -49,6 +51,7 @@ COLORS = ((0.15, 0.82, 0.96), (0.28, 0.91, 0.38), (0.95, 0.50, 0.87), (0.99, 0.6
 ALIGN = "Preview simulated alignment"
 SEARCH = "Search simulated starting poses"
 CANDIDATE = "Starting pose candidate"
+CANCEL = "Cancel simulated alignment"
 APPLY = "Apply proposed simulator pose"
 COMPARE = "Compare simulated analyzer reflections"
 BAND_BELOW = "Band below emission (eV)"
@@ -73,6 +76,8 @@ class AlignmentStatus(IntEnum):
     FAILED = 6
     SEARCHING = 7
     NO_SIGNAL = 8
+    CANCELLING = 9
+    CANCELLED = 10
 
 
 class PlanningStatus(IntEnum):
@@ -104,7 +109,9 @@ def detector_panel(joints: Sequence[AssemblySliderJoint]) -> str:
             "previewLabel": ALIGN,
             "searchLabel": SEARCH,
             "candidateLabel": CANDIDATE,
+            "cancelLabel": CANCEL,
             "minSignalHits": MIN_SIGNAL_HITS,
+            "startingPoseLimit": STARTING_POSE_LIMIT,
             "xFloor": by_name[DETECTOR_X].spectroscopy_bounds()[0],
             "applyLabel": APPLY,
             "targetLabels": [TARGET_U, TARGET_V],
@@ -150,19 +157,21 @@ class AlignmentPreview:
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="spectroscopy-align")
         self.cancel = Event()
         self.future: Future[AlignmentResult | list[StartingPose] | None] | None = None
+        self.progress: SimpleQueue[tuple[int, int, int]] = SimpleQueue()
         self.proposal: AlignmentResult | None = None
         self.starting_poses: list[StartingPose] = []
         self.candidate = 0
         self.snapshot: tuple[object, ...] | None = None
-        self.clicks = (0, 0, 0)
+        self.clicks = (0, 0, 0, 0)
         meshcat.AddButton(ALIGN)
         meshcat.AddButton(SEARCH)
-        meshcat.AddSlider(CANDIDATE, 0, len(REFLECTIONS) - 1, 1, 0)
+        meshcat.AddButton(CANCEL)
+        meshcat.AddSlider(CANDIDATE, 0, STARTING_POSE_LIMIT - 1, 1, 0)
         meshcat.AddButton(APPLY)
         self.publish(AlignmentStatus.IDLE)
 
-    def publish(self, status: AlignmentStatus) -> None:
-        data = [float(status)]
+    def publish(self, status: AlignmentStatus, progress: tuple[int, ...] = ()) -> None:
+        data = [float(status), *progress]
         if status == AlignmentStatus.READY and self.proposal is not None:
             proposal = self.proposal
             data.extend((len(self.starting_poses), self.candidate))
@@ -186,8 +195,12 @@ class AlignmentPreview:
     def update(
         self, context, positions, key, *, request: AlignmentRequest,
     ) -> None:
-        clicks = tuple(self.meshcat.GetButtonClicks(label) for label in (ALIGN, SEARCH, APPLY))
-        requested, search, apply = (new > old for new, old in zip(clicks, self.clicks, strict=True))
+        clicks = tuple(
+            self.meshcat.GetButtonClicks(label) for label in (ALIGN, SEARCH, APPLY, CANCEL)
+        )
+        requested, search, apply, cancel = (
+            new > old for new, old in zip(clicks, self.clicks, strict=True)
+        )
         self.clicks = clicks
         key = (*key, request.target_mm)
 
@@ -198,6 +211,9 @@ class AlignmentPreview:
             self.snapshot = None
             if self.future is None:
                 self.publish(AlignmentStatus.STALE)
+        if cancel and self.future is not None and not self.cancel.is_set():
+            self.cancel.set()
+            self.publish(AlignmentStatus.CANCELLING)
         if self.future is not None and self.future.done():
             future, self.future = self.future, None
             try:
@@ -209,6 +225,9 @@ class AlignmentPreview:
             else:
                 if self.snapshot is None:
                     self.publish(AlignmentStatus.STALE)
+                elif self.cancel.is_set():
+                    self.snapshot = None
+                    self.publish(AlignmentStatus.CANCELLED)
                 elif isinstance(result, list):
                     if not result:
                         self.publish(AlignmentStatus.NO_SIGNAL)
@@ -223,6 +242,13 @@ class AlignmentPreview:
                 else:
                     self.proposal = result
                     self.publish(AlignmentStatus.READY)
+        elif self.future is not None and not self.cancel.is_set():
+            try:
+                progress = self.progress.get_nowait()
+            except Empty:
+                pass
+            else:
+                self.publish(AlignmentStatus.SEARCHING, progress)
         if (requested or search) and self.future is None:
             if not search and bragg_angle(
                 request.energy_ev, request.spacing_a, request.order,
@@ -232,11 +258,17 @@ class AlignmentPreview:
             self.starting_poses = []
             self.cancel.clear()
             self.snapshot = key
-            self.future = self.executor.submit(
-                find_starting_poses if search else find_alignment,
+            args = (
                 self.scene, context.Clone(), self.spectrometer, self.joints,
                 self.followers, dict(positions), request, self.cancel,
             )
+            self.progress = SimpleQueue()
+            if search:
+                self.future = self.executor.submit(
+                    find_starting_poses, *args, progress=self.progress.put,
+                )
+            else:
+                self.future = self.executor.submit(find_alignment, *args)
             self.publish(AlignmentStatus.SEARCHING if search else AlignmentStatus.RUNNING)
             return
         if self.starting_poses:

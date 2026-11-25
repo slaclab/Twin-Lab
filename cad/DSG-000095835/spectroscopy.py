@@ -6,6 +6,7 @@ import json
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -26,6 +27,7 @@ LINES = (
     ("V K\u03b1 (K\u03b11)", 4952.2),
 )
 
+
 @dataclass(frozen=True)
 class ReflectionPreset:
     label: str
@@ -33,21 +35,64 @@ class ReflectionPreset:
     evidence: str = "Simulation candidate"
     source_url: str | None = None
     published_xcs_band_ev: tuple[float, float] | None = None
+    note_energy_ev: float | None = None
+
+    def matches_reference(self, energy_ev: float) -> bool:
+        band = self.published_xcs_band_ev
+        if band is not None and band[0] <= energy_ev <= band[1]:
+            return True
+        # The notes quote rounded energies and the emission presets use nominal values.
+        return self.note_energy_ev is not None and abs(energy_ev - self.note_energy_ev) <= 2
 
 
-# The indices already specify the diffracting planes, so these presets use n=1.
+_LATTICE_A = {"Si": 5.4310, "Ge": 5.6579}
+
+
+def _cubic_reflection(
+    material: Literal["Si", "Ge"],
+    hkl: tuple[int, int, int],
+    evidence: str = "Simulation candidate",
+    source_url: str | None = None,
+    published_xcs_band_ev: tuple[float, float] | None = None,
+    *,
+    note_energy_ev: float | None = None,
+) -> ReflectionPreset:
+    planes = "".join(str(index) for index in hkl)
+    spacing = _LATTICE_A[material] / math.sqrt(sum(index**2 for index in hkl))
+    return ReflectionPreset(
+        f"{material}({planes})", spacing, evidence, source_url, published_xcs_band_ev,
+        note_energy_ev=note_energy_ev,
+    )
+
+
+# The indices specify allowed diamond-cubic reflections at n=1, not mounting cuts.
+# Every preset uses the same 250 mm CAD curvature.
 REFLECTIONS = (
-    ReflectionPreset(
-        "Ge(620)", 5.6579 / math.sqrt(40), "Published XCS Fe setup",
+    _cubic_reflection(
+        "Ge", (6, 2, 0), "Published XCS Fe setup",
         "https://doi.org/10.3390/molecules29102323", (7030, 7125),
     ),
-    ReflectionPreset(
-        "Si(440)", 5.4310 / math.sqrt(32), "LCLS Mn precedent (16-crystal)",
+    _cubic_reflection(
+        "Si", (4, 4, 0), "LCLS Mn precedent (16-crystal)",
         "https://biology-lcls.slac.stanford.edu/capabilities/spectroscopy",
     ),
-    ReflectionPreset("Ge(511)", 5.6579 / math.sqrt(27)),
-    ReflectionPreset("Ge(331)", 5.6579 / math.sqrt(19)),
-    ReflectionPreset("Ge(642)", 5.6579 / math.sqrt(56)),
+    _cubic_reflection("Ge", (5, 1, 1)),
+    _cubic_reflection("Ge", (3, 3, 1)),
+    _cubic_reflection("Ge", (6, 4, 2)),
+    _cubic_reflection("Si", (5, 3, 3), "Co K\u03b2 setup notes", note_energy_ev=7649),
+    _cubic_reflection("Ge", (4, 4, 4), "Co valence-to-core setup notes", note_energy_ev=7705),
+    _cubic_reflection("Si", (4, 0, 0)),
+    _cubic_reflection("Si", (4, 2, 2)),
+    _cubic_reflection("Si", (5, 1, 1)),
+    _cubic_reflection("Si", (5, 3, 1)),
+    _cubic_reflection("Si", (4, 4, 4)),
+    _cubic_reflection("Si", (6, 2, 0)),
+    _cubic_reflection("Si", (7, 1, 1)),
+    _cubic_reflection("Ge", (4, 2, 2)),
+    _cubic_reflection("Ge", (4, 4, 0)),
+    _cubic_reflection("Ge", (5, 3, 1)),
+    _cubic_reflection("Ge", (5, 3, 3)),
+    _cubic_reflection("Ge", (7, 1, 1)),
 )
 HC_EV_ANGSTROM = 12398.419843
 IP_M = np.zeros(3)
@@ -143,8 +188,9 @@ def trace_crystal(
     delta = aperture.points_m - source_local
     distance2 = _dot_rows(delta, delta)
     safe = distance2 > 1e-18
-    incoming = delta / np.sqrt(np.where(safe, distance2, 1))[:, None]
-    sine = -_dot_rows(incoming, aperture.inward_normals)
+    distance = np.sqrt(np.where(safe, distance2, 1))
+    # Normalize the scalar incidence first; only accepted samples need unit vectors.
+    sine = -_dot_rows(delta, aperture.inward_normals) / distance
     front = safe & (sine > 0)
     incidence: tuple[float, float] | None = None
     if np.any(front):
@@ -161,7 +207,8 @@ def trace_crystal(
         accepted = np.flatnonzero(front & (sine >= low) & (sine <= high + 1e-15))
     bounce = aperture.points_m[accepted] @ rotation.T + translation
     outgoing_local = (
-        incoming[accepted] + 2 * sine[accepted, None] * aperture.inward_normals[accepted]
+        delta[accepted] / distance[accepted, None]
+        + 2 * sine[accepted, None] * aperture.inward_normals[accepted]
     )
     outgoing = outgoing_local @ rotation.T
     denom = outgoing @ detector.normal
