@@ -1,3 +1,28 @@
+# ePix10k2M Sensor Modules and Highlight-Safe Colours (2026-11-21)
+
+Same STEP (`ac9d89fe…`).
+
+- The 16 sensor modules `DSG-000006659` moved from detector internals onto
+  `detector_y`: frame `mo39152621`, carrier PCB, four ASICs and the sensor chip
+  each, 112 leaves. Their Samtec connectors stay omitted behind the carrier PCBs.
+  The model now retains 499 of 2,158 leaves.
+- Visual colours only; collision meshes and hulls are unchanged:
+  - `visual_reserved_hues` draws saturated STEP paint within 12° of red or at
+    40–65° (yellow) white, keeping its alpha. The posts, post holders, brass
+    thumb nuts and the ePix10k housing no longer look like interference or
+    near-clearance highlights.
+  - `visual_part_rgba` paints whole leaves by CAD name: the ePix10k ring set and
+    back plate `REF-000076019` black anodized, the sensor chips blue, and shield
+    window `mo39134050` smoked grey at 40% so the chips show through it. The build
+    rejects a name that matches no retained part.
+- CoACD ran only for the 112 new selections (about 5 minutes). Both packages
+  validate 35 bodies and 34 joints with 68 individual endpoints, max pose error
+  5.55e-16. The convex package has 8,022 geometries from 512 meshes. CAD-verified
+  home is clear (0 touching, 0 within 1 mm), and the collision regressions pass:
+  the lift touches the cage at −50 mm and both ePix10k y extremes are clear.
+- The single-joint sweep was not repeated. The new parts sit inside the detector
+  housing and move with it, so the ePix10k onsets above are not expected to change.
+
 # STEP Revision of 2026-11-21 (SHA-256 `ac9d89fe…`)
 
 The review was migrated from the `2f9a4891…` STEP. References below use the new

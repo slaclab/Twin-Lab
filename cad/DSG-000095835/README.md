@@ -9,7 +9,9 @@ uv run slac-run 95835
 which runs `python cad/DSG-000095835/build.py --view`.
 
 This builds the model and its convex collision meshes, then opens the interference
-viewer. Parts are drawn in their STEP colours, face by face. Collision checking
+viewer. Parts are drawn in their STEP colours, face by face, except that red and
+yellow paint is recoloured so it cannot be mistaken for a highlight (see
+[Colours](#colours)). Collision checking
 starts enabled with a zero warning band: convex-hull contact candidates are
 highlighted red by default.
 **Collision accuracy check** starts off; enable it to refine candidates against
@@ -187,7 +189,9 @@ keeping its transparency. `visual_part_rgba` paints whole leaves, named by CAD
 name without the `_oa_` suffix, to their real finish; the ePix10k ring set and
 back plate, which the STEP draws yellow and olive, are black anodized, the 16
 ePix10k2M sensor chips are blue, and the shield window in front of them is
-smoked translucent grey. Remove either key to show the STEP colours again.
+smoked translucent grey. Names, unlike refs, survive a re-export; the build stops
+if one no longer matches a retained part. Both keys apply only with
+`visual_colors: step`. Remove either key to show the STEP colours again.
 
 ## A new STEP revision
 

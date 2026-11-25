@@ -7,6 +7,7 @@ Those two features are not representable in the older stage-inventory schema.
 from __future__ import annotations
 
 import argparse
+import colorsys
 import hashlib
 import json
 import shutil
@@ -274,11 +275,10 @@ def repaint(leaf: dict, name: str, review: dict) -> dict:
     takes that band's colour and keeps its own alpha, so STEP paint is never mistaken for
     the clearance viewer's red and yellow highlights.
     """
-    import colorsys
-
     part = review.get("visual_part_rgba", {}).get(name.split("_oa_")[0])
     if part is not None:
-        return {**leaf, "palette": [list(part) for _ in leaf["palette"]]}
+        # Also covers leaves the STEP leaves uncoloured, whose palette is empty.
+        return {**leaf, "faces": [0] * len(leaf["faces"]), "palette": [list(part)]}
     bands = review.get("visual_reserved_hues", [])
     if not bands:
         return leaf
@@ -361,6 +361,12 @@ def validate_review(review: dict, stats: dict) -> None:
                     raise ValueError(f"{key} belongs to both {owners[conflicts[0]]} and {body}")
                 owners[key] = body
     retained = {key[0] for key in owners}
+    # Colour overrides are keyed by CAD name, so a typo would silently keep the STEP colour.
+    if review.get("visual_part_rgba"):
+        names = {stats[ref]["name"].split("_oa_")[0] for ref in retained}
+        unknown = sorted(set(review["visual_part_rgba"]) - names)
+        if unknown:
+            raise ValueError(f"visual_part_rgba names no retained part: {unknown}")
     omitted_list = [ref for refs in review["omitted_occurrences"].values() for ref in refs]
     omitted = set(omitted_list)
     if len(omitted) != len(omitted_list) or retained & omitted:

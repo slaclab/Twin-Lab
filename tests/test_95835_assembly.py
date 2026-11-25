@@ -146,14 +146,27 @@ def test_step_paint_is_not_mistaken_for_clearance_highlights(monkeypatch):
     assert build.repaint(leaf, "LIB-000001008", review)["palette"] == [
         [*white[:3], 1.0], [*white[:3], 0.3], [*white[:3], 1.0], orange, grey,
     ]
-    ring = {"faces": [0], "palette": [[0.577, 0.577, 0.0, 0.3]]}
+    ring = {"faces": [0, 1], "palette": [[0.577, 0.577, 0.0, 0.3], [0.4, 0.94, 0.45, 1.0]]}
     black = review["visual_part_rgba"]["REF__sa39152641__Epix10k_MountingRib"]
     assert build.repaint(ring, "REF__sa39152641__Epix10k_MountingRib_oa_67", review) == {
-        "faces": [0], "palette": [black],
+        "faces": [0, 0], "palette": [black],
+    }
+    uncoloured = {"faces": [-1, -1], "palette": []}
+    assert build.repaint(uncoloured, "REF__sa39152641__Epix10k_BackRing", review) == {
+        "faces": [0, 0], "palette": [black],
     }
     assert build.repaint(leaf, "x", {}) is leaf
-    names = {entry["name"].split("_oa_")[0] for entry in _manifest()}
-    assert set(review["visual_part_rgba"]) <= names
+
+    stats = {"P1": {"name": "plate_oa_3", "local": {"solids": [{}]}}}
+    recipe = {
+        "bodies": {"assembly_base": {"parts": ["P1"]}}, "joints": [], "stage_splits": {},
+        "omitted_occurrences": {build.EMPTY_GEOMETRY: []},
+        "visual_part_rgba": {"plate": black},
+    }
+    build.validate_review(recipe, stats)
+    recipe["visual_part_rgba"] = {"plates": black}
+    with pytest.raises(ValueError, match="visual_part_rgba"):
+        build.validate_review(recipe, stats)
 
 
 def test_fourth_stack_joints_match_the_first_stack():
