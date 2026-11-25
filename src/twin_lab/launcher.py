@@ -29,13 +29,13 @@ BUILD_95835 = str(REPOSITORY_ROOT / "cad" / "DSG-000095835" / "build.py")
 MODELS = (
     Model(
         "43841",
-        "DSG-000040389 *43841 polycapillary stage stack (27 joints)",
+        "DSG-000040389 *43841 polycapillary stage stack (31 joints)",
         ("-m", "twin_lab.collision_viewer", INVENTORY_43841),
         ("-m", "twin_lab.stage_cad_viewer", INVENTORY_43841),
     ),
     Model(
         "95835",
-        "DSG-000095835 offline assembly (12 joints)",
+        "DSG-000095835 offline assembly (34 joints)",
         (BUILD_95835, "--view"),
         (BUILD_95835, "--collision", "none", "--view"),
     ),

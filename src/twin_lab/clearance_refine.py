@@ -430,6 +430,8 @@ def _index_parts(cache_dir: Path) -> dict[str, _PartEntry]:
         if manifest is None:
             continue
         source = Path(manifest["source"])
+        if not source.is_absolute():
+            source = (manifest_path.parent / source).resolve()
         for item in manifest.get("parts", []):
             index.setdefault(
                 str(item["part_ref"]).upper(),

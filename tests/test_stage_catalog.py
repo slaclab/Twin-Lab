@@ -274,6 +274,22 @@ def test_43841_inventory_uses_reusable_stage_catalog() -> None:
     }
 
 
+def test_middle_crystal_rotary_home_preserves_imported_cad_pose() -> None:
+    inventory = yaml.safe_load(
+        Path("cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    home = _reviewed_home(inventory, "A211", "A211")
+    cad_position = _reviewed_cad_position(inventory, "A211", "A211")
+    assert math.isclose(home, math.radians(155.0))
+    assert math.isclose(cad_position, home)
+    assert _joint_displacement({"home": home, "cad_position": cad_position}, home) == 0.0
+    lower, upper = _reviewed_limits(inventory, "A211", "A211", [-math.pi, math.pi])
+    assert math.isclose(lower - cad_position, math.radians(-30.0))
+    assert math.isclose(upper - cad_position, math.radians(30.0))
+
+
 def test_current_43841_inventory_has_31_reviewed_joints_and_collision_cover() -> None:
     inventory = yaml.safe_load(
         Path("cad/DSG-000040389/reviews/43841-stage-stack.inventory.yaml").read_text()

@@ -1,0 +1,51 @@
+{
+  "bound_at": "2026-11-04T06:34:50.244069Z",
+  "bundle_id": "d1fde958b16c03bddf8c9693e93aca7448e6b8777a140f98eff33039ef446119",
+  "collision_mode": "convex",
+  "reference": {
+    "bundle_id": "d1fde958b16c03bddf8c9693e93aca7448e6b8777a140f98eff33039ef446119",
+    "cad": {
+      "assembly": "DSG-000043841",
+      "assembly_name": "43841 stage stack (DSG-000040389)",
+      "ingested_at": "2026-11-04T06:34:49.924503Z",
+      "original_filename": "source.stp",
+      "parent_revision": null,
+      "revision_id": "dsg-000043841-948f9e9f88204dd7a830cc5660375761bfe9807de72a8d18f8ac879abc2e86c8",
+      "step": {
+        "path": "cad/revisions/dsg-000043841-948f9e9f88204dd7a830cc5660375761bfe9807de72a8d18f8ac879abc2e86c8/source.stp",
+        "sha256": "948f9e9f88204dd7a830cc5660375761bfe9807de72a8d18f8ac879abc2e86c8",
+        "size_bytes": 157799347
+      },
+      "timestamp_basis": "registered_existing",
+      "uploaded_at": null
+    },
+    "inputs": {
+      "collision_mode": "convex",
+      "files": {
+        "cad_manifest": "7753c177a8ac9e4901cc3aeb1caba88c83b9c7679cbbda753407c62df242dd8b",
+        "inventory": "6548edf22e1ff7831a64c35e1f23bf0de286029cf97af750d73a2d5cdf15e6de",
+        "selection_review": "a97d90f49dc4b73ffd32af24abf851437441d4e5a401b63806eb8e69d82723db",
+        "source_step": "948f9e9f88204dd7a830cc5660375761bfe9807de72a8d18f8ac879abc2e86c8",
+        "stage_catalog": "4a2ca9cf5d30f745182a726d8992e56f38bca93c026978311718b7ebe580c641",
+        "supplement:0": "6f0d8641f1c09530f9cffac6dbb9b553ed8bb63a1443b9e67a0559abb26d94e8",
+        "supplement:1": "e02113f01b7decb82e275d6380c27603389d222ad1d004ab5b4be484c2e34c01"
+      },
+      "runtime": "twin-lab-collision-runtime/v1"
+    },
+    "schema": "twin-lab-artifact-reference/v1",
+    "sha256": "3f55c2ad040bddaee115ababd634bb75d55f6f4153b184a102609195a1a876a7",
+    "url": "https://github.com/slaclab/Twin-Lab/releases/download/geometry-43841-baseline/43841-baseline.tar.gz"
+  },
+  "schema": "twin-lab-cad-bundle-binding/v1",
+  "simulation": {
+    "bundle_id": "d1fde958b16c03bddf8c9693e93aca7448e6b8777a140f98eff33039ef446119",
+    "inventory_sha256": "6548edf22e1ff7831a64c35e1f23bf0de286029cf97af750d73a2d5cdf15e6de",
+    "schema": "twin-lab-simulation-identity/v1",
+    "simulation_id": "6589e1a43cd1c5e02e406fc0af3f0a86d8da7e3661e7dde247d400712abd3a16",
+    "snapshot_status": "legacy_compiled_only",
+    "source_step_sha256": "948f9e9f88204dd7a830cc5660375761bfe9807de72a8d18f8ac879abc2e86c8",
+    "stage_catalog_sha256": "4a2ca9cf5d30f745182a726d8992e56f38bca93c026978311718b7ebe580c641"
+  },
+  "step_sha256": "948f9e9f88204dd7a830cc5660375761bfe9807de72a8d18f8ac879abc2e86c8",
+  "updated_at": "2026-11-04T07:16:02.322046Z"
+}
