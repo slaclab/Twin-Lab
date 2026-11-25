@@ -27,6 +27,90 @@ no shared source files or stage catalog were changed.
 Generated geometry lives in `.cache/twin_lab/`; SDF and MATLAB exports live in
 `exports/DSG-000095835/`.
 
+## Offline ePix100 spectroscopy preview
+
+```bash
+uv run slac-run 95835 --spectroscopy
+```
+
+The preview uses the existing liquid-jet interaction datum (the fixed CAD world
+origin), all four concave crystal faces in the reviewed mounting, and the
+upward-facing ePix100 sensor. It resolves the active faces from the local STEP
+cache and follows the same stage sliders as the motion viewer. The jet and slit
+sliders still move their CAD solids; they do not move the fixed beam interaction
+point or mask rays in this preview. The separate spectroscopy export omits the
+downstream ePix10k2M scattering detector, its dedicated mounts, and its stage
+controls. The regular assembly viewer keeps them. For spectroscopy only,
+**ePix100 x** cannot go below **-6.5 mm**; the y and z limits are unchanged.
+This mode does not check collisions or connect to motors.
+
+Start with **Fe K&beta;1,3 + Ge(620)**, based on the Fe K&beta; setup in
+[Antolini et al.](https://doi.org/10.3390/molecules29102323). Use the two menus
+to pick a line and a reflection independently. The lines come from the
+[XCS standard configuration](https://lcls.slac.stanford.edu/instruments/xcs/standard-configurations);
+each represents one photon energy from the
+[NIST transition tables](https://www.nist.gov/pml/x-ray-transition-energies-database).
+K&alpha; uses K&alpha;1, and the K&beta;2,5 presets are nominal valence-to-core
+energies, not sample-specific peaks. Crystal presets are examples, not an
+inventory of installed optics. A named reflection already specifies its lattice
+planes and uses order 1; select **Custom d-spacing / order** to enter a spacing
+and apply a separate integer order. The selected reflection applies to all four.
+
+Drag a crystal, common analyzer, or ePix100 slider to see the image change. As
+a quick check, from the CAD pose change **ePix100 x** to **-4 mm**: the Fe demo
+centroid should move about 4 mm towards the crosshair. The table distinguishes
+Bragg-accepted samples that miss the detector from cases with no Bragg rays.
+The sensor image shows weighted hits in 4-by-4 pixel bins; the ring marks the
+centroid and the RMS values describe the horizontal and vertical footprint.
+
+For a **simulator-only focus example**, leave the default energy, reflection,
+and Bragg half-width selected, reset to the CAD pose, and set:
+
+| Slider | Value |
+|---|---:|
+| Spectrometer vertical | -19.10 mm |
+| Analyzer rotation | +0.45 degrees |
+| ePix100 x | +1.95 mm |
+| ePix100 y | -8.30 mm |
+| ePix100 z | -6.50 mm |
+
+With the reviewed 2026-11-21 CAD, the centroid lands at about (-0.03, -0.14) mm
+with RMS widths of (0.26, 0.29) mm. Crystals 1 and 2 contribute at this pose;
+3 and 4 do not meet the Bragg window. These are CAD slider offsets, not
+motor setpoints or a clearance-checked path.
+
+With **Animation** off, select a line and reflection, then click **Auto-align
+preview**. It searches for a shared spot from all four crystals. It varies
+translation, rotation, and tilt on each crystal, the common spectrometer
+slides and analyzer rotation, and ePix100 x/y/z and tilt (19 axes total).
+It samples the allowed ranges and refines promising poses; it does not
+enumerate all combinations. A proposed pose must retain signal from every
+crystal and capture at least 80% of its Bragg-accepted samples.
+The target defaults to the detector center; **Target u / v**
+set the offset in mm on the moving sensor (positive u is right; positive v is
+up). The gold cross marks the target. The detector model is a continuous
+rectangle: it does not locate quadrant gaps or bad pixels.
+
+Compare the two images, target error, and proposed slider changes before
+clicking **Apply to simulator**. A pose is shown as best effort if its target
+error or either RMS width exceeds 0.5 mm; this is a preview criterion, not a
+hardware tolerance. The preview by itself moves nothing. Changing the target,
+an optical setting, or a contributing stage invalidates the proposal. The
+search does not check clearance.
+
+Ten of the 24 preset pairs have no real Bragg angle and cannot be searched.
+For Bragg-allowed pairs, results depend on the starting pose, target, and
+Bragg window. If the search finds no proposal, that does not prove a pose is
+out of reach. A centered centroid alone does not imply a sharp four-crystal
+spot; compare the RMS widths and per-crystal hit counts.
+
+The trace assumes a point isotropic source, symmetric reflection from the
+curved lattice planes, and an adjustable angular window (default &plusmn;0.05&deg;).
+This window is not a measured rocking curve. The image is normalized per frame
+and omits occlusion, absorption, detector response, and absolute intensity.
+It is a geometry preview, not a calibrated alignment, focus prediction, or
+motion safety check.
+
 ## Included motion
 
 The model has 35 rigid bodies and 34 joints. 29 have sliders. The other five follow

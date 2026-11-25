@@ -12,9 +12,16 @@ import yaml
 from twin_lab.collision_viewer import SliderJoint, read_joint_metadata
 
 RECIPE = Path(__file__).resolve().parent / "reviews" / "assembly.yaml"
+SPECTROSCOPY_EPIX100_X_MIN_MM = -6.5
 
 
 class AssemblySliderJoint(SliderJoint):
+    def spectroscopy_bounds(self) -> tuple[float, float, float]:
+        low, high, home = self.slider_bounds()
+        if self.joint_name == "epix100_x_joint":
+            low = max(low, SPECTROSCOPY_EPIX100_X_MIN_MM)
+        return low, high, min(max(home, low), high)
+
     @property
     def label(self) -> str:
         names = {

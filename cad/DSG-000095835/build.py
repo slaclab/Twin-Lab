@@ -444,13 +444,42 @@ def validate_review(review: dict, stats: dict) -> None:
         raise ValueError(f"Disconnected bodies: {set(bodies) - reached}")
 
 
+def spectroscopy_assembly(review: dict) -> tuple[dict, list[dict]]:
+    """Keep the reviewed assembly except the dedicated ePix10k CAD subtree."""
+    entries = json.loads((HERE / "manifest.json").read_text())["occurrences"]
+    roots = [
+        entry["id"] for entry in entries
+        if entry["is_assembly"] and entry["name"].split("_oa_")[0] == "LCL5005-008450"
+    ]
+    if len(roots) != 1:
+        raise ValueError("Expected one ePix10k scattering assembly (LCL5005-008450)")
+    scattering = {entry["ref"] for entry in entries if entry["id"].startswith(roots[0] + "/")}
+    bodies = {}
+    for name, spec in review["bodies"].items():
+        parts = [
+            part for part in spec["parts"]
+            if (part if isinstance(part, str) else part["ref"]) not in scattering
+        ]
+        if parts or not spec["parts"]:
+            bodies[name] = {**spec, "parts": parts}
+    joints = [joint for joint in review["joints"] if joint["child"] in bodies]
+    if any(joint["parent"] not in bodies for joint in joints):
+        raise ValueError("A retained spectroscopy body depends on a removed scattering stage")
+    return bodies, joints
+
+
 def build(
     *, collision: str = "none", workers: int | None = None, rebuild: bool = False,
-    refinement_run: Path | None = None, output_dir: Path | None = None,
+    refinement_run: Path | None = None, output_dir: Path | None = None, spectroscopy: bool = False,
 ) -> Path:
     from cache_geometry import ROOT, SOURCE, prepare_geometry, source_stamp
 
-    default_name = "DSG-000095835" if collision == "none" else "DSG-000095835.collision"
+    if spectroscopy and collision != "none":
+        raise ValueError("Spectroscopy does not support collision checking")
+    if spectroscopy:
+        default_name = "DSG-000095835-spectroscopy"
+    else:
+        default_name = "DSG-000095835" if collision == "none" else "DSG-000095835.collision"
     output = (output_dir or EXPORT_ROOT / (
         "DSG-000095835.candidate" if refinement_run is not None else default_name
     )).resolve()
@@ -478,6 +507,9 @@ def build(
     review["stage_splits"] = expand_stage_splits(review, templates)
     stats = json.loads((CACHE / "stats.json").read_text())
     validate_review(review, stats)
+    bodies, reviewed_joints = (
+        spectroscopy_assembly(review) if spectroscopy else (review["bodies"], review["joints"])
+    )
     MESHES.mkdir(parents=True, exist_ok=True)
     output.mkdir(parents=True, exist_ok=True)
     (output / "meshes").mkdir(exist_ok=True)
@@ -494,7 +526,7 @@ def build(
         leaf_colors = prepare_colors()
     colored_visuals: dict[Path, Path] = {}
     links = []
-    for name, spec in review["bodies"].items():
+    for name, spec in bodies.items():
         link = LinkSpec(name)
         # One mesh per selected leaf keeps fast hull checks from filling entire stacks.
         for part in spec["parts"]:
@@ -554,7 +586,7 @@ def build(
             logical_home=0.0,
             reviewed_home=j.get("home", 0.0),
         )
-        for j in review["joints"]
+        for j in reviewed_joints
     ]
     supplied_parts = None
     if refinement_run is not None:
@@ -646,9 +678,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--view", action="store_true", help="Open the existing slider viewer")
     parser.add_argument(
+        "--spectroscopy", action="store_true",
+        help="Open the offline ePix100 Bragg-trace preview with stage sliders (no collisions)",
+    )
+    parser.add_argument(
         "--collision",
         choices=["none", "hull", "convex"],
-        default="convex",
         help="Convex interference checking by default; none builds a fast motion-only model",
     )
     parser.add_argument("--workers", type=int)
@@ -656,15 +691,19 @@ def main() -> None:
     parser.add_argument("--refinement-run", type=Path, help="Build an isolated refined candidate")
     parser.add_argument("--output-dir", type=Path, help="Override the generated package directory")
     args = parser.parse_args()
+    if args.spectroscopy and args.collision not in (None, "none"):
+        parser.error("--spectroscopy does not support collision checking")
+    collision = "none" if args.spectroscopy else args.collision or "convex"
     package = build(
-        collision=args.collision, workers=args.workers, rebuild=args.rebuild,
+        collision=collision, workers=args.workers, rebuild=args.rebuild,
         refinement_run=args.refinement_run, output_dir=args.output_dir,
+        spectroscopy=args.spectroscopy,
     )
-    if args.view:
-        if args.collision == "none":
+    if args.view or args.spectroscopy:
+        if collision == "none":
             from view import view
 
-            view(package)
+            view(package, spectroscopy=args.spectroscopy)
         else:
             from collision_view import view
 

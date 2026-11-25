@@ -980,24 +980,26 @@ def wsl_ipv4_address() -> str | None:
         return None
 
 
-def patch_meshcat_page() -> None:
+def patch_meshcat_page(*, extra_html: str = "", resource_root: Path = RESOURCE_ROOT) -> None:
     """Redirect Drake's resource lookup at a patched page. Call before ``Meshcat()``."""
 
-    if os.environ.get("DRAKE_RESOURCE_ROOT"):
+    if not extra_html and os.environ.get("DRAKE_RESOURCE_ROOT"):
         return
     try:
-        os.environ["DRAKE_RESOURCE_ROOT"] = str(_build_resource_root())
+        os.environ["DRAKE_RESOURCE_ROOT"] = str(_build_resource_root(resource_root, extra_html))
     except (RuntimeError, OSError) as error:
+        if extra_html:
+            raise RuntimeError("Cannot install the requested Meshcat panel") from error
         print(f"Meshcat UI patch unavailable ({error}); using Drake's page.")
 
 
-def _build_resource_root() -> Path:
+def _build_resource_root(resource_root: Path, extra_html: str) -> Path:
     """Mirror Drake's resource tree with symlinks, swapping in our own meshcat.html."""
 
     from pydrake.common import FindResourceOrThrow
 
     source = Path(FindResourceOrThrow("drake/geometry/meshcat.html")).resolve()
-    drake = RESOURCE_ROOT / "drake"
+    drake = resource_root / "drake"
     (drake / "geometry").mkdir(parents=True, exist_ok=True)
     for entry in source.parents[1].iterdir():
         if entry.name != "geometry":
@@ -1008,9 +1010,9 @@ def _build_resource_root() -> Path:
     # Written via a temporary so a second viewer starting at the same time never reads
     # a half-written page.
     patched = drake / "geometry" / "meshcat.html.new"
-    patched.write_text(_patched_html(source), encoding="utf-8")
+    patched.write_text(_patched_html(source, extra_html=extra_html), encoding="utf-8")
     patched.replace(drake / "geometry" / source.name)
-    return RESOURCE_ROOT
+    return resource_root
 
 
 def _link(link: Path, target: Path) -> None:
@@ -1020,7 +1022,7 @@ def _link(link: Path, target: Path) -> None:
     link.symlink_to(target)
 
 
-def _patched_html(source: Path) -> str:
+def _patched_html(source: Path, *, extra_html: str = "") -> str:
     html = source.read_text(encoding="utf-8")
     if "</body>" not in html:
         raise RuntimeError("Drake's meshcat.html no longer has a </body> to patch")
@@ -1035,7 +1037,7 @@ def _patched_html(source: Path) -> str:
         f"<script>{SCRUB_JS}</script>\n"
         f"<script>{VIEW_CUBE_JS}</script>\n"
     )
-    html = html.replace("</body>", f"{patch}</body>")
+    html = html.replace("</body>", f"{patch}{extra_html}</body>")
     # Inlined rather than served as a sibling file: Drake only maps meshcat.html onto its
     # resource root, so a relative icon href would 404.
     icon = base64.b64encode(FAVICON_PATH.read_bytes()).decode("ascii")

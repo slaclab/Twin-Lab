@@ -1,0 +1,295 @@
+<style>
+  #twinlab-spectroscopy {
+    position: fixed; top: 52px; left: 12px; z-index: 8; width: min(295px, 42vw);
+    max-height: calc(100dvh - 60px); overflow: auto; box-sizing: border-box;
+    color: #e7eefb; background: #101927ee; border: 1px solid #546783; border-radius: 8px;
+    padding: 10px 12px; font: 12px/1.45 system-ui, sans-serif;
+  }
+  #twinlab-spectroscopy summary { cursor: pointer; font-weight: 650; font-size: 14px; }
+  #twinlab-spectroscopy label { display: block; margin-top: 6px; }
+  #twinlab-spectroscopy select { display: block; width: 100%; color-scheme: dark; }
+  #twinlab-spectroscopy canvas { display: block; width: 100%; margin-top: 8px; }
+  #twinlab-spectroscopy p { margin: 6px 0; }
+  #twinlab-spectroscopy small { color: #b6c4d6; }
+  #twinlab-spectroscopy table { width: 100%; text-align: left; border-collapse: collapse; }
+  #twinlab-spectroscopy th, #twinlab-spectroscopy td { padding: 1px 3px; white-space: nowrap; }
+  #vh-target-fields { display: flex; flex-wrap: wrap; gap: 8px; }
+  #vh-target-fields input { width: 5em; color-scheme: dark; }
+  #vh-align-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+  #vh-align-actions button { color-scheme: dark; cursor: pointer; }
+  #vh-align-actions button:disabled { cursor: default; }
+  #vh-align-images { display: flex; gap: 8px; }
+  #vh-align-images figure { flex: 1; min-width: 0; margin: 4px 0; }
+  #vh-align-images canvas { margin-top: 2px; }
+  #vh-align-moves td:last-child, #vh-align-moves th:last-child { text-align: right; }
+</style>
+<details id="twinlab-spectroscopy" open>
+  <summary>ePix100 spectroscopy preview</summary>
+  <label>Emission line <select id="vh-line"></select></label>
+  <label>Reflection for all four crystals <select id="vh-reflection"></select></label>
+  <div id="vh-target-fields">
+    <label>Target u (mm) <input id="vh-target-u" type="number" value="0" required></label>
+    <label>Target v (mm) <input id="vh-target-v" type="number" value="0" required></label>
+  </div>
+  <small>Gold +: target · cyan ring: centroid. No detector gaps modeled.</small>
+  <div id="vh-align-actions">
+    <button id="vh-align-preview" type="button" disabled>Auto-align preview</button>
+    <button id="vh-align-apply" type="button" disabled>Apply to simulator</button>
+  </div>
+  <p id="vh-align-status" role="status">Waiting for the optical trace.</p>
+  <div id="vh-align-result" hidden>
+    <div id="vh-align-images">
+      <figure>
+        <figcaption>Before</figcaption>
+        <canvas id="vh-align-before" aria-label="Before: simulated hits from all four crystals"></canvas>
+        <small id="vh-align-before-report"></small>
+      </figure>
+      <figure>
+        <figcaption>Proposed</figcaption>
+        <canvas id="vh-align-after" aria-label="Proposed: simulated hits from all four crystals"></canvas>
+        <small id="vh-align-after-report"></small>
+      </figure>
+    </div>
+    <details open>
+      <summary>Proposed slider changes</summary>
+      <table id="vh-align-moves">
+        <thead><tr><th>Simulator slider</th><th>Before &rarr; proposed</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </details>
+    <small>Each image is normalized separately. Clearance not checked.</small>
+  </div>
+  <p id="vh-bragg"></p>
+  <canvas id="vh-image" aria-label="Simulated ePix100 hit image; horizontal u and vertical v"></canvas>
+  <small id="vh-scale"></small>
+  <p id="vh-result" role="status">Waiting for the optical trace.</p>
+  <table>
+    <thead><tr><th>Crystal</th><th>Incidence</th><th>Hits / accepted</th></tr></thead>
+    <tbody id="vh-crystals"></tbody>
+  </table>
+  <small>Offline geometry only. Brightness is relative to the brightest bin in each image.</small>
+</details>
+<script>
+(() => {
+  const opt = __OPTIONS__;
+  const align = opt.alignment;
+  const status = align.status;
+  const el = (id) => document.getElementById("vh-" + id);
+  function initializeImage(id) {
+    const canvas = el(id);
+    canvas.width = opt.cols * 2;
+    canvas.height = opt.rows * 2;
+    return canvas.getContext("2d");
+  }
+  const mainImage = initializeImage("image");
+  const beforeImage = initializeImage("align-before");
+  const afterImage = initializeImage("align-after");
+  const [uSize, vSize] = opt.sizeMm;
+  el("scale").textContent = `${uSize.toFixed(1)} × ${vSize.toFixed(1)} mm · u → v ↑ · 4 × 4 pixel bins`;
+
+  function dropdown(id, label, options) {
+    const select = el(id);
+    options.forEach((text, index) => select.add(new Option(text, index)));
+    select.addEventListener("change", () => viewer.set_control_value(label, +select.value, true));
+    return select;
+  }
+  const line = dropdown("line", opt.lineLabel, opt.lines);
+  const reflection = dropdown("reflection", opt.reflectionLabel, opt.reflections);
+  let detectorTarget = [0, 0];
+  let latestTrace = null;
+  let alignStatus = status.IDLE;
+  let meetsPreviewGoal = false;
+  const previewButton = el("align-preview");
+  const applyButton = el("align-apply");
+  const alignmentResult = el("align-result");
+  const alignmentStatus = el("align-status");
+  const targetFields = ["target-u", "target-v"].map((id, i) => {
+    const field = el(id);
+    field.min = -align.targetLimitsMm[i];
+    field.max = align.targetLimitsMm[i];
+    field.step = align.targetStepMm;
+    field.addEventListener("input", refreshAlignmentControls);
+    field.addEventListener("change", () => {
+      if (field.reportValidity()) sendTarget();
+    });
+    field.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") field.blur();
+    });
+    return field;
+  });
+  function sendTarget() {
+    targetFields.forEach((field, i) => {
+      if (field.validity.valid && field.valueAsNumber !== detectorTarget[i]) {
+        viewer.set_control_value(align.targetLabels[i], field.valueAsNumber, true);
+      }
+    });
+  }
+  previewButton.addEventListener("click", () => {
+    if (!targetFields.every((field) => field.reportValidity())) return;
+    sendTarget();
+    viewer.gui_controllers[align.previewLabel]?.object[align.previewLabel]();
+  });
+  applyButton.addEventListener("click", () => {
+    viewer.gui_controllers[align.applyLabel]?.object[align.applyLabel]();
+  });
+  const moves = align.axes.map((axis) => {
+    const row = el("align-moves").tBodies[0].insertRow();
+    row.insertCell().textContent = axis;
+    return row.insertCell();
+  });
+  let braggAllowed = null;
+  function refreshAlignmentControls() {
+    const pendingTarget = targetFields.some((field, i) => field.valueAsNumber !== detectorTarget[i]);
+    previewButton.disabled = !braggAllowed || alignStatus === status.RUNNING ||
+      targetFields.some((field) => !field.validity.valid);
+    applyButton.disabled = !braggAllowed || alignStatus !== status.READY || pendingTarget;
+    alignmentResult.hidden = alignStatus !== status.READY || !braggAllowed;
+    const messages = {
+      [status.IDLE]: "Preview a shared spot from all four crystals without moving the stages.",
+      [status.RUNNING]: "Searching simulated poses for all four crystals. The stages are unchanged.",
+      [status.READY]: meetsPreviewGoal ?
+        "Compact spot near the target in the model. Review the pose before applying." :
+        "Best effort only: target error or RMS exceeds 0.5 mm. The stages are unchanged.",
+      [status.STALE]: "The pose, optics, or target changed. Run a new preview before applying.",
+      [status.NO_IMPROVEMENT]: "Bragg is possible, but this search did not find a better pose with enough hits from all four crystals.",
+      [status.APPLIED]: "Applied to the simulator.",
+      [status.PAUSE_ANIMATION]: "Turn off Animation before running auto-align.",
+      [status.FAILED]: "The alignment search failed. See the viewer log.",
+    };
+    alignmentStatus.textContent = braggAllowed === null ? "Waiting for the optical trace." :
+      !braggAllowed ? "No alignment: this line and reflection cannot satisfy Bragg." :
+      messages[alignStatus];
+  }
+  const rows = opt.colors.map((rgb, i) => {
+    const row = el("crystals").insertRow();
+    const label = row.insertCell();
+    label.textContent = `● ${i + 1}`;
+    label.style.color = `rgb(${rgb.join(",")})`;
+    return [row.insertCell(), row.insertCell()];
+  });
+  function showSlider(label, show) {
+    const item = viewer.gui_controllers[label]?.domElement.closest("li");
+    if (item) item.hidden = !show;
+  }
+  function draw(data) {
+    const [lineId, crystalId, e, d, order, width, theta, u, v, rmsU, rmsV] = data;
+    line.value = lineId;
+    reflection.value = crystalId;
+    braggAllowed = theta >= 0;
+    refreshAlignmentControls();
+    showSlider(opt.lineLabel, false);
+    showSlider(opt.reflectionLabel, false);
+    showSlider(opt.energyLabel, lineId === opt.lines.length - 1);
+    showSlider(opt.spacingLabel, crystalId === opt.reflections.length - 1);
+    showSlider(opt.orderLabel, crystalId === opt.reflections.length - 1);
+    const angle = theta < 0 ? "no real Bragg angle" : `θ ${theta.toFixed(2)}° ± ${width.toFixed(3)}°`;
+    el("bragg").textContent = `${e.toFixed(1)} eV · d ${d.toFixed(4)} Å · n ${order} · ${angle}`;
+    let offset = 11;
+    let hits = 0;
+    let accepted = 0;
+    rows.forEach(([incidence, counts]) => {
+      const [a, h, low, high] = data.slice(offset, offset + 4);
+      incidence.textContent = low < 0 ? "—" : `${low.toFixed(1)}–${high.toFixed(1)}°`;
+      counts.textContent = `${h} / ${a}`;
+      hits += h;
+      accepted += a;
+      offset += 4;
+    });
+    latestTrace = [data.slice(offset), hits, u, v];
+    paint(mainImage, ...latestTrace, detectorTarget);
+    if (hits) {
+      el("result").textContent = `Centroid (${u.toFixed(2)}, ${v.toFixed(2)}) mm · ` +
+        `RMS (${rmsU.toFixed(2)}, ${rmsV.toFixed(2)}) mm`;
+    } else {
+      el("result").textContent = theta < 0 ? "This energy and reflection cannot satisfy Bragg." :
+        accepted ? "Bragg rays miss the active sensor." : "No analyzer samples meet the Bragg window.";
+    }
+  }
+  function paint(ctx, bins, hits, u, v, aim) {
+    const w = ctx.canvas.width, h = ctx.canvas.height;
+    ctx.fillStyle = "#030916";
+    ctx.fillRect(0, 0, w, h);
+    for (let i = 0; i < bins.length; i += 2) {
+      const bin = bins[i];
+      const brightness = Math.sqrt(bins[i + 1]);
+      ctx.fillStyle = `rgb(${Math.round(250 * brightness)},${Math.round(192 * brightness)},` +
+        `${Math.round(70 + 178 * brightness)})`;
+      ctx.fillRect(2 * (bin % opt.cols), h - 2 * (1 + Math.floor(bin / opt.cols)), 2, 2);
+    }
+    ctx.strokeStyle = "#879db49c";
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    ctx.moveTo(w / 2, 0); ctx.lineTo(w / 2, h);
+    ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    const x = w * (0.5 + aim[0] / uSize), y = h * (0.5 - aim[1] / vSize);
+    ctx.strokeStyle = "#ffca67";
+    ctx.beginPath();
+    ctx.moveTo(x - 7, y); ctx.lineTo(x + 7, y);
+    ctx.moveTo(x, y - 7); ctx.lineTo(x, y + 7);
+    ctx.stroke();
+    if (hits) {
+      ctx.strokeStyle = "#75efff";
+      ctx.beginPath();
+      ctx.arc(w * (0.5 + u / uSize), h * (0.5 - v / vSize), 6, 0, 2 * Math.PI);
+      ctx.stroke();
+    }
+  }
+  function drawAlignment(data) {
+    alignStatus = data[0];
+    if (alignStatus === status.READY) {
+      const aim = data.slice(1, 3);
+      const n = align.axes.length;
+      moves.forEach((cell, index) => {
+        const from = data[3 + index], to = data[3 + n + index];
+        cell.textContent = `${from.toFixed(2)} → ${to.toFixed(2)}`;
+        cell.parentElement.hidden = Math.abs(to - from) < 0.001;
+      });
+      let offset = 3 + 2 * n;
+      [[beforeImage, "align-before-report"], [afterImage, "align-after-report"]].forEach(
+        ([image, report]) => {
+          const [u, v, rmsU, rmsV] = data.slice(offset, offset + 4);
+          offset += 4;
+          const perCrystal = data.slice(offset, offset + opt.colors.length);
+          offset += opt.colors.length;
+          const count = data[offset++];
+          const totalHits = perCrystal.reduce((sum, hits) => sum + hits, 0);
+          paint(image, data.slice(offset, offset + count), totalHits, u, v, aim);
+          offset += count;
+          const hits = `Hits (1–4): ${perCrystal.join(" / ")}`;
+          const distance = Math.hypot(u - aim[0], v - aim[1]);
+          if (image === afterImage) {
+            meetsPreviewGoal = Math.max(distance, rmsU, rmsV) <= 0.5;
+          }
+          el(report).textContent = totalHits ?
+            `${distance.toFixed(2)} mm from target · ` +
+            `RMS ${rmsU.toFixed(2)} × ${rmsV.toFixed(2)} mm · ${hits}` : `No spot · ${hits}`;
+        },
+      );
+    }
+    refreshAlignmentControls();
+  }
+  function updateTarget(data) {
+    detectorTarget = data.map((value) => Number(value.toFixed(1)));
+    targetFields.forEach((field, i) => {
+      if (field !== document.activeElement) field.value = detectorTarget[i];
+    });
+    if (latestTrace) paint(mainImage, ...latestTrace, detectorTarget);
+    refreshAlignmentControls();
+  }
+  const handle = viewer.handle_command.bind(viewer);
+  viewer.handle_command = (command) => {
+    if (command.type === "set_property" && command.path === opt.root) {
+      if (command.property === "detector_frame") return draw(command.value);
+      if (command.property === "alignment_frame") return drawAlignment(command.value);
+      if (command.property === "alignment_target") return updateTarget(command.value);
+    }
+    handle(command);
+    if (command.type === "set_control" &&
+        [align.previewLabel, align.applyLabel, ...align.targetLabels].includes(command.name)) {
+      showSlider(command.name, false);
+    }
+  };
+})();
+</script>
