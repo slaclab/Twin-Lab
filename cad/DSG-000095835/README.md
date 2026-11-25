@@ -29,6 +29,9 @@ Generated geometry lives in `.cache/twin_lab/`; SDF and MATLAB exports live in
 
 ## Offline ePix100 spectroscopy preview
 
+See the [beamline guide](../../docs/95835-spectroscopy.md) for a walkthrough
+of the spectroscopy panel, starting-pose search, and energy-band comparison.
+
 ```bash
 uv run slac-run 95835 --spectroscopy
 ```
@@ -46,70 +49,29 @@ enforce **-6.5 mm** as the **ePix100 x** lower limit. The y and z limits and the
 regular assembly viewer are unchanged.
 This mode does not check collisions or connect to motors.
 
-Start with **Fe K&beta;1,3 + Ge(620)**, based on the Fe K&beta; setup in
-[Antolini et al.](https://doi.org/10.3390/molecules29102323). Use the two menus
-to pick a line and a reflection independently. The lines come from the
-[XCS standard configuration](https://lcls.slac.stanford.edu/instruments/xcs/standard-configurations);
-each represents one photon energy from the
-[NIST transition tables](https://www.nist.gov/pml/x-ray-transition-energies-database).
-K&alpha; uses K&alpha;1, and the K&beta;2,5 presets are nominal valence-to-core
-energies, not sample-specific peaks. Crystal presets are examples, not an
-inventory of installed optics. A named reflection already specifies its lattice
-planes and uses order 1; select **Custom d-spacing / order** to enter a spacing
-and apply a separate integer order. The selected reflection applies to all four.
+### Optical model notes
 
-### Experiment planner
+The line presets use the [XCS standard configuration][xcs-standard] and
+nominal NIST energies (K&alpha; uses K&alpha;1). All reflections use the same
+250 mm-radius CAD apertures and symmetric reflection. The ray trace assumes an
+isotropic point source and omits occlusion, absorption, and detector response.
+The sensor image bins weighted hits in 4-by-4 pixel bins.
 
-Select an emission line, set the requested span below and above it, and click
-**Compare reflections here**. **Use published Fe band** fills in the 7030–7125 eV
-window in the XCS Fe example. The comparison evaluates the named reflections
-at the current CAD pose and Bragg half-width without moving the stages. It checks
-21 evenly spaced energies, including both endpoints (one energy for a zero-width
-band). These are discrete samples, not a guarantee of continuous coverage.
+Both searches use the full 256-by-256 ray grid on each crystal they evaluate.
+They sample bounded pose candidates rather than enumerate all combinations of
+the 19 axes (three per crystal, three common analyzer axes, four detector axes).
+Starting-pose shortlisting favors angles closest to 79 degrees after matching
+setup references. Auto-align requires every crystal to retain at least as many
+hits as at the starting pose, at least 32 hits, and at least 80% of accepted
+rays. It refines ePix100 x to center the weighted spot horizontally without
+sacrificing hits or focus.
 
-The matching published XCS setup is listed first; the other options are sorted
-by the number of energies where all four crystals place at least 80% of their
-accepted samples on the sensor, then by the number of crystal/energy pairs with
-hits and the minimum edge distance. Select a row to see the per-crystal coverage
-strip and color-coded centroids on the detector. **Use reflection in simulator**
-changes only the reflection selection. Change a stage or apply an alignment
-preview, then compare again to assess the new pose.
+[xcs-standard]: https://lcls.slac.stanford.edu/instruments/xcs/standard-configurations
 
-Ge(620) is documented at XCS for Fe; [Si(440) is a precedent on the LCLS
-16-crystal instrument](https://biology-lcls.slac.stanford.edu/capabilities/spectroscopy).
-The Co setup notes name **Si(533)** for K&beta;1,3 (about 7649 eV, 78.11 degrees)
-and **Ge(444)** for valence-to-core K&beta;2,5 (about 7705 eV, 80.13 degrees),
-both with a 250 mm radius. The other Si and Ge presets are geometric candidates.
-Every preset uses the same 250 mm CAD crystal shapes. The 500 mm Ge(111)
-suggestion is not simulated; it needs separate geometry and a specified order.
-Capture is a geometry fraction, not a
-prediction of photon counts or reflectivity. Detector gaps, real analyzer
-availability, and collision clearance still need separate verification.
+### Single-line geometry check
 
-### Single-line trace and alignment
-
-If the detector is blank, choose a line and click **Find starting poses**. This
-tries up to four Bragg-compatible reflections at bounded stage poses. It
-shortlists matching Fe/Co references first, then angles closest to 79 degrees,
-a heuristic based on the 250 mm examples, not a reachability test. Select any
-reflection manually and use **Auto-align preview** to search outside the
-shortlist. **Compare reflections here** still evaluates the full catalog at
-the current pose. Starting-pose search ranks results by how many crystals have signal
-(at least 32 modeled hits), then how many capture at least 80% of their accepted
-rays. Partial poses are shown when the search does not land all four crystals.
-Select a candidate to preview its reflection and stage changes, then use
-**Apply to simulator** to try both. Searches show which compatible reflection
-they are testing and can be cancelled without moving stages. Then open
-**Check band at this pose** and run **Compare reflections here**; a starting
-pose is only for the selected line, not a
-hardware recommendation or evidence that the reflection is in stock.
-
-Drag a crystal, common analyzer, or ePix100 slider to see the image change. As
-a quick check, from the CAD pose change **ePix100 x** to **-4 mm**: the Fe demo
-centroid should move about 4 mm towards the crosshair. The table distinguishes
-Bragg-accepted samples that miss the detector from cases with no Bragg rays.
-The sensor image shows weighted hits in 4-by-4 pixel bins; the ring marks the
-centroid and the RMS values describe the horizontal and vertical footprint.
+From the CAD pose, change **ePix100 x** to **-4 mm** with the default Fe line
+and reflection. The centroid should move about 4 mm toward the crosshair.
 
 For a **simulator-only focus example**, leave the default energy, reflection,
 and Bragg half-width selected, reset to the CAD pose, and set:
@@ -126,43 +88,6 @@ With the reviewed 2026-11-21 CAD, the centroid lands at about (-0.03, -0.14) mm
 with RMS widths of (0.26, 0.29) mm. Crystals 1 and 2 contribute at this pose;
 3 and 4 do not meet the Bragg window. These are CAD slider offsets, not
 motor setpoints or a clearance-checked path.
-
-Select a line and reflection, then click **Auto-align preview**. It searches for a
-shared spot from all four crystals. It varies
-translation, rotation, and tilt on each crystal, the common spectrometer
-slides and analyzer rotation, and ePix100 x/y/z and tilt (19 axes total).
-It samples the allowed ranges and refines promising poses; it does not
-enumerate all combinations. Both searches score each trial with the full
-256-by-256 ray grid on each crystal they evaluate, just like the live trace.
-A proposed auto-align pose must retain signal from every
-crystal and capture at least 80% of its Bragg-accepted samples.
-The target defaults to the detector center; **Target u / v**
-set the offset in mm on the moving sensor (positive u is right; positive v is
-up). After focusing, the preview refines ePix100 x to center the weighted spot
-horizontally without sacrificing hits or focus. If x travel limits the
-horizontal correction, the proposed image reports the limit. The gold cross
-marks the target. The detector model is a continuous
-rectangle: it does not locate quadrant gaps or bad pixels.
-
-Compare the two images, target error, and proposed slider changes before
-clicking **Apply to simulator**. A pose is shown as best effort if its target
-error or either RMS width exceeds 0.5 mm; this is a preview criterion, not a
-hardware tolerance. The preview by itself moves nothing. Changing the target,
-an optical setting, or a contributing stage invalidates the proposal. The
-search does not check clearance.
-
-Pairs with no real Bragg angle cannot be searched. For Bragg-allowed pairs,
-results depend on the starting pose, target, and
-Bragg window. If the search finds no proposal, that does not prove a pose is
-out of reach. A centered centroid alone does not imply a sharp four-crystal
-spot; compare the RMS widths and per-crystal hit counts.
-
-The trace assumes a point isotropic source, symmetric reflection from the
-curved lattice planes, and an adjustable angular window (default &plusmn;0.05&deg;).
-This window is not a measured rocking curve. The image is normalized per frame
-and omits occlusion, absorption, detector response, and absolute intensity.
-It is a geometry preview, not a calibrated alignment, focus prediction, or
-motion safety check.
 
 ## Included motion
 

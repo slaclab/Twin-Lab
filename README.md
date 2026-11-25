@@ -14,6 +14,10 @@ Two models are currently runnable:
 In `43841`, the two Thorlabs LX10 detector stages are manual-only because they
 are not powered and have no EPICS archive data.
 
+Planning a von Hamos run with the ePix100? See the
+[95835 spectroscopy beamline guide](docs/95835-spectroscopy.md) for a worked
+Fe example, starting poses, and energy-band checks.
+
 ## Collision Viewer Quick Start: Published Geometry
 
 **You do not need to mesh the CAD or compute convex hulls to run the published
