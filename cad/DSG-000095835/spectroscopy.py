@@ -120,7 +120,10 @@ def bragg_angle(energy_ev: float, spacing_a: float, order: int) -> float | None:
 
 
 def _dot_rows(a: Array, b: Array) -> Array:
-    return np.einsum("...i,...i->...", a, b)
+    ax, ay, az = a.T
+    bx, by, bz = b.T
+    # Vectorize over samples while keeping the previous three-term sum order.
+    return (ax * bx + az * bz) + ay * by
 
 
 @dataclass(frozen=True)
@@ -143,8 +146,11 @@ def cylinder_aperture(
     radial = np.cos(u)[:, None] * x + np.sin(u)[:, None] * y
     grid = origin_m + radius_m * radial[:, None, :] + v[None, :, None] * z
     normals = np.broadcast_to(-radial[:, None, :], grid.shape)
+    # Keep each coordinate contiguous for the Bragg check across the full aperture.
     return Aperture(
-        grid.reshape(-1, 3), normals.reshape(-1, 3), radius_m * (u1 - u0) * (v1 - v0) / (nu * nv)
+        np.asfortranarray(grid.reshape(-1, 3)),
+        np.asfortranarray(normals.reshape(-1, 3)),
+        radius_m * (u1 - u0) * (v1 - v0) / (nu * nv),
     )
 
 

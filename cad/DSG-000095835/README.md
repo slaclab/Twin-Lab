@@ -132,7 +132,9 @@ shared spot from all four crystals. It varies
 translation, rotation, and tilt on each crystal, the common spectrometer
 slides and analyzer rotation, and ePix100 x/y/z and tilt (19 axes total).
 It samples the allowed ranges and refines promising poses; it does not
-enumerate all combinations. A proposed pose must retain signal from every
+enumerate all combinations. Both searches score each trial with the full
+256-by-256 ray grid on each crystal they evaluate, just like the live trace.
+A proposed auto-align pose must retain signal from every
 crystal and capture at least 80% of its Bragg-accepted samples.
 The target defaults to the detector center; **Target u / v**
 set the offset in mm on the moving sensor (positive u is right; positive v is
