@@ -5,11 +5,9 @@ from dataclasses import dataclass
 from enum import IntEnum
 
 import numpy as np
-from pydrake.systems.framework import Context
-from spectroscopy import (
+
+from .spectroscopy import (
     ACTIVE_SIZE_M,
-    CRYSTAL_INDICES,
-    REFLECTIONS,
     CrystalTrace,
     Spectrometer,
     bragg_angle,
@@ -51,15 +49,15 @@ class BandComparison:
     points: tuple[tuple[BandPoint, ...], ...]
 
     def geometry_rank(self) -> tuple[int, int, float]:
-        """Prefer consistent four-crystal capture, not simulated intensity."""
+        """Prefer consistent capture across all crystals, not simulated intensity."""
         complete = sum(all(p.capture >= CAPTURE_GOAL for p in sample) for sample in self.points)
         hits = [p for sample in self.points for p in sample if p.capture > 0]
         return complete, len(hits), min((p.edge_mm for p in hits), default=0.0)
 
 
-def compare_reflections(
-    spectrometer: Spectrometer,
-    context: Context,
+def compare_reflections[PoseT](
+    spectrometer: Spectrometer[PoseT],
+    context: PoseT,
     energy_ev: float,
     below_ev: float,
     above_ev: float,
@@ -75,12 +73,14 @@ def compare_reflections(
         energy_ev - below_ev, energy_ev + above_ev, BAND_SAMPLES if below_ev + above_ev else 1,
     ).tolist())
     comparisons = []
-    for index, preset in enumerate(REFLECTIONS):
+    for index, preset in enumerate(spectrometer.reflections):
         center = bragg_angle(energy_ev, preset.spacing_a, 1)
         points = []
         for energy in energies:
             if bragg_angle(energy, preset.spacing_a, 1) is None:
-                points.append(tuple(BandPoint(Coverage.NO_BRAGG_ANGLE) for _ in CRYSTAL_INDICES))
+                points.append(tuple(
+                    BandPoint(Coverage.NO_BRAGG_ANGLE) for _ in spectrometer.crystal_labels
+                ))
                 continue
             _, _, traces = spectrometer.trace(context, energy, preset.spacing_a, 1, half_width_deg)
             points.append(tuple(BandPoint.from_trace(trace) for trace in traces))
@@ -89,7 +89,7 @@ def compare_reflections(
         ))
 
     def rank(comparison: BandComparison) -> tuple[bool, int, int, float]:
-        band = REFLECTIONS[comparison.reflection].published_xcs_band_ev
+        band = spectrometer.reflections[comparison.reflection].published_xcs_band_ev
         precedent = band is not None and band[0] <= energy_ev <= band[1]
         return precedent, *comparison.geometry_rank()
 

@@ -1,4 +1,4 @@
-"""Bounded alignment search for a shared simulated ePix100 spot from four crystals."""
+"""Bounded alignment search for a shared simulated ePix100 spot."""
 
 import math
 from collections.abc import Callable, Mapping, Sequence
@@ -6,40 +6,43 @@ from dataclasses import dataclass, replace
 from threading import Event
 
 import numpy as np
-from controls import AssemblySliderJoint, with_followers
-from pydrake.systems.framework import Context
-from spectroscopy import (
+
+from .spectroscopy import (
     ACTIVE_SIZE_M,
-    CRYSTAL_INDICES,
-    MODEL,
-    REFLECTIONS,
     Array,
     CrystalTrace,
+    ReflectionPreset,
     Spectrometer,
     bragg_angle,
     detector_image,
 )
 
-from twin_lab.scene import DrakeScene
-
-PREFIX = f"{MODEL}::"
 STAGE_STEP = 0.05
-DETECTOR_X = "epix100_x_joint"
 MIN_SIGNAL_HITS = 32
 STARTING_POSE_LIMIT = 4
-SHORTLIST_BRAGG_DEG = 79.0  # Near the demonstrated 250 mm Fe and Co setups.
-COMMON_AXES = (
-    "parker_lift_joint", "parker_cross_joint", "analyzer_rotation_joint",
-    DETECTOR_X, "epix100_y_joint", "epix100_z_joint", "epix100_tilt_joint",
-)
-CRYSTAL_AXES = tuple(
-    tuple(f"crystal_{index + 1}_{axis}_joint" for axis in ("translation", "rotation", "tilt"))
-    for index in CRYSTAL_INDICES
-)
-AXES = (
-    *COMMON_AXES,
-    *(name for axes in CRYSTAL_AXES for name in axes),
-)
+
+
+@dataclass(frozen=True)
+class AlignmentAxis:
+    key: str
+    label: str
+    lower: float
+    upper: float
+    to_slider: Callable[[float], float]
+    from_slider: Callable[[float], float]
+
+
+@dataclass(frozen=True)
+class AlignmentRig[PoseT]:
+    shared: tuple[AlignmentAxis, ...]
+    independent: tuple[tuple[AlignmentAxis, ...], ...]
+    set_positions: Callable[[PoseT, Mapping[str, float]], None]
+    clone: Callable[[PoseT], PoseT]
+    detector_x: str | None = None
+
+    @property
+    def axes(self) -> tuple[AlignmentAxis, ...]:
+        return (*self.shared, *(axis for group in self.independent for axis in group))
 
 
 @dataclass(frozen=True)
@@ -95,26 +98,26 @@ class StartingPose:
     alignment: AlignmentResult
 
 
-def starting_reflections(energy_ev: float) -> list[int]:
-    """Prefer a matching setup reference, then angles near the 250 mm examples."""
+def starting_reflections(
+    energy_ev: float, reflections: tuple[ReflectionPreset, ...], shortlist_angle_deg: float,
+) -> list[int]:
+    """Prefer a matching setup reference, then angles near the model's nominal angle."""
     ranked = []
-    for index, preset in enumerate(REFLECTIONS):
+    for index, preset in enumerate(reflections):
         theta = bragg_angle(energy_ev, preset.spacing_a, 1)
         if theta is not None:
             ranked.append((
                 not preset.matches_reference(energy_ev),
-                abs(math.degrees(theta) - SHORTLIST_BRAGG_DEG),
+                abs(math.degrees(theta) - shortlist_angle_deg),
                 index,
             ))
     return [index for _, _, index in sorted(ranked)[:STARTING_POSE_LIMIT]]
 
 
-def find_starting_poses(
-    scene: DrakeScene,
-    context: Context,
-    spectrometer: Spectrometer,
-    joints: Sequence[AssemblySliderJoint],
-    followers: Mapping[str, tuple[str, Mapping]],
+def find_starting_poses[PoseT](
+    context: PoseT,
+    spectrometer: Spectrometer[PoseT],
+    rig: AlignmentRig[PoseT],
     positions: Mapping[str, float],
     request: AlignmentRequest,
     cancel: Event,
@@ -123,15 +126,18 @@ def find_starting_poses(
 ) -> list[StartingPose]:
     """Rank the best bounded single-line poses from the reflection shortlist."""
     poses = []
-    eligible = starting_reflections(request.energy_ev)
+    reflections = spectrometer.reflections
+    eligible = starting_reflections(
+        request.energy_ev, reflections, spectrometer.shortlist_angle_deg,
+    )
     for step, index in enumerate(eligible, start=1):
         if cancel.is_set():
             return []
         if progress is not None:
             progress((step, len(eligible), index))
         result = find_alignment(
-            scene, context.Clone(), spectrometer, joints, followers, positions,
-            replace(request, spacing_a=REFLECTIONS[index].spacing_a, order=1),
+            rig.clone(context), spectrometer, rig, positions,
+            replace(request, spacing_a=reflections[index].spacing_a, order=1),
             cancel, find_signal=True,
         )
         if result is not None:
@@ -140,19 +146,17 @@ def find_starting_poses(
     def rank(pose: StartingPose) -> tuple[int, int, bool, float, int]:
         after = pose.alignment.after
         assert after.rms_mm is not None
-        precedent = REFLECTIONS[pose.reflection].matches_reference(request.energy_ev)
+        precedent = reflections[pose.reflection].matches_reference(request.energy_ev)
         spread = float(np.linalg.norm(after.rms_mm))
         return *after.signal_rank(), precedent, -spread, sum(after.hits)
 
     return [] if cancel.is_set() else sorted(poses, key=rank, reverse=True)
 
 
-def find_alignment(
-    scene: DrakeScene,
-    context: Context,
-    spectrometer: Spectrometer,
-    joints: Sequence[AssemblySliderJoint],
-    followers: Mapping[str, tuple[str, Mapping]],
+def find_alignment[PoseT](
+    context: PoseT,
+    spectrometer: Spectrometer[PoseT],
+    rig: AlignmentRig[PoseT],
     positions: Mapping[str, float],
     request: AlignmentRequest,
     cancel: Event,
@@ -167,26 +171,23 @@ def find_alignment(
     if theta is None or cancel.is_set():
         return None
 
-    by_name = {joint.joint_name: joint for joint in joints}
-    controls = [by_name[name] for name in AXES]
-    start = np.array([
-        (positions[PREFIX + joint.joint_name] + joint.logical_offset) * joint.scale
-        for joint in controls
-    ])
-    bounds = np.array([joint.spectroscopy_bounds()[:2] for joint in controls])
-    first = np.ceil(bounds[:, 0] / STAGE_STEP)
-    last = np.floor(bounds[:, 1] / STAGE_STEP)
+    controls = rig.axes
+    crystal_indices = tuple(range(len(spectrometer.crystal_labels)))
+    start = np.array([axis.to_slider(positions[axis.key]) for axis in controls])
+    bounds = np.array([(axis.lower, axis.upper) for axis in controls])
+    first = np.ceil(bounds[:, 0] / STAGE_STEP - 1e-10)
+    last = np.floor(bounds[:, 1] / STAGE_STEP + 1e-10)
     if np.any(last < first):
         raise ValueError("No slider positions in the spectroscopy limits")
     current = np.clip(np.round(start / STAGE_STEP), first, last)
     applied = start / STAGE_STEP
-    shared = np.arange(len(COMMON_AXES))
+    shared = np.arange(len(rig.shared))
+    axis_indices = {axis.key: i for i, axis in enumerate(controls)}
     blocks = [
-        np.array([AXES.index(name) for name in names])
-        for names in CRYSTAL_AXES
+        np.array([axis_indices[axis.key] for axis in group]) for group in rig.independent
     ]
 
-    def trace(crystals: Sequence[int] = CRYSTAL_INDICES) -> list[CrystalTrace]:
+    def trace(crystals: Sequence[int] = crystal_indices) -> list[CrystalTrace]:
         return spectrometer.trace(
             context, request.energy_ev, request.spacing_a, request.order,
             request.half_width_deg, crystals=crystals, aim=True,
@@ -196,10 +197,9 @@ def find_alignment(
         nonlocal applied
         values = {}
         for i in np.flatnonzero(ticks != applied):
-            joint = controls[i]
-            value = joint.to_sdf(round(float(ticks[i]) * STAGE_STEP, 2))
-            values[PREFIX + joint.joint_name] = min(max(value, joint.sdf_lower), joint.sdf_upper)
-        scene.set_joint_positions(context, with_followers(values, followers, prefix=PREFIX))
+            axis = controls[i]
+            values[axis.key] = axis.from_slider(round(float(ticks[i]) * STAGE_STEP, 2))
+        rig.set_positions(context, values)
         applied = ticks
 
     home_traces = trace()
@@ -207,7 +207,26 @@ def find_alignment(
     min_hits = tuple(max(MIN_SIGNAL_HITS, hits) for hits in before.hits)
     theta_deg = math.degrees(theta)
 
+    def enough_signal(ray: CrystalTrace, crystal: int) -> bool:
+        return len(ray.weights) >= max(min_hits[crystal], 0.8 * ray.accepted)
+
+    refine_flat = not find_signal and all(
+        ray.aim_cost is not None and enough_signal(ray, i)
+        for i, ray in enumerate(home_traces)
+    )
+
     def score(ray: CrystalTrace, crystal: int) -> float:
+        if ray.aim_cost is not None:
+            if refine_flat and enough_signal(ray, crystal):
+                # Once captured, aim the measured footprint rather than the central ray,
+                # which can be displaced from the spot by clipping at the crystal seat.
+                centroid = np.average(ray.uv_m, axis=0, weights=ray.weights) * 1000
+                return float(np.sum((centroid - target) ** 2))
+            uv = ray.projected_uv_m
+            target_cost = 0.0 if uv is None or not len(uv) else float(
+                np.mean(np.sum((uv * 1000 - target) ** 2, axis=1))
+            )
+            return ray.aim_cost + target_cost + (1e6 if refine_flat else 0)
         # Use the infinite detector plane to guide rays back from outside the active rectangle.
         uv = ray.projected_uv_m
         if uv is None or not len(uv):
@@ -223,10 +242,7 @@ def find_alignment(
         return cost + 80 * (1 - capture)**2 + 0.001 * max(0, desired_hits - hits)**2
 
     def valid(traces: list[CrystalTrace]) -> bool:
-        return all(
-            len(ray.weights) >= max(minimum, 0.8 * ray.accepted)
-            for ray, minimum in zip(traces, min_hits, strict=True)
-        )
+        return all(enough_signal(ray, i) for i, ray in enumerate(traces))
 
     best_cost = sum(score(ray, i) for i, ray in enumerate(home_traces))
     best_signal = (0, 0)
@@ -279,7 +295,7 @@ def find_alignment(
             costs = np.array([score(ray, i) for i, ray in zip(crystals, traces, strict=True)])
             old = current
             current = candidate
-            if crystals == CRYSTAL_INDICES:
+            if crystals == crystal_indices:
                 record(traces, costs)
             if (cost := float(costs.sum())) < best:
                 best = cost
@@ -294,7 +310,7 @@ def find_alignment(
     if find_signal:
         record_current()
     # Independent crystal stages are cheap to explore one at a time; the common stages
-    # move multiple spots and therefore need the joint four-crystal objective.
+    # move multiple spots and therefore need the joint objective.
     for i, block in enumerate(blocks):
         for scale, count in ((1.0, 144), (0.12, 80), (0.04, 64), (0.012, 64)):
             if cancel.is_set():
@@ -304,16 +320,18 @@ def find_alignment(
     for scale in (0.15, 0.06, 0.025, 0.01, 0.004, 0.0015):
         if cancel.is_set():
             return None
-        search(shared, CRYSTAL_INDICES, scale, 80)
+        search(shared, crystal_indices, scale, 80)
         for i, block in enumerate(blocks):
             search(block, (i,), scale, 50)
         record_current()
 
     if cancel.is_set() or winner is None:
         return None
+    if rig.detector_x is None:
+        return winner
     centroid, rms = winner.after.centroid_mm, winner.after.rms_mm
     assert centroid is not None and rms is not None  # The winning pose has detector hits.
-    x_axis = AXES.index(DETECTOR_X)
+    x_axis = axis_indices[rig.detector_x]
     ticks = np.rint(np.asarray(winner.target) / STAGE_STEP)
     # Positive x moves the sensor opposite +u, increasing each hit's local u by the same amount.
     # Center the displayed weighted centroid after focusing, without clipping any more signal.

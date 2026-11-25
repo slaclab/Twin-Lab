@@ -11,6 +11,8 @@ from unittest.mock import Mock
 import numpy as np
 import pytest
 
+from twin_lab import spectroscopy_align as align
+from twin_lab import spectroscopy_plan as plan
 from twin_lab.scene import load_scene
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,6 +21,11 @@ ROOT = Path(__file__).resolve().parents[1]
 @pytest.fixture
 def optics(monkeypatch):
     monkeypatch.syspath_prepend(str(ROOT / "cad" / "DSG-000095835"))
+    return import_module("twin_lab.spectroscopy")
+
+
+@pytest.fixture
+def assembly_optics(optics):
     return import_module("spectroscopy")
 
 
@@ -40,8 +47,7 @@ def test_second_order_uses_the_same_bragg_angle_as_halved_spacing(optics):
 def test_co_setup_notes_are_reproduced_and_shortlisted(
     optics, name, note_energy, line_energy, angle, axial_distance,
 ):
-    align = import_module("spectroscopy_align")
-    indices = align.starting_reflections(line_energy)
+    indices = align.starting_reflections(line_energy, optics.REFLECTIONS, 79.0)
     assert len(indices) == 4
     preset = optics.REFLECTIONS[indices[0]]
     assert preset.label == name
@@ -80,7 +86,7 @@ def test_concave_surface_focuses_rays_and_sensor_can_clip_them(optics):
 
 
 @pytest.fixture
-def cad_spectrometer(optics):
+def cad_spectrometer(assembly_optics):
     from twin_lab.paths import EXPORT_ROOT
 
     build = import_module("build")
@@ -94,7 +100,7 @@ def cad_spectrometer(optics):
         pytest.skip("requires the local 95835 STEP cache and motion or collision package")
     scene = load_scene(sdf)
     context = scene.create_context()
-    return scene, context, optics.Spectrometer(scene, context), package
+    return scene, context, assembly_optics.Spectrometer(scene, context), package
 
 
 def test_fe_demo_detector_and_crystal_stage_changes(optics, cad_spectrometer):
@@ -166,24 +172,24 @@ def test_spectroscopy_package_excludes_scattering_detector(cad_spectrometer):
     assert joints["epix100_z_joint"].spectroscopy_bounds() == (-6.5, 6.5, 0)
 
 
-def test_find_starting_pose_recovers_v_signal_from_a_blank_detector(optics, cad_spectrometer):
+def test_find_starting_pose_recovers_v_signal_from_a_blank_detector(
+    optics, assembly_optics, cad_spectrometer,
+):
     scene, context, spectrometer, package = cad_spectrometer
     if package.name != "DSG-000095835-spectroscopy":
         pytest.skip("requires a fresh 95835 export from --spectroscopy")
-    align = import_module("spectroscopy_align")
     controls = import_module("controls")
     joints = controls.read_controls(package)
-    positions = {align.PREFIX + joint.joint_name: 0.0 for joint in joints}
+    positions = {assembly_optics.PREFIX + joint.joint_name: 0.0 for joint in joints}
     request = align.AlignmentRequest(optics.LINES[-1][1], optics.REFLECTIONS[0].spacing_a, 1, 0.05)
     followers = controls.read_followers()
-    poses = align.find_starting_poses(
-        scene, context, spectrometer, joints, followers, positions, request, Event(),
-    )
+    rig = assembly_optics.alignment_rig(joints, followers, scene=scene)
+    poses = align.find_starting_poses(context, spectrometer, rig, positions, request, Event())
     assert poses
     pose = next(pose for pose in poses if optics.REFLECTIONS[pose.reflection].label == "Ge(331)")
     assert pose.alignment.before.hits == (0, 0, 0, 0)
     assert pose.alignment.after.signal_rank() == (4, 4)
-    assert pose.alignment.target[align.AXES.index(align.DETECTOR_X)] >= -6.5
+    assert pose.alignment.target[assembly_optics.AXES.index(assembly_optics.DETECTOR_X)] >= -6.5
     _, _, traces = spectrometer.trace(
         context, request.energy_ev, optics.REFLECTIONS[pose.reflection].spacing_a,
         1, request.half_width_deg,
@@ -192,15 +198,13 @@ def test_find_starting_pose_recovers_v_signal_from_a_blank_detector(optics, cad_
 
 
 def test_starting_poses_keep_partial_signal_and_rank_complete_coverage_first(optics, monkeypatch):
-    align = import_module("spectroscopy_align")
     request = align.AlignmentRequest(optics.LINES[0][1], optics.REFLECTIONS[0].spacing_a, 1, 0.05)
     image = np.zeros((1, 1))
     center, rms = np.zeros(2), np.ones(2)
     before = align.AlignmentImage(image, None, None, (0,) * 4, (0,) * 4)
     tested = []
 
-    def search(_scene, _context, _optics, _joints, _followers, _positions, trial, _cancel, *,
-               find_signal):
+    def search(_context, _optics, _rig, _positions, trial, _cancel, *, find_signal):
         assert find_signal
         tested.append(trial.spacing_a)
         if trial.spacing_a == optics.REFLECTIONS[0].spacing_a:
@@ -213,9 +217,10 @@ def test_starting_poses_keep_partial_signal_and_rank_complete_coverage_first(opt
         return align.AlignmentResult((), (), request.target_mm, before, after)
 
     monkeypatch.setattr(align, "find_alignment", search)
+    spectrometer = Mock(reflections=optics.REFLECTIONS, shortlist_angle_deg=79.0)
     progress = []
     poses = align.find_starting_poses(
-        Mock(), Mock(), Mock(), [], {}, {}, request, Event(), progress=progress.append,
+        Mock(), spectrometer, Mock(), {}, request, Event(), progress=progress.append,
     )
     assert progress == [(1, 4, 0), (2, 4, 10), (3, 4, 16), (4, 4, 1)]
     assert tested == [optics.REFLECTIONS[index].spacing_a for _, _, index in progress]
@@ -230,8 +235,7 @@ def test_starting_poses_keep_partial_signal_and_rank_complete_coverage_first(opt
             cancel.set()
 
     assert not align.find_starting_poses(
-        Mock(), Mock(), Mock(), [], {}, {}, request, cancel,
-        progress=cancel_during_second_reflection,
+        Mock(), spectrometer, Mock(), {}, request, cancel, progress=cancel_during_second_reflection,
     )
     assert len(tested) == 2
 
@@ -246,22 +250,23 @@ def test_starting_poses_keep_partial_signal_and_rank_complete_coverage_first(opt
     ids=["Fe-center", "Fe-offset", "Mn-offset"],
 )
 def test_auto_align_moves_each_crystal_in_a_private_context(
-    optics, cad_spectrometer, line, reflection, target, max_error, x_limited,
+    optics, assembly_optics, cad_spectrometer, line, reflection, target, max_error, x_limited,
 ):
     scene, context, spectrometer, package = cad_spectrometer
-    align = import_module("spectroscopy_align")
     controls = import_module("controls")
     if package.name != "DSG-000095835-spectroscopy":
         pytest.skip("requires a fresh 95835 export from --spectroscopy")
     joints = controls.read_controls(package)
-    positions = {align.PREFIX + joint.joint_name: 0.0 for joint in joints}
+    prefix = assembly_optics.PREFIX
+    positions = {prefix + joint.joint_name: 0.0 for joint in joints}
     followers = controls.read_followers()
     energy, spacing = optics.LINES[line][1], optics.REFLECTIONS[reflection].spacing_a
     request = align.AlignmentRequest(energy, spacing, 1, 0.05, target)
     plant_context = scene.plant.GetMyContextFromRoot(context)
     original_positions = scene.plant.GetPositions(plant_context).copy()
+    rig = assembly_optics.alignment_rig(joints, followers, scene=scene)
     result = align.find_alignment(
-        scene, context.Clone(), spectrometer, joints, followers, positions, request, Event(),
+        context.Clone(), spectrometer, rig, positions, request, Event(),
     )
     np.testing.assert_array_equal(scene.plant.GetPositions(plant_context), original_positions)
     assert result is not None
@@ -286,18 +291,18 @@ def test_auto_align_moves_each_crystal_in_a_private_context(
     assert tuple(len(trace.weights) for trace in traces) == result.before.hits
     assert not np.array_equal(result.before.image, result.after.image)
     by_name = {joint.joint_name: joint for joint in joints}
-    for name, value in zip(align.AXES, result.target, strict=True):
+    for name, value in zip(assembly_optics.AXES, result.target, strict=True):
         joint = by_name[name]
         first, last, _ = joint.spectroscopy_bounds()
         assert first <= value <= last
         assert joint.sdf_lower <= joint.to_sdf(value) <= joint.sdf_upper
         assert value / align.STAGE_STEP == pytest.approx(round(value / align.STAGE_STEP))
-    proposed = dict(zip(align.AXES, result.target, strict=True))
+    proposed = dict(zip(assembly_optics.AXES, result.target, strict=True))
     assert all(proposed[f"crystal_{i}_tilt_joint"] != 0 for i in range(1, 5))
     if x_limited:
         assert proposed["epix100_x_joint"] == result.x_limit_mm
-    applied = {align.PREFIX + name: by_name[name].to_sdf(v) for name, v in proposed.items()}
-    scene.set_joint_positions(context, controls.with_followers(applied, followers, align.PREFIX))
+    applied = {prefix + name: by_name[name].to_sdf(v) for name, v in proposed.items()}
+    scene.set_joint_positions(context, controls.with_followers(applied, followers, prefix))
     _, _, traces = spectrometer.trace(context, energy, spacing, 1, 0.05)
     image, center, rms = optics.detector_image(traces)
     np.testing.assert_array_equal(image, result.after.image)
@@ -306,23 +311,21 @@ def test_auto_align_moves_each_crystal_in_a_private_context(
 
 
 def test_search_skips_impossible_bragg_and_rejects_an_off_chip_target(optics):
-    align = import_module("spectroscopy_align")
     energy = optics.LINES[9][1]  # Ti Kβ1,3 with Ge(620) has no real Bragg angle.
     spacing = optics.REFLECTIONS[0].spacing_a
     forbidden = align.AlignmentRequest(energy, spacing, 1, 0.05)
     # Neither case should touch a scene or evaluate any ray traces.
-    scene, context, spectrometer = Mock(), Mock(), Mock()
-    result = align.find_alignment(scene, context, spectrometer, [], {}, {}, forbidden, Event())
+    context, spectrometer, rig = Mock(), Mock(), Mock()
+    result = align.find_alignment(context, spectrometer, rig, {}, forbidden, Event())
     assert result is None
     off_chip = align.AlignmentRequest(7058.2, spacing, 1, 0.05, (20.0, 0.0))
     with pytest.raises(ValueError, match="inside the active ePix100"):
-        align.find_alignment(scene, context, spectrometer, [], {}, {}, off_chip, Event())
-    scene.set_joint_positions.assert_not_called()
+        align.find_alignment(context, spectrometer, rig, {}, off_chip, Event())
+    rig.set_positions.assert_not_called()
     spectrometer.trace.assert_not_called()
 
 
 def test_planner_compares_detector_coverage_over_the_published_fe_band(optics, cad_spectrometer):
-    plan = import_module("spectroscopy_plan")
     scene, context, spectrometer, _ = cad_spectrometer
     plant_context = scene.plant.GetMyContextFromRoot(context)
     original_positions = scene.plant.GetPositions(plant_context).copy()
@@ -348,8 +351,7 @@ def test_planner_compares_detector_coverage_over_the_published_fe_band(optics, c
 
 
 def test_planner_evaluates_a_single_line_and_does_not_rank_by_hit_count(optics):
-    plan = import_module("spectroscopy_plan")
-    spectrometer = Mock()
+    spectrometer = Mock(reflections=optics.REFLECTIONS, crystal_labels=("1", "2", "3", "4"))
     trace = Mock(spec=optics.CrystalTrace)
     trace.accepted = 20
     trace.weights = np.ones(16)

@@ -1,0 +1,398 @@
+"""Offline Bragg preview for the three polycapillary paths of 43841."""
+
+import argparse
+import math
+from collections.abc import Callable, Mapping, Sequence
+from contextlib import ExitStack
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import yaml
+from pydrake.geometry import Meshcat, Rgba
+from pydrake.math import RigidTransform
+
+from .beam import (
+    Plane,
+    face_from_cache,
+    manifest_rotation,
+    manifest_transform,
+    perpendicular_basis,
+    read_beam_config,
+)
+from .convex_collision import read_obj_parts
+from .paths import resolve_repo_path
+from .spectroscopy import (
+    ACTIVE_SIZE_M,
+    Array,
+    CrystalTrace,
+    Detector,
+    ReflectionPreset,
+    bragg_angle,
+    cubic_reflection,
+)
+from .spectroscopy import (
+    LINES as COMMON_LINES,
+)
+from .spectroscopy_align import AlignmentAxis, AlignmentRig
+from .spectroscopy_view import COLORS, SpectroscopyPreview, detector_panel, spectroscopy_page
+from .stage_cad_viewer import (
+    _add_viewer_args,
+    _slider_label,
+    _slider_scale,
+    joint_transform,
+    prepare_stage_cad,
+    view_stage_cad,
+)
+
+ROOT = "/43841-spectroscopy"
+PAPER = "https://doi.org/10.1021/photonsci.5c00024"
+LINES = (("Pt L\u03b1 (L\u03b11)", 9442.3), ("Fe K\u03b1 (K\u03b11)", 6403.84), *COMMON_LINES)
+DEFAULT_HALF_WIDTH_DEG = 0.1
+MODEL_NOTE = (
+    "Flat crystals, ideal collimation. The sensor plane is estimated from the ePix100 housing."
+)
+# The second solid in both reviewed holder designs is a 70 x 30 x 2 mm plate.
+# These are its positive-Z face coordinates in the holder's own STEP frame.
+PLATE_HALF_SIZE_M = (0.035, 0.015)
+PLATE_FRONT_Z_MM = 14.7
+MESH_TOLERANCE_M = 1e-6
+type Pose = dict[str, float]
+type Joint = dict[str, Any]
+
+
+@dataclass(frozen=True)
+class CrystalFace:
+    center_m: Array
+    axes: Array  # Rows are the local long axis, short axis, and outward normal.
+    half_size_m: tuple[float, float]
+
+    @property
+    def normal(self) -> Array:
+        return self.axes[2]
+
+    def contains(self, points: Array) -> np.ndarray:
+        local = (points - self.center_m) @ self.axes[:2].T
+        return np.all(np.abs(local) <= self.half_size_m, axis=1)
+
+    def moved(self, pose: Array) -> "CrystalFace":
+        rotation = pose[:3, :3]
+        return CrystalFace(
+            rotation @ self.center_m + pose[:3, 3], self.axes @ rotation.T, self.half_size_m,
+        )
+
+    def outline(self) -> tuple[Array, Array]:
+        long, short = self.axes[:2] * np.asarray(self.half_size_m)[:, None]
+        corners = self.center_m + np.array([
+            -long - short, long - short, long + short, -long + short,
+        ])
+        cross = 0.15 * np.array([long, short])
+        return (
+            np.vstack((corners, self.center_m - cross)),
+            np.vstack((np.roll(corners, -1, axis=0), self.center_m + cross)),
+        )
+
+
+def load_crystal_face(mesh: Path, ref: str, manifest: Path) -> CrystalFace:
+    transform = manifest_transform(manifest, ref)
+    rotation, origin = transform[:3, :3], transform[:3, 3] / 1000
+    center = origin + rotation[:, 2] * (PLATE_FRONT_Z_MM / 1000)
+    face = CrystalFace(center, rotation.T, PLATE_HALF_SIZE_M)
+    for name, vertices, indices in read_obj_parts(mesh):
+        if name != ref:
+            continue
+        triangles = ((np.asarray(vertices) - center) @ rotation)[indices]
+        plane = np.abs(triangles[:, :, 2]) <= MESH_TOLERANCE_M
+        bounds = np.asarray(face.half_size_m) + MESH_TOLERANCE_M
+        inside = np.all(np.abs(triangles[:, :, :2]) <= bounds, axis=2)
+        a, b, c = triangles[np.all(plane & inside, axis=1)].transpose(1, 0, 2)
+        areas = np.cross(b - a, c - a)[:, 2] / 2
+        expected = 4 * math.prod(face.half_size_m)
+        if np.all(areas > 0) and math.isclose(areas.sum(), expected, rel_tol=1e-4):
+            return face
+    raise ValueError(f"{ref} in {mesh.name}: reviewed 70 x 30 mm crystal front face not found")
+
+
+def disk_offsets(radius_m: float) -> Array:
+    """Uniform-area parallel ray samples on the optic's circular exit aperture."""
+    coord = ((np.arange(32) + 0.5) / 16 - 1) * radius_m
+    points = np.column_stack([xyz.ravel() for xyz in np.meshgrid(coord, coord)])
+    return points[np.linalg.norm(points, axis=1) < radius_m]
+
+
+def trace_flat(
+    source: Plane, crystal: CrystalFace, detector: Detector, offsets: Array,
+    theta: float | None, half_width_rad: float, *, aim: bool = False,
+) -> CrystalTrace:
+    """Clip the collimated beam to the flat analyzer and project accepted rays."""
+    direction = source.normal
+    dot = float(direction @ crystal.normal)
+    incidence_deg = math.degrees(math.asin(min(max(-dot, -1), 1)))
+    front = dot < -1e-10
+    # Compute the central ray first: it guides alignment even with zero Bragg acceptance.
+    distance = float((crystal.center_m - source.origin_m) @ crystal.normal)
+    t = distance / dot if abs(dot) > 1e-10 else 0.0
+    central = source.origin_m + t * direction
+    outgoing = direction - 2 * dot * crystal.normal
+    detector_dot = float(outgoing @ detector.normal)
+    forwards = detector_dot < -1e-10 and (detector.center_m - central) @ detector.normal < 0
+    uv_axes = np.column_stack((detector.u, detector.v))
+    empty = np.empty((0, 3))
+    aim_uv: Array | None = None
+    aim_cost: float | None = None
+    if aim and theta is not None:
+        gap = incidence_deg - math.degrees(theta)
+        miss_mm = np.linalg.norm(central - crystal.center_m) * 1000
+        aim_cost = 900 * gap**2 + 8 * miss_mm**2
+        if t <= 0:
+            aim_cost += 20_000
+        if forwards:
+            delta = detector.center_m - central
+            plane_hit = central + float(delta @ detector.normal) / detector_dot * outgoing
+            uv = (plane_hit - detector.center_m) @ uv_axes
+            # Keep projections near grazing from dominating the search.
+            aim_uv = np.clip(uv, -0.5, 0.5)[None, :]
+        else:
+            aim_cost += 20_000
+    incidence = (incidence_deg, incidence_deg) if front else None
+    if not front or theta is None or abs(math.radians(incidence_deg) - theta) > half_width_rad:
+        return CrystalTrace(
+            incidence, 0, empty, empty[:, :2], np.empty(0), empty, empty, aim_uv, empty, aim_cost,
+        )
+
+    basis = np.array(perpendicular_basis(direction))
+    start = source.origin_m + offsets @ basis
+    distances = ((crystal.center_m - start) @ crystal.normal) / dot
+    bounce = start + distances[:, None] * direction
+    on_crystal = (distances > 0) & crystal.contains(bounce)
+    start, bounce = start[on_crystal], bounce[on_crystal]
+    times = (detector.center_m - bounce) @ detector.normal / (
+        detector_dot if detector_dot < -1e-10 else 1.0
+    )
+    forward = (detector_dot < -1e-10) & (times > 0)
+    hits = bounce + times[:, None] * outgoing
+    uv = (hits - detector.center_m) @ uv_axes
+    inside = forward & np.all(np.abs(uv) < ACTIVE_SIZE_M / 2, axis=1)
+    preview = np.flatnonzero(inside) if np.any(inside) else np.arange(len(bounce))
+    keep = preview[np.linspace(0, len(preview) - 1, min(len(preview), 12), dtype=int)]
+    end = bounce + np.where(forward, times, 0.15)[:, None] * outgoing
+    return CrystalTrace(
+        incidence, len(bounce), hits[inside], uv[inside], np.ones(np.count_nonzero(inside)),
+        bounce[keep], end[keep], aim_uv, start[keep], aim_cost,
+    )
+
+
+def chain_pose(chain: Sequence[Joint], positions: Mapping[str, float]) -> Array:
+    pose = RigidTransform()
+    for joint in chain:
+        pose = pose @ joint_transform(joint, positions[joint["key"]])
+    return pose.GetAsMatrix4()
+
+
+@dataclass(frozen=True)
+class OpticalPath:
+    name: str
+    source: Plane
+    crystal: CrystalFace
+    offsets: Array
+    source_chain: tuple[Joint, ...]
+    crystal_chain: tuple[Joint, ...]
+
+
+@dataclass(frozen=True)
+class PolycapSpectrometer:
+    paths: tuple[OpticalPath, ...]
+    detector: Detector
+    detector_chain: tuple[Joint, ...]
+
+    # Low-index flat-crystal candidates, not an installed analyzer list. Do not rank
+    # the 95835 curved-crystal Fe/Co precedents as confirmed setups for 43841.
+    reflections = (
+        ReflectionPreset(
+            "Graphite(004)", 1.677, "Published PCXS Fe/Pt benchmark", PAPER,
+            reference_energies_ev=(9442.3, 6403.84),
+        ),
+        ReflectionPreset(
+            "Graphite(002)", 3.354, "Published PCXS Fe benchmark", PAPER,
+            reference_energies_ev=(6403.84,),
+        ),
+    ) + tuple(
+        cubic_reflection(material, hkl)
+        for hkl in ((2, 2, 0), (1, 1, 1), (3, 1, 1), (4, 0, 0), (3, 3, 1),
+                    (4, 2, 2), (4, 4, 0), (5, 3, 3), (6, 2, 0))
+        for material in ("Ge", "Si")
+    )
+    shortlist_angle_deg = 25.0
+
+    @property
+    def crystal_labels(self) -> tuple[str, ...]:
+        return tuple(path.name for path in self.paths)
+
+    def rig(self) -> AlignmentRig[Pose]:
+        def axis(joint: Joint) -> AlignmentAxis:
+            scale, unit = _slider_scale(joint)
+            lower, upper = joint["limits"]
+            return AlignmentAxis(
+                joint["key"], _slider_label(joint, unit), lower * scale, upper * scale,
+                lambda value: value * scale,
+                lambda value: min(max(value / scale, lower), upper),
+            )
+
+        return AlignmentRig(
+            tuple(map(axis, self.detector_chain)),
+            tuple(
+                tuple(map(axis, (*path.source_chain, *path.crystal_chain)))
+                for path in self.paths
+            ),
+            dict.update, dict.copy,
+        )
+
+    def trace(
+        self, pose: Pose, energy_ev: float, spacing_a: float, order: int, half_width_deg: float,
+        *, crystals: Sequence[int] | None = None, aim: bool = False,
+    ) -> tuple[float | None, Detector, list[CrystalTrace]]:
+        theta = bragg_angle(energy_ev, spacing_a, order)
+        if not (math.isfinite(half_width_deg) and 0 < half_width_deg < 90):
+            raise ValueError("Bragg half-width must be between 0 and 90 degrees")
+        detector = self.detector.moved(chain_pose(self.detector_chain, pose))
+        paths = self.paths if crystals is None else tuple(self.paths[i] for i in crystals)
+        return theta, detector, [
+            trace_flat(
+                path.source.transformed(chain_pose(path.source_chain, pose)),
+                path.crystal.moved(chain_pose(path.crystal_chain, pose)),
+                detector, path.offsets, theta, math.radians(half_width_deg), aim=aim,
+            )
+            for path in paths
+        ]
+
+
+def housing_detector(
+    vertices: Array, rotation: Array,
+) -> Detector:
+    # P2388 is one housing occurrence, not a separately reviewed chip. Its long
+    # local +X points out of the nose; use the nose's bounding plane and center.
+    local = vertices @ rotation
+    near, far = local.min(axis=0), local.max(axis=0)
+    center = (near + far) / 2
+    center[0] = far[0]
+    normal, u, v = rotation.T
+    return Detector(rotation @ center, u, v, normal)
+
+
+def load_spectrometer(scene_path: Path) -> PolycapSpectrometer:
+    scene_path = scene_path.resolve()
+    scene = yaml.safe_load(scene_path.read_text(encoding="utf-8"))
+    inventory = Path(scene["source_inventory"])
+    review = yaml.safe_load(inventory.read_text(encoding="utf-8"))
+    if review["subassembly"]["name"] != "DSG-000043841":
+        raise ValueError("The polycapillary spectroscopy preview requires the 43841 review")
+    manifest = resolve_repo_path(review["cad_manifest"], relative_to=inventory.parent)
+    beams = read_beam_config(inventory)
+    if {entry["name"] for entry in beams} != {"North", "Middle", "South"} or len(beams) != 3:
+        raise ValueError("Expected three reviewed 43841 beam paths")
+    chains = {chain["name"]: tuple(chain["joints"]) for chain in scene["motion_chains"]}
+
+    def attachment_chain(mesh: Path, name: str) -> tuple[Joint, ...]:
+        chain = chains[name]
+        if not any(
+            Path(item["mesh"]) == mesh
+            and item.get("parent_stage_ref") == chain[-1]["ref"]
+            and item.get("parent_joint_key") in (None, chain[-1]["key"])
+            for item in scene["attachments"]
+        ):
+            raise ValueError(f"{mesh.name} is not attached to the end of the reviewed {name} chain")
+        return chain
+
+    paths = []
+    for entry in sorted(beams, key=lambda entry: ("North", "Middle", "South").index(entry["name"])):
+        name = entry["name"]
+        source_spec, crystal_spec = entry["source"], entry["crystal"]
+        source_mesh = scene_path.parent / source_spec["mesh"]
+        crystal_mesh = scene_path.parent / crystal_spec["mesh"]
+        source_chain = attachment_chain(source_mesh, f"{name} Polycap")
+        crystal_chain = attachment_chain(crystal_mesh, f"{name} Crystal")
+        source = face_from_cache(source_mesh, source_spec["ref"], manifest)
+        crystal = load_crystal_face(crystal_mesh, crystal_spec["ref"], manifest)
+        radius = min(source.radius_m, float(entry["diameter_mm"]) / 2000)
+        paths.append(OpticalPath(name, source, crystal, disk_offsets(radius),
+                                 source_chain, crystal_chain))
+
+    # Only the detector occurs in all three paths' lists of expected targets.
+    common = set.intersection(*(set(entry["expected"]) for entry in beams))
+    if len(common) != 1:
+        raise ValueError("Expected one shared detector in the reviewed beam paths")
+    ref = common.pop()
+    detector_ref = chains["Detector"][-1]["ref"]
+    candidates = [
+        Path(item["mesh"]) for item in scene["attachments"]
+        if item.get("style") == "detector" and item["parent_stage_ref"] == detector_ref
+    ]
+    if len(candidates) != 1:
+        raise ValueError("Expected one reviewed detector attachment")
+    mesh = candidates[0]
+    detector_chain = attachment_chain(mesh, "Detector")
+    for name, vertices, _ in read_obj_parts(mesh):
+        if name == ref:
+            detector = housing_detector(np.array(vertices), manifest_rotation(manifest, ref))
+            return PolycapSpectrometer(tuple(paths), detector, detector_chain)
+    raise ValueError(f"Reviewed detector {ref} not found in {mesh.name}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("stage_inventory")
+    parser.add_argument("--rebuild", action="store_true")
+    parser.add_argument("--prepare-only", action="store_true")
+    parser.add_argument("--deflection-mm", type=float, default=2.0)
+    parser.add_argument("--fps", type=float, default=30.0)
+    parser.add_argument("--once", action="store_true", help="Publish one frame and exit")
+    _add_viewer_args(parser)
+    args = parser.parse_args()
+    print("Preparing or loading reviewed stage CAD for 43841…", flush=True)
+    scene = prepare_stage_cad(
+        args.stage_inventory, rebuild=args.rebuild, linear_deflection_mm=args.deflection_mm,
+    )
+    model = load_spectrometer(scene)
+    print(f"Stage CAD cache: {scene.parent}")
+    if args.prepare_only:
+        return
+    rig = model.rig()
+    html = detector_panel(
+        rig, crystal_labels=model.crystal_labels, reflections=model.reflections,
+        root=ROOT, model_note=MODEL_NOTE, lines=LINES, focus_goal_mm=None,
+    )
+    try:
+        with spectroscopy_page(html), ExitStack() as stack:
+            def attach(meshcat: Meshcat) -> Callable[[Pose], None]:
+                preview = SpectroscopyPreview(
+                    meshcat, model, rig, root=ROOT, lines=LINES,
+                    default_half_width_deg=DEFAULT_HALF_WIDTH_DEG,
+                )
+                stack.callback(preview.close)
+                previous: dict[str, tuple[float, ...]] = {}
+
+                def update(positions: Pose) -> None:
+                    for path, color in zip(model.paths, COLORS[:len(model.paths)], strict=True):
+                        key = tuple(positions[joint["key"]] for joint in path.crystal_chain)
+                        if previous.get(path.name) != key:
+                            previous[path.name] = key
+                            face = path.crystal.moved(chain_pose(path.crystal_chain, positions))
+                            start, end = face.outline()
+                            marker = f"{ROOT}/Crystal faces/{path.name}"
+                            meshcat.SetLineSegments(marker, start.T, end.T, rgba=Rgba(*color, 1))
+                            meshcat.SetProperty(f"{marker}/<object>", "material.depthTest", False)
+                    preview.update(positions, positions)
+
+                return update
+
+            view_stage_cad(
+                scene, fps=args.fps, port=args.port, open_browser=not args.no_browser,
+                spectroscopy=attach, once=args.once,
+            )
+    except KeyboardInterrupt:
+        print("\nSpectroscopy viewer stopped.")
+
+
+if __name__ == "__main__":
+    main()

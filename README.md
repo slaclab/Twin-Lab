@@ -17,6 +17,8 @@ are not powered and have no EPICS archive data.
 Planning a von Hamos run with the ePix100? See the
 [95835 spectroscopy beamline guide](docs/95835-spectroscopy.md) for a worked
 Fe example, starting poses, and energy-band checks.
+For flat graphite analyzers with polycapillary optics, see the
+[43841 spectroscopy preview](docs/43841-spectroscopy.md).
 
 ## Collision Viewer Quick Start: Published Geometry
 
@@ -686,7 +688,9 @@ Answer with the number or the key. To skip the prompt, name the model:
 
 ```bash
 uv run slac-run 43841                  # collision viewer
+uv run slac-run 43841 --spectroscopy   # three flat analyzers and ePix100 preview
 uv run slac-run 95835 --motion-only    # lighter viewer, no collision checking
+uv run slac-run 95835 --spectroscopy   # four von Hamos analyzers and ePix100 preview
 uv run slac-run --list                 # list the models and exit
 ```
 

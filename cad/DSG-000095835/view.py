@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import math
-import os
-import tempfile
 import time
 from pathlib import Path
 
@@ -16,28 +14,24 @@ from twin_lab.collision_viewer import isometric_camera
 from twin_lab.meshcat_ui import announce_viewer, patch_meshcat_page, viewer_params
 from twin_lab.scene import load_scene
 
+SPECTROSCOPY_ROOT = "/95835-spectroscopy"
+
 
 def view(package: Path, *, once: bool = False, spectroscopy: bool = False) -> None:
-    if not spectroscopy:
+    if spectroscopy:
+        from spectroscopy import Spectrometer, alignment_rig
+
+        from twin_lab.spectroscopy_view import detector_panel, spectroscopy_page
+
+        with spectroscopy_page(detector_panel(
+            alignment_rig(read_controls(package), read_followers()),
+            crystal_labels=Spectrometer.crystal_labels, reflections=Spectrometer.reflections,
+            root=SPECTROSCOPY_ROOT, model_note="250 mm CAD geometry.",
+        )):
+            _view(package, once=once, spectroscopy=True)
+    else:
         patch_meshcat_page()
         _view(package, once=once, spectroscopy=False)
-        return
-
-    from spectroscopy_view import detector_panel
-
-    previous = os.environ.get("DRAKE_RESOURCE_ROOT")
-    with tempfile.TemporaryDirectory(prefix="twinlab-95835-") as directory:
-        patch_meshcat_page(
-            extra_html=detector_panel(read_controls(package)), resource_root=Path(directory),
-            show_zoom_override=False,
-        )
-        try:
-            _view(package, once=once, spectroscopy=True)
-        finally:
-            if previous is None:
-                os.environ.pop("DRAKE_RESOURCE_ROOT", None)
-            else:
-                os.environ["DRAKE_RESOURCE_ROOT"] = previous
 
 
 def _view(package: Path, *, once: bool, spectroscopy: bool) -> None:
@@ -47,15 +41,18 @@ def _view(package: Path, *, once: bool, spectroscopy: bool) -> None:
     joints = read_controls(package)
     followers = read_followers()
     if spectroscopy:
-        from spectroscopy import Spectrometer
-        from spectroscopy_view import SpectroscopyPreview
+        from spectroscopy import IP_M, Spectrometer, alignment_rig
+
+        from twin_lab.spectroscopy_view import SpectroscopyPreview
 
         joints = [
             joint for joint in joints
             if not joint.joint_name.startswith(("top_slit_", "bottom_slit_"))
         ]
         preview = SpectroscopyPreview(
-            meshcat, Spectrometer(scene, context), scene, joints, followers,
+            meshcat, Spectrometer(scene, context),
+            alignment_rig(joints, followers, scene=scene),
+            root=SPECTROSCOPY_ROOT, point_source_m=IP_M,
         )
     else:
         preview = None

@@ -49,12 +49,12 @@
     <p id="vh-plan-status" role="status">Compare the band at this simulator pose.</p>
     <div id="vh-plan-result" hidden>
       <table aria-label="Reflection comparison at the current pose">
-        <thead><tr><th>Reflection</th><th>Line θ</th><th>All 4 ≥80%</th><th>Any hit</th></tr></thead>
+        <thead><tr><th>Reflection</th><th>Line θ</th><th id="vh-all-capture"></th><th>Any hit</th></tr></thead>
         <tbody id="vh-plan-rows"></tbody>
       </table>
       <p id="vh-plan-source"></p>
       <table aria-label="Geometric capture by crystal and energy"><tbody id="vh-plan-coverage"></tbody></table>
-      <small>Crystals 1–4 by row. Green ≥80%, amber partial, red off-sensor, gray no accepted rays.</small>
+      <small>One crystal per row. Green ≥80%, amber partial, red off-sensor, gray no accepted rays.</small>
       <canvas id="vh-plan-map" aria-label="Simulated ePix100 centroids by photon energy"></canvas>
       <div id="vh-plan-spectrum"></div>
       <div id="vh-plan-map-scale"><small id="vh-plan-low"></small><small id="vh-plan-high"></small></div>
@@ -63,7 +63,7 @@
       <small>Sampled geometry only. No detector gaps, reflectivity, or inventory modeled.</small>
     </div>
   </details>
-  <label>Reflection for all four crystals <select id="vh-reflection"></select></label>
+  <label><span id="vh-reflection-caption"></span> <select id="vh-reflection"></select></label>
   <small id="vh-reflection-model"></small>
   <div id="vh-target-fields">
     <label>Target u (mm) <input id="vh-target-u" type="number" value="0" required></label>
@@ -87,12 +87,12 @@
     <div id="vh-align-images">
       <figure>
         <figcaption>Before</figcaption>
-        <canvas id="vh-align-before" aria-label="Before: simulated hits from all four crystals"></canvas>
+        <canvas id="vh-align-before" aria-label="Before: simulated hits from all crystals"></canvas>
         <small id="vh-align-before-report"></small>
       </figure>
       <figure>
         <figcaption>Proposed</figcaption>
-        <canvas id="vh-align-after" aria-label="Proposed: simulated hits from all four crystals"></canvas>
+        <canvas id="vh-align-after" aria-label="Proposed: simulated hits from all crystals"></canvas>
         <small id="vh-align-after-report"></small>
       </figure>
     </div>
@@ -134,9 +134,14 @@
   const afterImage = initializeImage("align-after");
   const planImage = initializeImage("plan-map");
   const [uSize, vSize] = opt.sizeMm;
+  const allCrystals = `all ${opt.crystals.length} crystals`;
+  el("reflection-caption").textContent = `Reflection for ${allCrystals}`;
+  el("all-capture").textContent = `All ${opt.crystals.length} ≥80%`;
   el("reflection-model").textContent =
-    `250 mm CAD geometry. Starting-pose search tests up to ${align.startingPoseLimit} reflections.`;
-  el("x-floor").textContent = `ePix100 x cannot go below ${align.xFloor.toFixed(2)} mm.`;
+    `${opt.modelNote} Starting-pose search tests up to ${align.startingPoseLimit} reflections.`;
+  if (align.xFloor !== null) {
+    el("x-floor").textContent = `ePix100 x cannot go below ${align.xFloor.toFixed(2)} mm.`;
+  }
   el("scale").textContent = `${uSize.toFixed(1)} × ${vSize.toFixed(1)} mm · u → v ↑ · 4 × 4 pixel bins`;
 
   function dropdown(id, label, options) {
@@ -260,7 +265,7 @@
       const row = coverage.insertRow();
       const labelCell = document.createElement("th");
       labelCell.scope = "row";
-      labelCell.textContent = String(crystal + 1);
+      labelCell.textContent = opt.crystals[crystal];
       labelCell.style.color = `rgb(${color.join(",")})`;
       row.append(labelCell);
       points.forEach((sample, i) => {
@@ -422,7 +427,7 @@
       [status.IDLE]: braggAllowed ?
         "Find signal across reflections, or refine a shared spot with the selected reflection." :
         "This reflection cannot satisfy Bragg. Find starting poses to try the other reflections.",
-      [status.RUNNING]: "Searching simulated poses for all four crystals. The stages are unchanged.",
+      [status.RUNNING]: `Searching simulated poses for ${allCrystals}. The stages are unchanged.`,
       [status.SEARCHING]: searchProgress ?
         `Testing ${searchProgress.label} (${searchProgress.step} of ${searchProgress.total}). No stages moved.` :
         "Shortlisting Bragg-compatible reflections. No stages moved.",
@@ -430,7 +435,7 @@
       [status.CANCELLED]: "Search cancelled. No stages moved.",
       [status.READY]: readyMessage(),
       [status.STALE]: "The pose, optics, or target changed. Run a new preview before applying.",
-      [status.NO_IMPROVEMENT]: "Bragg is possible, but this search did not find a better pose with enough hits from all four crystals.",
+      [status.NO_IMPROVEMENT]: `Bragg is possible, but this search did not find a better pose with enough hits from ${allCrystals}.`,
       [status.NO_SIGNAL]: `No shortlisted pose reached ${align.minSignalHits} modeled hits on any crystal. Try a reflection manually.`,
       [status.APPLIED]: "Applied to the simulator.",
       [status.FAILED]: "The alignment search failed. See the viewer log.",
@@ -441,7 +446,7 @@
   const rows = opt.colors.map((rgb, i) => {
     const row = el("crystals").insertRow();
     const label = row.insertCell();
-    label.textContent = `● ${i + 1}`;
+    label.textContent = `● ${opt.crystals[i]}`;
     label.style.color = `rgb(${rgb.join(",")})`;
     return [row.insertCell(), row.insertCell()];
   });
@@ -533,7 +538,9 @@
       for (let i = 0; i < startingCount; i++) {
         const [index, usable, captured] = data.slice(offset, offset + 3);
         const [label, evidence] = plan.presets[index];
-        candidateSelect.add(new Option(`${label} · ${usable}/4 with signal · ${captured}/4 ≥80%`, i));
+        const n = opt.crystals.length;
+        const coverage = `${usable}/${n} with signal · ${captured}/${n} ≥80%`;
+        candidateSelect.add(new Option(`${label} · ${coverage}`, i));
         if (i === selectedCandidate) {
           el("starting-note").textContent = `${evidence}; availability unconfirmed. Both images use ${label}.`;
         }
@@ -560,11 +567,12 @@
           const totalHits = perCrystal.reduce((sum, hits) => sum + hits, 0);
           paint(image, data.slice(offset, offset + count), totalHits, u, v, aim);
           offset += count;
-          const hits = `Hits (1–4): ${perCrystal.join(" / ")}`;
+          const hits = `Hits (${opt.crystals.join(", ")}): ${perCrystal.join(" / ")}`;
           const distance = Math.hypot(u - aim[0], v - aim[1]);
           let limitNote = "";
           if (image === afterImage) {
-            meetsPreviewGoal = Math.max(distance, rmsU, rmsV) <= 0.5;
+            meetsPreviewGoal = align.focusGoalMm === null ||
+              Math.max(distance, rmsU, rmsV) <= align.focusGoalMm;
             if (xLimited) {
               limitNote = ` · ePix100 x travel limit (${xLimitMm.toFixed(2)} mm)`;
             }

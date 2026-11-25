@@ -8,9 +8,10 @@ import math
 import os
 import re
 import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 from OCP.Bnd import Bnd_Box
@@ -27,6 +28,9 @@ from .constraints_wizard import _occurrence_shape_by_ref, _read_step_document
 from .epics_playback import PlaybackSource
 from .paths import CACHE_ROOT, resolve_repo_path, review_artifact_stem
 from .static_review import collision_only_refs, normalized_name, review_selection
+
+if TYPE_CHECKING:
+    from pydrake.geometry import Meshcat
 
 AUTO_MOTION_LABEL = "Animation"
 AUTO_RANGE_LABEL = "Auto motion range (% of travel)"
@@ -533,6 +537,8 @@ def view_stage_cad(
     joint_labels: dict[str, str] | None = None,
     port: int | None = None,
     open_browser: bool = True,
+    spectroscopy: Callable[[Meshcat], Callable[[dict[str, float]], None]] | None = None,
+    once: bool = False,
 ) -> None:
     """Show reusable real-CAD meshes with one transform per occurrence.
 
@@ -566,11 +572,14 @@ def view_stage_cad(
         viewer_params,
     )
 
+    if spectroscopy is not None and playback is not None:
+        raise ValueError("Spectroscopy preview is offline and cannot use playback")
     scene = yaml.safe_load(Path(scene_path).read_text(encoding="utf-8"))
     instances = scene["instances"]
     hidden_stage_geometry = set(scene.get("hidden_stage_geometry", []))
     # Nothing here publishes a realtime rate, so the stats plot only ever covers the view.
-    patch_meshcat_page()
+    if spectroscopy is None:
+        patch_meshcat_page()
     try:
         meshcat = Meshcat(viewer_params(port=port))
     except RuntimeError:
@@ -659,15 +668,21 @@ def view_stage_cad(
     has_travel_control = playback is not None and hasattr(playback, "set_travel_fraction")
     has_ongoing_controls = playback is not None and hasattr(playback, "stop_feed")
     if playback is None:
+        step = 0.1
+        if spectroscopy is not None:
+            from .spectroscopy_align import STAGE_STEP
+
+            step = STAGE_STEP
         for joint in joints:
             scale, unit = _slider_scale(joint)
             meshcat.AddSlider(
                 _slider_label(joint, unit),
                 joint["limits"][0] * scale,
                 joint["limits"][1] * scale,
-                0.1,
+                step,
                 joint["home"] * scale,
             )
+    if playback is None and spectroscopy is None:
         # Drake can publish a slider but not a checkbox, so this steps 0 to 1 and
         # meshcat_ui.TOGGLE_JS swaps a real checkbox into its row.
         meshcat.AddSlider(AUTO_MOTION_LABEL, 0.0, 1.0, 1.0, 0.0)
@@ -707,14 +722,19 @@ def view_stage_cad(
         meshcat.AddButton("Reset to home")
     stop_label = "Stop live feed" if playback is not None and not (has_playback_controls or has_ongoing_controls) else "Stop viewer"
     meshcat.AddButton(stop_label, "Escape")
-    announce_viewer("Reusable stage CAD", meshcat, open_browser=should_open_browser(open_browser))
+    preview = spectroscopy(meshcat) if spectroscopy is not None else None
+    label = "43841 offline ePix100 spectroscopy" if preview is not None else "Reusable stage CAD"
+    announce_viewer(label, meshcat, open_browser=should_open_browser(open_browser and not once))
     print(
         f"Showing {len(instances)} real stages and {scene['attached_part_count']} attached "
         "non-fastener parts."
     )
     if playback is None:
         print(f"Motion sliders: {len(joints)}")
-        print("Tick 'Animation' to start and stop cyclic motion.")
+        if preview is None:
+            print("Tick 'Animation' to start and stop cyclic motion.")
+        else:
+            print("Optical geometry only; no collision checking or hardware connection.")
     elif playback_keys:
         label = "Continuous playback" if has_ongoing_controls else "Live EPICS feed" if not has_playback_controls else "Playback"
         if getattr(playback, "has_commands", True):
@@ -843,13 +863,14 @@ def view_stage_cad(
                 stamp = moment.astimezone().strftime("%Y-%m-%d %H:%M:%S")
                 print(f"[playback {stamp}] {sample}")
         else:
-            automatic = meshcat.GetSliderValue(AUTO_MOTION_LABEL) >= 0.5
+            automatic = preview is None and meshcat.GetSliderValue(AUTO_MOTION_LABEL) >= 0.5
             new_reset_clicks = meshcat.GetButtonClicks("Reset to home")
             if new_reset_clicks != reset_clicks:
                 reset_clicks = new_reset_clicks
                 phase = 0.0
                 automatic = False
-                meshcat.SetSliderValue(AUTO_MOTION_LABEL, 0.0)
+                if preview is None:
+                    meshcat.SetSliderValue(AUTO_MOTION_LABEL, 0.0)
                 values = list(homes)
                 _push_sliders(meshcat, labels, values)
             if automatic:
@@ -878,16 +899,13 @@ def view_stage_cad(
                 continue
             published[index] = values[index]
             last_motion_tick = tick
-            value = _joint_displacement(joint, values[index] / scales[index])
-            if joint["joint_type"] == "prismatic":
-                offset = [component * value for component in joint["axis_world"]]
-                # pydrake's Eigen stub is malformed; the list converts at runtime.
-                transform = RigidTransform(offset)  # pyright: ignore
-            else:
-                transform = _rotation_about_axis(
-                    joint["axis_world"], joint["origin_m"], value, RigidTransform, RotationMatrix
-                )
-            meshcat.SetTransform(joint_paths[joint["key"]], transform)
+            meshcat.SetTransform(joint_paths[joint["key"]], joint_transform(
+                joint, values[index] / scales[index],
+            ))
+        if preview is not None:
+            preview({joint["key"]: value / scale for joint, value, scale in zip(
+                joints, values, scales, strict=True,
+            )})
         # Held between commands a joint publishes nothing, so a short tail keeps the
         # readout from flickering to "no motors moving" during slow continuous motion.
         moving = (tick - last_motion_tick) < MOTION_HOLD_S
@@ -898,6 +916,8 @@ def view_stage_cad(
         # the browser can draw builds a queue that never drains, and a stop request cannot
         # be seen until the browser has chewed through it.
         meshcat.Flush()
+        if once:
+            break
         frame_cost = time.monotonic() - tick
         time.sleep(max(0.0, frame_period - frame_cost))
 
@@ -1042,6 +1062,19 @@ def _auto_amplitude(joint: dict[str, Any], span_fraction: float) -> float:
 
 def _joint_displacement(joint: dict[str, Any], slider_value: float) -> float:
     return slider_value - float(joint.get("cad_position", joint["home"]))
+
+
+def joint_transform(joint: dict[str, Any], position: float):
+    """Transform a joint's CAD-root geometry from its drawn to its logical position."""
+    from pydrake.math import RigidTransform, RotationMatrix
+
+    displacement = _joint_displacement(joint, position)
+    if joint["joint_type"] == "prismatic":
+        offset = [component * displacement for component in joint["axis_world"]]
+        return RigidTransform(offset)  # pyright: ignore[reportArgumentType]
+    return _rotation_about_axis(
+        joint["axis_world"], joint["origin_m"], displacement, RigidTransform, RotationMatrix,
+    )
 
 
 def _shape_center_m(shape: Any) -> list[float] | None:
