@@ -30,6 +30,7 @@ from .spectroscopy import (
 )
 from .spectroscopy_align import (
     MIN_SIGNAL_HITS,
+    STAGE_STEP,
     STARTING_POSE_LIMIT,
     AlignmentRequest,
     AlignmentResult,
@@ -90,9 +91,10 @@ def detector_panel[PoseT](
     rig: AlignmentRig[PoseT], *, crystal_labels: tuple[str, ...],
     reflections: tuple[ReflectionPreset, ...], root: str, model_note: str,
     lines: tuple[tuple[str, float], ...] = LINES, focus_goal_mm: float | None = 0.5,
-    ray_guides: bool = False,
+    ray_guides: bool = False, detector_trim: tuple[tuple[str, str], ...] = (),
 ) -> str:
     axes = rig.axes
+    detector_axes = {axis.key: axis for axis in rig.shared}
     options = {
         "root": root,
         "modelNote": model_note,
@@ -109,6 +111,14 @@ def detector_panel[PoseT](
             "Custom d-spacing / order",
         ],
         "sizeMm": (ACTIVE_SIZE_M * 1000).tolist(),
+        "detectorTrim": [
+            {
+                "key": key, "caption": caption, "label": detector_axes[key].label,
+                "min": detector_axes[key].lower, "max": detector_axes[key].upper,
+                "step": STAGE_STEP,
+            }
+            for key, caption in detector_trim
+        ],
         "cols": COLS,
         "rows": ROWS,
         "colors": [

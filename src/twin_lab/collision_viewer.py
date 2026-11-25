@@ -25,7 +25,7 @@ from .collision import (
     read_collision_excluded_parts,
     read_home_ignored_pairs,
 )
-from .meshcat_ui import FRAMING_DISTANCE, ISOMETRIC_DIRECTION
+from .meshcat_ui import FRAMING_DISTANCE, ISOMETRIC_DIRECTION, stage_stack_label
 from .paths import resolve_repo_path
 
 WARN_LABEL = "Clearance warning band (mm)"
@@ -125,7 +125,12 @@ class SliderJoint:
 
     @property
     def label(self) -> str:
-        return f"{self.stack} / {self.stage_ref} {self.joint_name} ({self.unit})"
+        stack = stage_stack_label(self.stack)
+        name = self.joint_name
+        if stack != self.stack:
+            legacy_prefix = f"{self.stack.lower().replace(' ', '_')}_{self.stage_ref.lower()}_"
+            name = name.removeprefix(legacy_prefix)
+        return f"{stack} / {self.stage_ref} {name} ({self.unit})"
 
     def to_sdf(self, slider_value: float) -> float:
         return slider_value / self.scale - self.logical_offset

@@ -46,6 +46,11 @@ FRAMING_DISTANCE = 2.2
 VIEW_CUBE_PX = 132
 
 
+def stage_stack_label(name: str) -> str:
+    """Translate legacy stack names without changing the pinned collision bundle."""
+    return {"LJ Detector 1": "Lower Slit", "LJ Detector 2": "Upper Slit"}.get(name, name)
+
+
 def _swing_and_rise(swing_deg: float, rise_deg: float) -> tuple[float, float, float]:
     """A unit direction ``swing_deg`` off the front face (-Y) and ``rise_deg`` above it."""
 

@@ -50,8 +50,15 @@ ROOT = "/43841-spectroscopy"
 PAPER = "https://doi.org/10.1021/photonsci.5c00024"
 LINES = (("Pt L\u03b1 (L\u03b11)", 9442.3), ("Fe K\u03b1 (K\u03b11)", 6403.84), *COMMON_LINES)
 DEFAULT_HALF_WIDTH_DEG = 0.1
+DETECTOR_TRIM = (("A205", "Horizontal (u)"), ("A206", "Vertical (v)"))
+# These towers' grounded hardware is grouped with unrelated fixed parts in the cached OBJ.
+SLIT_SUPPORT_REFS = frozenset({
+    "P232", "P281", "P282", "P283", "P330", "P331", "P340", "P345", "P346", "P347",
+    "P348", "P349", "P350",
+})
 MODEL_NOTE = (
-    "Flat crystals, ideal collimation. The sensor plane is estimated from the ePix100 housing."
+    "Flat crystals, ideal parallel rays (no polycapillary divergence or transmission model). "
+    "The sensor plane is estimated from the ePix100 housing."
 )
 # The second solid in both reviewed holder designs is a 70 x 30 x 2 mm plate.
 # These are its positive-Z face coordinates in the holder's own STEP frame.
@@ -367,6 +374,7 @@ def main() -> None:
     html = detector_panel(
         rig, crystal_labels=model.crystal_labels, reflections=model.reflections,
         root=ROOT, model_note=MODEL_NOTE, lines=LINES, focus_goal_mm=None, ray_guides=True,
+        detector_trim=DETECTOR_TRIM,
     )
     try:
         with spectroscopy_page(html), ExitStack() as stack:
@@ -394,6 +402,8 @@ def main() -> None:
 
             view_stage_cad(
                 scene, fps=args.fps, port=args.port, open_browser=not args.no_browser,
+                hidden_chains=("LJ Detector 1", "LJ Detector 2"),
+                hidden_fixed_parts=SLIT_SUPPORT_REFS,
                 spectroscopy=attach, once=args.once,
             )
     except KeyboardInterrupt:

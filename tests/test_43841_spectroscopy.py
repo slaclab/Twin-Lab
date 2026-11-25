@@ -12,9 +12,10 @@ import pytest
 from twin_lab import launcher
 from twin_lab.beam import Plane, intersect_plane
 from twin_lab.paths import CACHE_ROOT
-from twin_lab.spectroscopy import Detector, bragg_angle
+from twin_lab.spectroscopy import Detector, bragg_angle, detector_image
 from twin_lab.spectroscopy_43841 import (
     DEFAULT_HALF_WIDTH_DEG,
+    DETECTOR_TRIM,
     LINES,
     CrystalFace,
     chain_pose,
@@ -25,6 +26,7 @@ from twin_lab.spectroscopy_43841 import (
 )
 from twin_lab.spectroscopy_align import AlignmentRequest, find_alignment, find_starting_poses
 from twin_lab.spectroscopy_plan import compare_reflections
+from twin_lab.spectroscopy_view import detector_panel
 
 
 def test_launcher_routes_spectroscopy_without_enabling_collision(monkeypatch):
@@ -132,8 +134,21 @@ def test_pt_starting_pose_recovers_all_three_cad_paths_and_scans_the_band():
     for axis, value in zip(rig.axes, best.target, strict=True):
         assert axis.lower - 1e-9 <= value <= axis.upper + 1e-9
         proposed[axis.key] = axis.from_slider(value)
-    _, _, traces = model.trace(proposed, energy, spacing, 1, width)
+    _, sensor, traces = model.trace(proposed, energy, spacing, 1, width)
     assert tuple(len(trace.weights) for trace in traces) == best.after.hits
+    # Trim shifts sensor coordinates, not the diffracted rays in world space.
+    for key, displacement, spot_shift in (
+        ("A205", sensor.u, [-1, 0]),
+        ("A206", -sensor.v, [0, 1]),
+    ):
+        shifted_pose = {**proposed, key: proposed[key] + 0.001}
+        _, moved, trimmed = model.trace(shifted_pose, energy, spacing, 1, width)
+        np.testing.assert_allclose(moved.center_m - sensor.center_m, displacement * 0.001,
+                                   atol=1e-12)
+        assert [len(trace.weights) for trace in trimmed] == [len(trace.weights) for trace in traces]
+        _, centroid, _ = detector_image(trimmed)
+        assert centroid is not None and best.after.centroid_mm is not None
+        np.testing.assert_allclose(centroid - best.after.centroid_mm, spot_shift, atol=1e-9)
     for path, trace in zip(model.paths, traces, strict=True):
         source = path.source.transformed(chain_pose(path.source_chain, proposed))
         plate = path.crystal.moved(chain_pose(path.crystal_chain, proposed))
@@ -165,3 +180,14 @@ def test_pt_starting_pose_recovers_all_three_cad_paths_and_scans_the_band():
         after >= before
         for before, after in zip(refined.before.hits, refined.after.hits, strict=True)
     )
+
+    html = detector_panel(
+        rig, crystal_labels=model.crystal_labels, reflections=model.reflections,
+        root="/test", model_note="", detector_trim=DETECTOR_TRIM,
+    )
+    options = json.loads(html.split("const opt = ", 1)[1].split(";\n", 1)[0])
+    assert [(axis["key"], axis["label"], axis["min"], axis["max"])
+            for axis in options["detectorTrim"]] == [
+        ("A205", "Detector / A205 LX10 (mm)", -12.5, 12.5),
+        ("A206", "Detector / A206 LX10 (mm)", -12.5, 12.5),
+    ]

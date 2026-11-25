@@ -26,11 +26,12 @@ from OCP.TopoDS import TopoDS
 from .cad_geometry import leaf_occurrences, placed_shape, write_group_obj
 from .constraints_wizard import _occurrence_shape_by_ref, _read_step_document
 from .epics_playback import PlaybackSource
+from .meshcat_ui import stage_stack_label
 from .paths import CACHE_ROOT, resolve_repo_path, review_artifact_stem
 from .static_review import collision_only_refs, normalized_name, review_selection
 
 if TYPE_CHECKING:
-    from pydrake.geometry import Meshcat
+    from pydrake.geometry import Meshcat, Rgba
 
 AUTO_MOTION_LABEL = "Animation"
 AUTO_RANGE_LABEL = "Auto motion range (% of travel)"
@@ -538,12 +539,17 @@ def view_stage_cad(
     port: int | None = None,
     open_browser: bool = True,
     spectroscopy: Callable[[Meshcat], Callable[[dict[str, float]], None]] | None = None,
+    hidden_chains: tuple[str, ...] = (),
+    hidden_fixed_parts: frozenset[str] = frozenset(),
     once: bool = False,
 ) -> None:
     """Show reusable real-CAD meshes with one transform per occurrence.
 
     `joint_labels` (joint key -> display label) is only used in the playback
     terminal readout, e.g. to show EPICS PV names instead of joint refs.
+
+    Hidden chains are not published and have no sliders. Fixed attachment parts
+    can also be excluded by occurrence ref without changing the cached meshes.
 
     If `playback` is given, every joint it has a track for is driven from the
     recorded session instead of its slider/animation value each frame; other
@@ -575,6 +581,15 @@ def view_stage_cad(
     if spectroscopy is not None and playback is not None:
         raise ValueError("Spectroscopy preview is offline and cannot use playback")
     scene = yaml.safe_load(Path(scene_path).read_text(encoding="utf-8"))
+    chains = scene.get("motion_chains", [])
+    if unknown := set(hidden_chains).difference(chain["name"] for chain in chains):
+        raise ValueError(f"Unknown hidden motion chains: {', '.join(sorted(unknown))}")
+    hidden_joints = [
+        joint for chain in chains if chain["name"] in hidden_chains for joint in chain["joints"]
+    ]
+    hidden_stage_refs = {joint["ref"] for joint in hidden_joints}
+    hidden_joint_keys = {joint["key"] for joint in hidden_joints}
+    chains = [chain for chain in chains if chain["name"] not in hidden_chains]
     instances = scene["instances"]
     hidden_stage_geometry = set(scene.get("hidden_stage_geometry", []))
     # Nothing here publishes a realtime rate, so the stats plot only ever covers the view.
@@ -592,8 +607,8 @@ def view_stage_cad(
     role_paths: dict[tuple[str, str], str] = {}
     joint_paths: dict[str, str] = {}
     last_joint_path_by_stage: dict[str, str] = {}
-    for chain in scene.get("motion_chains", []):
-        parent_path = f"/chains/{chain['name']}"
+    for chain in chains:
+        parent_path = f"/chains/{stage_stack_label(chain['name'])}"
         for joint in chain["joints"]:
             reference = joint["ref"]
             fixed_role = joint.get("fixed_role")
@@ -609,7 +624,7 @@ def view_stage_cad(
             )
             parent_path = joint_path
     for item in instances:
-        if item["ref"] in hidden_stage_geometry:
+        if item["ref"] in hidden_stage_geometry or item["ref"] in hidden_stage_refs:
             continue
         if item["ref"] in scene["motion_stage_meshes"]:
             meshes = scene["motion_stage_meshes"][item["ref"]]
@@ -635,6 +650,8 @@ def view_stage_cad(
         parent_ref = attachment["parent_stage_ref"]
         style = attachment.get("style", "default")
         parent_joint_key = attachment.get("parent_joint_key")
+        if parent_ref in hidden_stage_refs or parent_joint_key in hidden_joint_keys:
+            continue
         if parent_joint_key in joint_paths:
             path = f"{joint_paths[parent_joint_key]}/{style} geometry"
         elif parent_ref in last_joint_path_by_stage:
@@ -643,6 +660,11 @@ def view_stage_cad(
             path = f"/pending motion/{parent_ref}/{style} geometry"
         else:
             path = f"/attached geometry/fixed/{style}"
+            if hidden_fixed_parts and _publish_filtered_attachment(
+                meshcat, path, Path(attachment["mesh"]), Rgba(*attachment["rgba"]),
+                hidden_fixed_parts,
+            ):
+                continue
         meshcat.SetObject(
             path,
             Mesh(Path(attachment["mesh"]), 1.0),
@@ -658,7 +680,7 @@ def view_stage_cad(
             Rgba(*rgba),
         )
 
-    joints = [joint for chain in scene.get("motion_chains", []) for joint in chain["joints"]]
+    joints = [joint for chain in chains for joint in chain["joints"]]
     playback_keys = {joint["key"] for joint in joints if playback and joint["key"] in playback.joint_names}
     manual_keys = manual_playback_keys(joints, instances) if playback is not None else set()
     # Playback/live modes are view-only: the recording (or the real hardware) is the only
@@ -927,6 +949,29 @@ def _push_sliders(meshcat, labels: list[str], values: list[float]) -> None:
         meshcat.SetSliderValue(label, value)
 
 
+def _publish_filtered_attachment(
+    meshcat: Meshcat, path: str, mesh: Path, rgba: Rgba, hidden: frozenset[str],
+) -> bool:
+    """Replace a fixed attachment only when it contains an excluded part."""
+    import numpy as np
+
+    from .convex_collision import read_obj_parts
+
+    parts = read_obj_parts(mesh)
+    if not any(ref in hidden for ref, _, _ in parts):
+        return False
+    points = []
+    faces = []
+    for ref, vertices, triangles in parts:
+        if ref not in hidden:
+            offset = len(points)
+            faces.extend((a + offset, b + offset, c + offset) for a, b, c in triangles)
+            points.extend(vertices)
+    if faces:
+        meshcat.SetTriangleMesh(path, np.asarray(points).T, np.asarray(faces, dtype=np.int32).T, rgba)
+    return True
+
+
 def _write_shape_obj(shape: Any, output: Path, linear_deflection_mm: float) -> None:
     vertices: list[tuple[float, float, float]] = []
     triangles: list[tuple[int, int, int]] = []
@@ -1030,7 +1075,7 @@ def _reviewed_cad_position(inventory: dict[str, Any], key: str, stage_ref: str) 
 
 def _slider_label(joint: dict[str, Any], unit: str) -> str:
     axis_name = "" if joint["name"] == "motion" else f" {joint['name']}"
-    return f"{joint['stack']} / {joint['ref']}{axis_name} {joint['model']} ({unit})"
+    return f"{stage_stack_label(joint['stack'])} / {joint['ref']}{axis_name} {joint['model']} ({unit})"
 
 
 def _slider_scale(joint: dict[str, Any]) -> tuple[float, str]:
