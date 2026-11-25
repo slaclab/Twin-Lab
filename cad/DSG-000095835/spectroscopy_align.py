@@ -2,7 +2,7 @@
 
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from threading import Event
 
 import numpy as np
@@ -12,6 +12,7 @@ from spectroscopy import (
     ACTIVE_SIZE_M,
     CRYSTAL_INDICES,
     MODEL,
+    REFLECTIONS,
     Array,
     CrystalTrace,
     Spectrometer,
@@ -23,9 +24,11 @@ from twin_lab.scene import DrakeScene
 
 PREFIX = f"{MODEL}::"
 STAGE_STEP = 0.05
+DETECTOR_X = "epix100_x_joint"
+MIN_SIGNAL_HITS = 32
 COMMON_AXES = (
     "parker_lift_joint", "parker_cross_joint", "analyzer_rotation_joint",
-    "epix100_x_joint", "epix100_y_joint", "epix100_z_joint", "epix100_tilt_joint",
+    DETECTOR_X, "epix100_y_joint", "epix100_z_joint", "epix100_tilt_joint",
 )
 CRYSTAL_AXES = tuple(
     tuple(f"crystal_{index + 1}_{axis}_joint" for axis in ("translation", "rotation", "tilt"))
@@ -62,6 +65,17 @@ class AlignmentImage:
             tuple(trace.accepted for trace in traces),
         )
 
+    def signal_rank(self) -> tuple[int, int]:
+        return signal_rank(self.hits, self.accepted)
+
+
+def signal_rank(hits: tuple[int, ...], accepted: tuple[int, ...]) -> tuple[int, int]:
+    usable = sum(hit >= MIN_SIGNAL_HITS for hit in hits)
+    captured = sum(
+        hit >= max(MIN_SIGNAL_HITS, 0.8 * rays) for hit, rays in zip(hits, accepted, strict=True)
+    )
+    return usable, captured
+
 
 @dataclass(frozen=True)
 class AlignmentResult:
@@ -70,6 +84,48 @@ class AlignmentResult:
     detector_target_mm: tuple[float, float]
     before: AlignmentImage
     after: AlignmentImage
+    x_limit_mm: float | None = None
+
+
+@dataclass(frozen=True)
+class StartingPose:
+    reflection: int
+    alignment: AlignmentResult
+
+
+def find_starting_poses(
+    scene: DrakeScene,
+    context: Context,
+    spectrometer: Spectrometer,
+    joints: Sequence[AssemblySliderJoint],
+    followers: Mapping[str, tuple[str, Mapping]],
+    positions: Mapping[str, float],
+    request: AlignmentRequest,
+    cancel: Event,
+) -> list[StartingPose]:
+    """Rank the best bounded single-line pose found for each named reflection."""
+    poses = []
+    for index, preset in enumerate(REFLECTIONS):
+        if cancel.is_set():
+            return []
+        if bragg_angle(request.energy_ev, preset.spacing_a, 1) is None:
+            continue
+        result = find_alignment(
+            scene, context.Clone(), spectrometer, joints, followers, positions,
+            replace(request, spacing_a=preset.spacing_a, order=1), cancel, find_signal=True,
+        )
+        if result is not None:
+            poses.append(StartingPose(index, result))
+
+    def rank(pose: StartingPose) -> tuple[int, int, bool, float, int]:
+        after = pose.alignment.after
+        assert after.rms_mm is not None
+        band = REFLECTIONS[pose.reflection].published_xcs_band_ev
+        precedent = band is not None and band[0] <= request.energy_ev <= band[1]
+        spread = float(np.linalg.norm(after.rms_mm))
+        return *after.signal_rank(), precedent, -spread, sum(after.hits)
+
+    return [] if cancel.is_set() else sorted(poses, key=rank, reverse=True)
 
 
 def find_alignment(
@@ -81,8 +137,10 @@ def find_alignment(
     positions: Mapping[str, float],
     request: AlignmentRequest,
     cancel: Event,
+    *,
+    find_signal: bool = False,
 ) -> AlignmentResult | None:
-    """Find a better pose on a private context already at the captured slider positions."""
+    """Preview a better focus (or search for signal) on a private context."""
     target = np.asarray(request.target_mm)
     if not np.all(np.isfinite(target) & (np.abs(target) < ACTIVE_SIZE_M * 500)):
         raise ValueError("The alignment target must be inside the active ePix100 rectangle")
@@ -127,7 +185,7 @@ def find_alignment(
 
     home_traces = trace()
     before = AlignmentImage.from_traces(home_traces)
-    min_hits = tuple(max(32, hits) for hits in before.hits)
+    min_hits = tuple(max(MIN_SIGNAL_HITS, hits) for hits in before.hits)
     theta_deg = math.degrees(theta)
 
     def score(ray: CrystalTrace, crystal: int) -> float:
@@ -142,8 +200,8 @@ def find_alignment(
         hits = len(ray.weights)
         # Trade spot size against throughput, not the number of rays that happened to clip.
         capture = hits / ray.accepted
-        return (cost + 80 * (1 - capture)**2
-                + 0.001 * max(0, max(700, before.hits[crystal]) - hits)**2)
+        desired_hits = 700 if find_signal else max(700, before.hits[crystal])
+        return cost + 80 * (1 - capture)**2 + 0.001 * max(0, desired_hits - hits)**2
 
     def valid(traces: list[CrystalTrace]) -> bool:
         return all(
@@ -152,13 +210,25 @@ def find_alignment(
         )
 
     best_cost = sum(score(ray, i) for i, ray in enumerate(home_traces))
+    best_signal = (0, 0)
     winner: AlignmentResult | None = None
     rng = np.random.default_rng(42)
 
     def record(traces: list[CrystalTrace], costs: Array) -> None:
-        nonlocal best_cost, winner
+        nonlocal best_cost, best_signal, winner
         cost = float(costs.sum())
-        if cost < best_cost - 1e-4 and valid(traces):
+        if find_signal:
+            signal = signal_rank(
+                tuple(len(ray.weights) for ray in traces), tuple(ray.accepted for ray in traces),
+            )
+            improved = signal[0] > 0 and (
+                signal > best_signal or (signal == best_signal and cost < best_cost - 1e-4)
+            )
+        else:
+            signal = best_signal
+            improved = cost < best_cost - 1e-4 and valid(traces)
+        if improved:
+            best_signal = signal
             best_cost = cost
             winner = AlignmentResult(
                 tuple(start.tolist()), tuple(np.round(current * STAGE_STEP, 2).tolist()),
@@ -202,6 +272,8 @@ def find_alignment(
         traces = trace()
         record(traces, np.array([score(ray, i) for i, ray in enumerate(traces)]))
 
+    if find_signal:
+        record_current()
     # Independent crystal stages are cheap to explore one at a time; the common stages
     # move multiple spots and therefore need the joint four-crystal objective.
     for i, block in enumerate(blocks):
@@ -217,4 +289,43 @@ def find_alignment(
         for i, block in enumerate(blocks):
             search(block, (i,), scale, 50)
         record_current()
+
+    if cancel.is_set() or winner is None:
+        return None
+    centroid, rms = winner.after.centroid_mm, winner.after.rms_mm
+    assert centroid is not None and rms is not None  # The winning pose has detector hits.
+    x_axis = AXES.index(DETECTOR_X)
+    ticks = np.rint(np.asarray(winner.target) / STAGE_STEP)
+    # Positive x moves the sensor opposite +u, increasing each hit's local u by the same amount.
+    # Center the displayed weighted centroid after focusing, without clipping any more signal.
+    error_u = target[0] - centroid[0]
+    correction = int(np.clip(
+        np.rint(error_u / STAGE_STEP), first[x_axis] - ticks[x_axis], last[x_axis] - ticks[x_axis],
+    ))
+    while correction and not cancel.is_set():
+        candidate = ticks.copy()
+        candidate[x_axis] += correction
+        set_pose(candidate)
+        after = AlignmentImage.from_traces(trace())
+        if (
+            after.centroid_mm is not None and after.rms_mm is not None
+            and all(a >= b for a, b in zip(after.hits, winner.after.hits, strict=True))
+            and abs(target[0] - after.centroid_mm[0]) < abs(error_u)
+            and abs(target[1] - after.centroid_mm[1]) <= abs(target[1] - centroid[1]) + 1e-7
+            and np.all(after.rms_mm <= rms + 1e-7)
+        ):
+            ticks = candidate
+            error_u = target[0] - after.centroid_mm[0]
+            winner = replace(
+                winner, target=tuple(np.round(ticks * STAGE_STEP, 2).tolist()), after=after,
+            )
+            break
+        correction = math.trunc(correction / 2)
+    if cancel.is_set():
+        return None
+    if (
+        (error_u < -STAGE_STEP / 2 and ticks[x_axis] == first[x_axis])
+        or (error_u > STAGE_STEP / 2 and ticks[x_axis] == last[x_axis])
+    ):
+        winner = replace(winner, x_limit_mm=winner.target[x_axis])
     return winner

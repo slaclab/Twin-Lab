@@ -445,7 +445,9 @@ def validate_review(review: dict, stats: dict) -> None:
 
 
 def spectroscopy_assembly(review: dict) -> tuple[dict, list[dict]]:
-    """Keep the reviewed assembly except the dedicated ePix10k CAD subtree."""
+    """Omit scattering hardware and apply spectroscopy-only travel restrictions."""
+    from controls import SPECTROSCOPY_EPIX100_X_MIN_MM
+
     entries = json.loads((HERE / "manifest.json").read_text())["occurrences"]
     roots = [
         entry["id"] for entry in entries
@@ -463,6 +465,12 @@ def spectroscopy_assembly(review: dict) -> tuple[dict, list[dict]]:
         if parts or not spec["parts"]:
             bodies[name] = {**spec, "parts": parts}
     joints = [joint for joint in review["joints"] if joint["child"] in bodies]
+    joints = [
+        {**joint, "limits": [
+            max(joint["limits"][0], SPECTROSCOPY_EPIX100_X_MIN_MM / 1000), joint["limits"][1],
+        ]} if joint["name"] == "epix100_x_joint" else joint
+        for joint in joints
+    ]
     if any(joint["parent"] not in bodies for joint in joints):
         raise ValueError("A retained spectroscopy body depends on a removed scattering stage")
     return bodies, joints

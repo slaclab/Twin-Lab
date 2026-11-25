@@ -1,6 +1,6 @@
 <style>
   #twinlab-spectroscopy {
-    position: fixed; top: 52px; left: 12px; z-index: 8; width: min(295px, 42vw);
+    position: fixed; top: 52px; left: 12px; z-index: 8; width: min(350px, 68vw);
     max-height: calc(100dvh - 60px); overflow: auto; box-sizing: border-box;
     color: #e7eefb; background: #101927ee; border: 1px solid #546783; border-radius: 8px;
     padding: 10px 12px; font: 12px/1.45 system-ui, sans-serif;
@@ -13,8 +13,16 @@
   #twinlab-spectroscopy small { color: #b6c4d6; }
   #twinlab-spectroscopy table { width: 100%; text-align: left; border-collapse: collapse; }
   #twinlab-spectroscopy th, #twinlab-spectroscopy td { padding: 1px 3px; white-space: nowrap; }
-  #vh-target-fields { display: flex; flex-wrap: wrap; gap: 8px; }
-  #vh-target-fields input { width: 5em; color-scheme: dark; }
+  #vh-target-fields, #vh-band-fields { display: flex; flex-wrap: wrap; gap: 8px; }
+  #vh-target-fields input, #vh-band-fields input { width: 5em; color-scheme: dark; }
+  #vh-planner { border-block: 1px solid #546783; margin-top: 8px; padding: 6px 0; }
+  #vh-planner button { color-scheme: dark; }
+  #vh-plan-compare, #vh-plan-published, #vh-plan-use { margin: 4px 3px 4px 0; }
+  #vh-plan-rows button[aria-pressed="true"] { outline: 1px solid #75efff; }
+  #vh-plan-map-scale { display: flex; justify-content: space-between; }
+  #vh-plan-spectrum { height: 5px; background: linear-gradient(90deg, #568bff, #33e6ac, #ffae46); }
+  #vh-plan-coverage td { border: 1px solid #101927; padding: 0; height: 8px; }
+  #vh-plan-source a { color: #95d5ff; }
   #vh-align-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
   #vh-align-actions button { color-scheme: dark; cursor: pointer; }
   #vh-align-actions button:disabled { cursor: default; }
@@ -26,18 +34,52 @@
 <details id="twinlab-spectroscopy" open>
   <summary>ePix100 spectroscopy preview</summary>
   <label>Emission line <select id="vh-line"></select></label>
+  <details id="vh-planner" open>
+    <summary>Experiment planner</summary>
+    <div id="vh-band-fields">
+      <label>Below line (eV) <input id="vh-band-below" type="number" required></label>
+      <label>Above line (eV) <input id="vh-band-above" type="number" required></label>
+    </div>
+    <small id="vh-plan-band"></small>
+    <div>
+      <button id="vh-plan-compare" type="button" disabled>Compare reflections here</button>
+      <button id="vh-plan-published" type="button" hidden>Use published Fe band</button>
+    </div>
+    <p id="vh-plan-status" role="status">Compare the band at this simulator pose.</p>
+    <div id="vh-plan-result" hidden>
+      <table aria-label="Reflection comparison at the current pose">
+        <thead><tr><th>Reflection</th><th>Line θ</th><th>All 4 ≥80%</th><th>Any hit</th></tr></thead>
+        <tbody id="vh-plan-rows"></tbody>
+      </table>
+      <p id="vh-plan-source"></p>
+      <table aria-label="Geometric capture by crystal and energy"><tbody id="vh-plan-coverage"></tbody></table>
+      <small>Crystals 1–4 by row. Green ≥80%, amber partial, red off-sensor, gray no accepted rays.</small>
+      <canvas id="vh-plan-map" aria-label="Simulated ePix100 centroids by photon energy"></canvas>
+      <div id="vh-plan-spectrum"></div>
+      <div id="vh-plan-map-scale"><small id="vh-plan-low"></small><small id="vh-plan-high"></small></div>
+      <p id="vh-plan-edge"></p>
+      <button id="vh-plan-use" type="button">Use reflection in simulator</button>
+      <small>Sampled geometry only. No detector gaps, reflectivity, or inventory modeled.</small>
+    </div>
+  </details>
   <label>Reflection for all four crystals <select id="vh-reflection"></select></label>
   <div id="vh-target-fields">
     <label>Target u (mm) <input id="vh-target-u" type="number" value="0" required></label>
     <label>Target v (mm) <input id="vh-target-v" type="number" value="0" required></label>
   </div>
   <small>Gold +: target · cyan ring: centroid. No detector gaps modeled.</small>
+  <br><small id="vh-x-floor"></small>
   <div id="vh-align-actions">
+    <button id="vh-align-search" type="button" disabled>Find starting poses</button>
     <button id="vh-align-preview" type="button" disabled>Auto-align preview</button>
     <button id="vh-align-apply" type="button" disabled>Apply to simulator</button>
   </div>
   <p id="vh-align-status" role="status">Waiting for the optical trace.</p>
   <div id="vh-align-result" hidden>
+    <div id="vh-starting-poses" hidden>
+      <label>Ranked starting poses <select id="vh-align-candidate"></select></label>
+      <small id="vh-starting-note"></small>
+    </div>
     <div id="vh-align-images">
       <figure>
         <figcaption>Before</figcaption>
@@ -74,6 +116,8 @@
   const opt = __OPTIONS__;
   const align = opt.alignment;
   const status = align.status;
+  const plan = opt.planner;
+  const planStatus = plan.status;
   const el = (id) => document.getElementById("vh-" + id);
   function initializeImage(id) {
     const canvas = el(id);
@@ -84,7 +128,9 @@
   const mainImage = initializeImage("image");
   const beforeImage = initializeImage("align-before");
   const afterImage = initializeImage("align-after");
+  const planImage = initializeImage("plan-map");
   const [uSize, vSize] = opt.sizeMm;
+  el("x-floor").textContent = `ePix100 x cannot go below ${align.xFloor.toFixed(2)} mm.`;
   el("scale").textContent = `${uSize.toFixed(1)} × ${vSize.toFixed(1)} mm · u → v ↑ · 4 × 4 pixel bins`;
 
   function dropdown(id, label, options) {
@@ -95,12 +141,194 @@
   }
   const line = dropdown("line", opt.lineLabel, opt.lines);
   const reflection = dropdown("reflection", opt.reflectionLabel, opt.reflections);
+  const compareButton = el("plan-compare");
+  const publishedButton = el("plan-published");
+  const bandFields = ["band-below", "band-above"].map((id) => {
+    const field = el(id);
+    field.min = 0;
+    field.max = plan.maxOffset;
+    field.step = 0.1;
+    field.value = plan.defaultOffset;
+    field.addEventListener("input", refreshPlanner);
+    return field;
+  });
+  let liveEnergy = null;
+  let liveWidth = null;
+  let comparison = null;
+  let planningState = planStatus.IDLE;
+  let comparing = false;
+  let selected = null;
+  let energies = [];
+
+  function publishedBand() {
+    return plan.presets.find(([, , , band]) => band && band[0] <= liveEnergy &&
+      liveEnergy <= band[1])?.[3];
+  }
+  function refreshPlanner() {
+    const valid = bandFields.every((field) => field.validity.valid);
+    const [below, above] = bandFields.map((field) => field.valueAsNumber);
+    compareButton.disabled = liveEnergy === null || !valid || comparing;
+    publishedButton.hidden = !publishedBand();
+    el("plan-band").textContent = valid && liveEnergy !== null ?
+      `Scan ${(liveEnergy - below).toFixed(1)}–${(liveEnergy + above).toFixed(1)} eV` : "";
+    const current = comparison && Math.abs(comparison.energy - liveEnergy) < 1e-8 &&
+      Math.abs(comparison.width - liveWidth) < 1e-8 &&
+      Math.abs(comparison.below - below) < 1e-8 && Math.abs(comparison.above - above) < 1e-8;
+    el("plan-result").hidden = !current || comparing;
+    const messages = {
+      [planStatus.IDLE]: "Compare the band at this simulator pose.",
+      [planStatus.STALE]: "Pose or settings changed. Compare again.",
+      [planStatus.FAILED]: "The comparison failed. See the viewer log.",
+    };
+    el("plan-status").textContent = comparing ? "Tracing the energy band…" :
+      current ? `${energies.length} sampled energies. No stages moved.` :
+      comparison ? "Energy or band changed. Compare again." : messages[planningState];
+  }
+  compareButton.addEventListener("click", () => {
+    if (!bandFields.every((field) => field.reportValidity())) return;
+    const compare = viewer.gui_controllers[plan.compareLabel]?.object[plan.compareLabel];
+    if (!compare || viewer.connection?.readyState !== 1) {
+      el("plan-status").textContent = "The simulator is not connected.";
+      return;
+    }
+    bandFields.forEach((field, i) => {
+      viewer.set_control_value(plan.bandLabels[i], field.valueAsNumber, true);
+    });
+    comparing = true;
+    refreshPlanner();
+    compare();
+  });
+  publishedButton.addEventListener("click", () => {
+    const band = publishedBand();
+    if (!band) return;
+    bandFields[0].value = (liveEnergy - band[0]).toFixed(1);
+    bandFields[1].value = (band[1] - liveEnergy).toFixed(1);
+    refreshPlanner();
+  });
+  el("plan-use").addEventListener("click", () => {
+    if (selected !== null && !el("plan-result").hidden) {
+      viewer.set_control_value(opt.reflectionLabel, selected, true);
+    }
+  });
+
+  function energyColor(index) {
+    const colors = ["#568bff", "#33e6ac", "#ffae46"];
+    if (energies.length === 1) return colors[1];
+    const x = 2 * index / (energies.length - 1);
+    const i = Math.min(1, Math.floor(x));
+    const rgb = colors.slice(i, i + 2).map(c => c.slice(1).match(/../g).map(h => parseInt(h, 16)));
+    return `rgb(${rgb[0].map((c, j) => Math.round(c + (rgb[1][j] - c) * (x - i))).join(",")})`;
+  }
+  function describeCapture(value) {
+    if (value === -2) return "No real Bragg angle";
+    if (value === -1) return "No analyzer samples accepted";
+    if (!value) return "Bragg rays miss the sensor";
+    return `${(value * 100).toFixed(0)}% of accepted samples reach the sensor`;
+  }
+  function selectCandidate(index, points) {
+    selected = index;
+    for (const button of el("plan-rows").querySelectorAll("button")) {
+      button.setAttribute("aria-pressed", String(+button.value === index));
+    }
+    const [, label, source] = plan.presets[index];
+    const evidence = el("plan-source");
+    evidence.textContent = `${label}. Availability unconfirmed.`;
+    if (source) {
+      const link = document.createElement("a");
+      link.textContent = " Source";
+      link.href = source;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      evidence.append(link);
+    }
+    const coverage = el("plan-coverage");
+    coverage.replaceChildren();
+    const w = planImage.canvas.width, h = planImage.canvas.height;
+    planImage.fillStyle = "#030916";
+    planImage.fillRect(0, 0, w, h);
+    planImage.strokeStyle = "#546783";
+    planImage.strokeRect(0.5, 0.5, w - 1, h - 1);
+    let edge = Infinity;
+    opt.colors.forEach((color, crystal) => {
+      const row = coverage.insertRow();
+      const labelCell = document.createElement("th");
+      labelCell.scope = "row";
+      labelCell.textContent = String(crystal + 1);
+      labelCell.style.color = `rgb(${color.join(",")})`;
+      row.append(labelCell);
+      points.forEach((sample, i) => {
+        const [fraction, u, v, margin] = sample[crystal];
+        const cell = row.insertCell();
+        const description = `${energies[i].toFixed(1)} eV: ${describeCapture(fraction)}`;
+        cell.title = description;
+        cell.setAttribute("aria-label", description);
+        cell.style.backgroundColor = fraction >= plan.captureGoal ? "#43b08f" :
+          fraction > 0 ? "#da9b52" : fraction === 0 ? "#a84a48" :
+          fraction === -1 ? "#566781" : "#293545";
+        if (fraction <= 0) return;
+        edge = Math.min(edge, margin);
+        planImage.fillStyle = energyColor(i);
+        planImage.beginPath();
+        planImage.arc(w * (0.5 + u / uSize), h * (0.5 - v / vSize), 3, 0, 2 * Math.PI);
+        planImage.fill();
+      });
+    });
+    el("plan-low").textContent = `${energies[0].toFixed(1)} eV`;
+    el("plan-high").textContent = `${energies.at(-1).toFixed(1)} eV`;
+    el("plan-edge").textContent = Number.isFinite(edge) ?
+      `Closest captured ray to modeled sensor edge: ${edge.toFixed(2)} mm. Map shows centroids only.` :
+      "No detector hits in this scan. Try a different reflection or pose.";
+  }
+  function drawPlanning(data) {
+    comparing = false;
+    planningState = data[0];
+    comparison = null;
+    if (planningState !== planStatus.READY) return refreshPlanner();
+    const [, energy, width, below, above, n] = data;
+    comparison = {energy, width, below, above};
+    let offset = 6;
+    energies = data.slice(offset, offset += n);
+    const table = el("plan-rows");
+    table.replaceChildren();
+    for (let i = 0; i < plan.presets.length; i++) {
+      const index = data[offset++], angle = data[offset++];
+      const points = energies.map(() =>
+        opt.colors.map(() => data.slice(offset, offset += 4)));
+      const row = table.insertRow();
+      const button = document.createElement("button");
+      button.type = "button";
+      button.value = index;
+      button.textContent = plan.presets[index][0];
+      button.setAttribute("aria-pressed", "false");
+      button.onclick = () => selectCandidate(index, points);
+      row.insertCell().append(button);
+      row.insertCell().textContent = angle < 0 ? "—" : `${angle.toFixed(1)}°`;
+      const complete = points.filter(sample => sample.every(([f]) => f >= plan.captureGoal)).length;
+      const any = points.filter(sample => sample.some(([f]) => f > 0)).length;
+      row.insertCell().textContent = `${complete}/${n}`;
+      row.insertCell().textContent = `${any}/${n}`;
+      if (i === 0) selectCandidate(index, points);
+    }
+    refreshPlanner();
+  }
+  function updateBand(data) {
+    if (comparing) return;
+    bandFields.forEach((field, i) => {
+      if (field !== document.activeElement) field.value = +data[i].toFixed(1);
+    });
+    refreshPlanner();
+  }
+
   let detectorTarget = [0, 0];
   let latestTrace = null;
   let alignStatus = status.IDLE;
   let meetsPreviewGoal = false;
+  let startingCount = 0;
+  let selectedCandidate = 0;
+  const searchButton = el("align-search");
   const previewButton = el("align-preview");
   const applyButton = el("align-apply");
+  const candidateSelect = el("align-candidate");
   const alignmentResult = el("align-result");
   const alignmentStatus = el("align-status");
   const targetFields = ["target-u", "target-v"].map((id, i) => {
@@ -124,10 +352,21 @@
       }
     });
   }
-  previewButton.addEventListener("click", () => {
+  function requestAlignment(label) {
     if (!targetFields.every((field) => field.reportValidity())) return;
+    const controller = viewer.gui_controllers[label];
+    if (!controller || viewer.connection?.readyState !== 1) {
+      alignmentStatus.textContent = "The simulator is not connected or still loading.";
+      return;
+    }
     sendTarget();
-    viewer.gui_controllers[align.previewLabel]?.object[align.previewLabel]();
+    controller.object[label]();
+  }
+  searchButton.addEventListener("click", () => requestAlignment(align.searchLabel));
+  previewButton.addEventListener("click", () => requestAlignment(align.previewLabel));
+  candidateSelect.addEventListener("change", () => {
+    viewer.set_control_value(align.candidateLabel, +candidateSelect.value, true);
+    refreshAlignmentControls();
   });
   applyButton.addEventListener("click", () => {
     viewer.gui_controllers[align.applyLabel]?.object[align.applyLabel]();
@@ -138,26 +377,36 @@
     return row.insertCell();
   });
   let braggAllowed = null;
+  function readyMessage() {
+    if (startingCount) return "Review a starting pose before applying its reflection and stages.";
+    return meetsPreviewGoal ?
+      "Compact spot near the target in the model. Review the pose before applying." :
+      "Best effort only: target error or RMS exceeds 0.5 mm. The stages are unchanged.";
+  }
   function refreshAlignmentControls() {
     const pendingTarget = targetFields.some((field, i) => field.valueAsNumber !== detectorTarget[i]);
-    previewButton.disabled = !braggAllowed || alignStatus === status.RUNNING ||
-      targetFields.some((field) => !field.validity.valid);
-    applyButton.disabled = !braggAllowed || alignStatus !== status.READY || pendingTarget;
-    alignmentResult.hidden = alignStatus !== status.READY || !braggAllowed;
+    const busy = alignStatus === status.RUNNING || alignStatus === status.SEARCHING;
+    const valid = targetFields.every((field) => field.validity.valid);
+    searchButton.disabled = liveEnergy === null || busy || !valid;
+    previewButton.disabled = !braggAllowed || busy || !valid;
+    const ready = alignStatus === status.READY;
+    const pendingCandidate = startingCount > 0 && +candidateSelect.value !== selectedCandidate;
+    applyButton.disabled = !ready || pendingTarget || pendingCandidate;
+    alignmentResult.hidden = !ready;
     const messages = {
-      [status.IDLE]: "Preview a shared spot from all four crystals without moving the stages.",
+      [status.IDLE]: braggAllowed ?
+        "Find signal across reflections, or refine a shared spot with the selected reflection." :
+        "This reflection cannot satisfy Bragg. Find starting poses to try the other reflections.",
       [status.RUNNING]: "Searching simulated poses for all four crystals. The stages are unchanged.",
-      [status.READY]: meetsPreviewGoal ?
-        "Compact spot near the target in the model. Review the pose before applying." :
-        "Best effort only: target error or RMS exceeds 0.5 mm. The stages are unchanged.",
+      [status.SEARCHING]: "Trying reflections and stage positions for this line. No stages moved.",
+      [status.READY]: readyMessage(),
       [status.STALE]: "The pose, optics, or target changed. Run a new preview before applying.",
       [status.NO_IMPROVEMENT]: "Bragg is possible, but this search did not find a better pose with enough hits from all four crystals.",
+      [status.NO_SIGNAL]: `No pose reached ${align.minSignalHits} modeled hits on any crystal in this search. Other poses or reflections may work.`,
       [status.APPLIED]: "Applied to the simulator.",
-      [status.PAUSE_ANIMATION]: "Turn off Animation before running auto-align.",
       [status.FAILED]: "The alignment search failed. See the viewer log.",
     };
     alignmentStatus.textContent = braggAllowed === null ? "Waiting for the optical trace." :
-      !braggAllowed ? "No alignment: this line and reflection cannot satisfy Bragg." :
       messages[alignStatus];
   }
   const rows = opt.colors.map((rgb, i) => {
@@ -175,6 +424,9 @@
     const [lineId, crystalId, e, d, order, width, theta, u, v, rmsU, rmsV] = data;
     line.value = lineId;
     reflection.value = crystalId;
+    liveEnergy = e;
+    liveWidth = width;
+    refreshPlanner();
     braggAllowed = theta >= 0;
     refreshAlignmentControls();
     showSlider(opt.lineLabel, false);
@@ -239,14 +491,30 @@
   function drawAlignment(data) {
     alignStatus = data[0];
     if (alignStatus === status.READY) {
-      const aim = data.slice(1, 3);
+      [startingCount, selectedCandidate] = data.slice(1, 3);
+      el("starting-poses").hidden = !startingCount;
+      candidateSelect.replaceChildren();
+      let offset = 3;
+      for (let i = 0; i < startingCount; i++) {
+        const [index, usable, captured] = data.slice(offset, offset + 3);
+        const [label, evidence] = plan.presets[index];
+        candidateSelect.add(new Option(`${label} · ${usable}/4 with signal · ${captured}/4 ≥80%`, i));
+        if (i === selectedCandidate) {
+          el("starting-note").textContent = `${evidence}; availability unconfirmed. Both images use ${label}.`;
+        }
+        offset += 3;
+      }
+      if (startingCount) candidateSelect.value = selectedCandidate;
+      const aim = data.slice(offset, offset + 2);
+      const [xLimited, xLimitMm] = data.slice(offset + 2, offset + 4);
+      offset += 4;
       const n = align.axes.length;
       moves.forEach((cell, index) => {
-        const from = data[3 + index], to = data[3 + n + index];
+        const from = data[offset + index], to = data[offset + n + index];
         cell.textContent = `${from.toFixed(2)} → ${to.toFixed(2)}`;
         cell.parentElement.hidden = Math.abs(to - from) < 0.001;
       });
-      let offset = 3 + 2 * n;
+      offset += 2 * n;
       [[beforeImage, "align-before-report"], [afterImage, "align-after-report"]].forEach(
         ([image, report]) => {
           const [u, v, rmsU, rmsV] = data.slice(offset, offset + 4);
@@ -259,11 +527,15 @@
           offset += count;
           const hits = `Hits (1–4): ${perCrystal.join(" / ")}`;
           const distance = Math.hypot(u - aim[0], v - aim[1]);
+          let limitNote = "";
           if (image === afterImage) {
             meetsPreviewGoal = Math.max(distance, rmsU, rmsV) <= 0.5;
+            if (xLimited) {
+              limitNote = ` · ePix100 x travel limit (${xLimitMm.toFixed(2)} mm)`;
+            }
           }
           el(report).textContent = totalHits ?
-            `${distance.toFixed(2)} mm from target · ` +
+            `${distance.toFixed(2)} mm from target${limitNote} · ` +
             `RMS ${rmsU.toFixed(2)} × ${rmsV.toFixed(2)} mm · ${hits}` : `No spot · ${hits}`;
         },
       );
@@ -284,10 +556,13 @@
       if (command.property === "detector_frame") return draw(command.value);
       if (command.property === "alignment_frame") return drawAlignment(command.value);
       if (command.property === "alignment_target") return updateTarget(command.value);
+      if (command.property === "planning_band") return updateBand(command.value);
+      if (command.property === "planning_frame") return drawPlanning(command.value);
     }
     handle(command);
     if (command.type === "set_control" &&
-        [align.previewLabel, align.applyLabel, ...align.targetLabels].includes(command.name)) {
+        [align.previewLabel, align.applyLabel, align.searchLabel, align.candidateLabel, ...align.targetLabels,
+          plan.compareLabel, ...plan.bandLabels].includes(command.name)) {
       showSlider(command.name, false);
     }
   };

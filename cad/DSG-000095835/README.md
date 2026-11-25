@@ -36,12 +36,14 @@ uv run slac-run 95835 --spectroscopy
 The preview uses the existing liquid-jet interaction datum (the fixed CAD world
 origin), all four concave crystal faces in the reviewed mounting, and the
 upward-facing ePix100 sensor. It resolves the active faces from the local STEP
-cache and follows the same stage sliders as the motion viewer. The jet and slit
-sliders still move their CAD solids; they do not move the fixed beam interaction
-point or mask rays in this preview. The separate spectroscopy export omits the
-downstream ePix10k2M scattering detector, its dedicated mounts, and its stage
-controls. The regular assembly viewer keeps them. For spectroscopy only,
-**ePix100 x** cannot go below **-6.5 mm**; the y and z limits are unchanged.
+cache and follows the spectroscopy stage sliders. The jet sliders move the CAD
+solids without moving the fixed interaction point. The slits stay at their CAD
+pose without sliders; they do not mask rays in this preview. The separate
+spectroscopy export omits the downstream ePix10k2M scattering detector, its
+dedicated mounts, and its stage controls. Spectroscopy also omits the stage
+animation and zoom-limit override controls. The spectroscopy export and viewer
+enforce **-6.5 mm** as the **ePix100 x** lower limit. The y and z limits and the
+regular assembly viewer are unchanged.
 This mode does not check collisions or connect to motors.
 
 Start with **Fe K&beta;1,3 + Ge(620)**, based on the Fe K&beta; setup in
@@ -55,6 +57,43 @@ energies, not sample-specific peaks. Crystal presets are examples, not an
 inventory of installed optics. A named reflection already specifies its lattice
 planes and uses order 1; select **Custom d-spacing / order** to enter a spacing
 and apply a separate integer order. The selected reflection applies to all four.
+
+### Experiment planner
+
+Select an emission line, set the requested span below and above it, and click
+**Compare reflections here**. **Use published Fe band** fills in the 7030–7125 eV
+window in the XCS Fe example. The comparison evaluates the named reflections
+at the current CAD pose and Bragg half-width without moving the stages. It checks
+21 evenly spaced energies, including both endpoints (one energy for a zero-width
+band). These are discrete samples, not a guarantee of continuous coverage.
+
+The matching published XCS setup is listed first; the other options are sorted
+by the number of energies where all four crystals place at least 80% of their
+accepted samples on the sensor, then by the number of crystal/energy pairs with
+hits and the minimum edge distance. Select a row to see the per-crystal coverage
+strip and color-coded centroids on the detector. **Use reflection in simulator**
+changes only the reflection selection. Change a stage or apply an alignment
+preview, then compare again to assess the new pose.
+
+Ge(620) is documented at XCS for Fe; [Si(440) is a precedent on the LCLS
+16-crystal instrument](https://biology-lcls.slac.stanford.edu/capabilities/spectroscopy).
+Ge(511), Ge(331), and Ge(642) are planning candidates for Mn K&alpha;, Ti K&beta;
+or V K&alpha;, and Ni K&beta; respectively. The comparison assumes the same CAD
+crystal shapes for all reflections. Capture is a geometry fraction, not a
+prediction of photon counts or reflectivity. Detector gaps, real analyzer
+availability, and collision clearance still need separate verification.
+
+### Single-line trace and alignment
+
+If the detector is blank, choose a line and click **Find starting poses**. This
+tries the named reflections at bounded stage poses, not just at the current
+pose. It ranks the simulated candidates by how many crystals have signal
+(at least 32 modeled hits), then how many capture at least 80% of their accepted
+rays. Partial poses are shown when the search does not land all four crystals.
+Select a candidate to preview its reflection and stage changes, then use
+**Apply to simulator** to try both. Run **Compare reflections here** at that
+pose to check the band; a starting pose is only for the selected line, not a
+hardware recommendation or evidence that the reflection is in stock.
 
 Drag a crystal, common analyzer, or ePix100 slider to see the image change. As
 a quick check, from the CAD pose change **ePix100 x** to **-4 mm**: the Fe demo
@@ -79,8 +118,8 @@ with RMS widths of (0.26, 0.29) mm. Crystals 1 and 2 contribute at this pose;
 3 and 4 do not meet the Bragg window. These are CAD slider offsets, not
 motor setpoints or a clearance-checked path.
 
-With **Animation** off, select a line and reflection, then click **Auto-align
-preview**. It searches for a shared spot from all four crystals. It varies
+Select a line and reflection, then click **Auto-align preview**. It searches for a
+shared spot from all four crystals. It varies
 translation, rotation, and tilt on each crystal, the common spectrometer
 slides and analyzer rotation, and ePix100 x/y/z and tilt (19 axes total).
 It samples the allowed ranges and refines promising poses; it does not
@@ -88,7 +127,10 @@ enumerate all combinations. A proposed pose must retain signal from every
 crystal and capture at least 80% of its Bragg-accepted samples.
 The target defaults to the detector center; **Target u / v**
 set the offset in mm on the moving sensor (positive u is right; positive v is
-up). The gold cross marks the target. The detector model is a continuous
+up). After focusing, the preview refines ePix100 x to center the weighted spot
+horizontally without sacrificing hits or focus. If x travel limits the
+horizontal correction, the proposed image reports the limit. The gold cross
+marks the target. The detector model is a continuous
 rectangle: it does not locate quadrant gaps or bad pixels.
 
 Compare the two images, target error, and proposed slider changes before
@@ -98,8 +140,8 @@ hardware tolerance. The preview by itself moves nothing. Changing the target,
 an optical setting, or a contributing stage invalidates the proposal. The
 search does not check clearance.
 
-Ten of the 24 preset pairs have no real Bragg angle and cannot be searched.
-For Bragg-allowed pairs, results depend on the starting pose, target, and
+Pairs with no real Bragg angle cannot be searched. For Bragg-allowed pairs,
+results depend on the starting pose, target, and
 Bragg window. If the search finds no proposal, that does not prove a pose is
 out of reach. A centered centroid alone does not imply a sharp four-crystal
 spot; compare the RMS widths and per-crystal hit counts.

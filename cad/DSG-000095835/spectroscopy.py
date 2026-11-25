@@ -26,10 +26,28 @@ LINES = (
     ("V K\u03b1 (K\u03b11)", 4952.2),
 )
 
+@dataclass(frozen=True)
+class ReflectionPreset:
+    label: str
+    spacing_a: float
+    evidence: str = "Simulation candidate"
+    source_url: str | None = None
+    published_xcs_band_ev: tuple[float, float] | None = None
+
+
 # The indices already specify the diffracting planes, so these presets use n=1.
 REFLECTIONS = (
-    ("Ge(620) - Fe demo", 5.6579 / math.sqrt(40)),
-    ("Si(440) - Mn example", 5.4310 / math.sqrt(32)),
+    ReflectionPreset(
+        "Ge(620)", 5.6579 / math.sqrt(40), "Published XCS Fe setup",
+        "https://doi.org/10.3390/molecules29102323", (7030, 7125),
+    ),
+    ReflectionPreset(
+        "Si(440)", 5.4310 / math.sqrt(32), "LCLS Mn precedent (16-crystal)",
+        "https://biology-lcls.slac.stanford.edu/capabilities/spectroscopy",
+    ),
+    ReflectionPreset("Ge(511)", 5.6579 / math.sqrt(27)),
+    ReflectionPreset("Ge(331)", 5.6579 / math.sqrt(19)),
+    ReflectionPreset("Ge(642)", 5.6579 / math.sqrt(56)),
 )
 HC_EV_ANGSTROM = 12398.419843
 IP_M = np.zeros(3)

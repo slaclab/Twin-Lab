@@ -29,6 +29,7 @@ def view(package: Path, *, once: bool = False, spectroscopy: bool = False) -> No
     with tempfile.TemporaryDirectory(prefix="twinlab-95835-") as directory:
         patch_meshcat_page(
             extra_html=detector_panel(read_controls(package)), resource_root=Path(directory),
+            show_zoom_override=False,
         )
         try:
             _view(package, once=once, spectroscopy=True)
@@ -49,6 +50,10 @@ def _view(package: Path, *, once: bool, spectroscopy: bool) -> None:
         from spectroscopy import Spectrometer
         from spectroscopy_view import SpectroscopyPreview
 
+        joints = [
+            joint for joint in joints
+            if not joint.joint_name.startswith(("top_slit_", "bottom_slit_"))
+        ]
         preview = SpectroscopyPreview(
             meshcat, Spectrometer(scene, context), scene, joints, followers,
         )
@@ -59,9 +64,10 @@ def _view(package: Path, *, once: bool, spectroscopy: bool) -> None:
     ]
     for joint, (low, high, home) in zip(joints, bounds, strict=True):
         meshcat.AddSlider(joint.label, low, high, 0.05, home)
-    meshcat.AddSlider("Animation", 0.0, 1.0, 1.0, 0.0)
-    meshcat.AddSlider("Auto motion range (% of travel)", 0.0, 100.0, 1.0, 10.0)
-    meshcat.AddSlider("Auto motion period (s)", 2.0, 60.0, 1.0, 20.0)
+    if not spectroscopy:
+        meshcat.AddSlider("Animation", 0.0, 1.0, 1.0, 0.0)
+        meshcat.AddSlider("Auto motion range (% of travel)", 0.0, 100.0, 1.0, 10.0)
+        meshcat.AddSlider("Auto motion period (s)", 2.0, 60.0, 1.0, 20.0)
     meshcat.AddButton("Reset to home")
     meshcat.AddButton("Stop viewer", "Escape")
     # Fit actual illustration vertices; geometry frames alone do not give CAD extents.
@@ -91,10 +97,11 @@ def _view(package: Path, *, once: bool, spectroscopy: bool) -> None:
             now = time.monotonic()
             if meshcat.GetButtonClicks("Reset to home") != reset_clicks:
                 reset_clicks = meshcat.GetButtonClicks("Reset to home")
-                meshcat.SetSliderValue("Animation", 0.0)
+                if not spectroscopy:
+                    meshcat.SetSliderValue("Animation", 0.0)
                 for joint, (_, _, home) in zip(joints, bounds, strict=True):
                     meshcat.SetSliderValue(joint.label, home)
-            automatic = meshcat.GetSliderValue("Animation") > 0.5
+            automatic = not spectroscopy and meshcat.GetSliderValue("Animation") > 0.5
             positions = {}
             for index, (joint, (low, high, _)) in enumerate(zip(joints, bounds, strict=True)):
                 slider = meshcat.GetSliderValue(joint.label)
@@ -115,7 +122,7 @@ def _view(package: Path, *, once: bool, spectroscopy: bool) -> None:
                 context, with_followers(positions, followers, prefix="DSG-000095835::")
             )
             if preview is not None:
-                preview.update(context, positions, automatic=automatic)
+                preview.update(context, positions)
             scene.diagram.ForcedPublish(context)
             meshcat.Flush()
             if once:
