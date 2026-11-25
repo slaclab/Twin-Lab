@@ -1,0 +1,2880 @@
+schema: twin-lab-local-assembly/v1
+model_name: DSG-000095835
+source_step: cad/DSG-000095835/source.stp
+source_sha256: ac9d89fe269da69a341706e96d0d6506b9a317d3883bf4cd1a8ce3b172eb9111
+cad_manifest: cad/DSG-000095835/manifest.json
+linear_deflection_mm: 0.5
+# Visual meshes use the STEP presentation colours, face by face (STEP carries no image
+# textures). visual_rgba is the fallback for leaves the STEP leaves uncoloured.
+visual_colors: step
+visual_rgba: [0.7, 0.7, 0.7, 1.0]
+# Red and yellow are the clearance viewer's interference and near-clearance highlights, so
+# saturated STEP paint in those hues (the ePix10k housing mo39134050, the Thorlabs posts,
+# brass thumb nuts) is drawn white instead, keeping its transparency. Oranges and tans
+# (18-38 degrees) are left alone.
+visual_reserved_hues:
+- hue_deg: [-12, 12]
+  rgba: [0.95, 0.95, 0.95, 1.0]
+- hue_deg: [40, 65]
+  rgba: [0.95, 0.95, 0.95, 1.0]
+# Whole leaves painted to their real finish, by CAD name without the _oa_ suffix. The
+# ePix10k ring set (mo39152641) and its back plate REF-000076019 are black anodized; the
+# STEP draws them translucent yellow and olive. The ePix10k2M sensor chips are drawn
+# silicon blue, seen through the shield window mo39134050, which is smoked grey so it
+# stays visible over them without the red the STEP gives it.
+visual_part_rgba:
+  REF__sa39152641__Epix10k_FrontRing: [0.08, 0.08, 0.08, 1.0]
+  REF__sa39152641__Epix10k_BackRing: [0.08, 0.08, 0.08, 1.0]
+  REF__sa39152641__Epix10k_MountingRib: [0.08, 0.08, 0.08, 1.0]
+  mo39152625: [0.08, 0.08, 0.08, 1.0]
+  REF-000076019: [0.08, 0.08, 0.08, 1.0]
+  REF__mo39152608__DetectorChip: [0.15, 0.35, 0.9, 1.0]
+  mo39134050: [0.3, 0.32, 0.35, 0.4]
+split_templates: stage-splits.yaml
+collision_regressions:
+# The 2026-11-12 STEP put the ePix10k frame and plate 2.3 mm into chamber part REF-000062451
+# (DSG-000000413) at home. The 2026-11-21 STEP raises the ePix10k payload 61.67 mm relative to
+# the chamber, and home is clear again.
+- name: CAD home is clear
+  positions: {}
+  expect_clear: true
+- name: Vertical lift contacts the outer cage
+  positions:
+    parker_lift_joint: -0.05
+  touching_pairs: [[P534, P702]]
+- name: Return from cage contact to home
+  positions: {}
+  expect_clear: true
+# The ZA16A wedge follows ePix10k y, sliding 32 mm forward at the top.
+- name: ePix10k y top, wedge slid forward
+  positions:
+    detector_y_joint: 0.008
+  expect_clear: true
+- name: ePix10k y bottom, wedge drawn back
+  positions:
+    detector_y_joint: -0.008
+  expect_clear: true
+# Reviewed hull false positives that cannot close within travel. The convex hulls of chamber
+# port P414 fill the bores the slit blade rods pass through; source CAD keeps clearance around
+# each rod at every corner of its +/-4 mm y and +/-7.5 mm x travel.
+ignored_pairs:
+- pair: [P414, P078]
+  reason: Bottom slit rod passes through the port bore with >= 2.786 mm CAD clearance over travel.
+- pair: [P414, P124]
+  reason: Top slit rod passes through the port bore with >= 2.729 mm CAD clearance over travel.
+- pair: [P2147, P2146]
+  reason: The ZA16A table and wedge are sibling bodies coupled by detector_y_wedge_joint; their 1/4
+    incline faces stay in contact, without overlap, at every height, so no Drake joint filter
+    covers this always-touching bearing.
+- pair: [P2147, P2145]
+  reason: The ZA16A wedge's retainer P2145 rides the same 1/4 incline under the table, touching it
+    without overlap at every height.
+- pair: [P2146, P2054]
+  reason: ePix10k frame P2054 clears the ZA16A wedge by 9.297 mm at home and 1.297 mm at the bottom
+    of +/-8 mm y travel, measured in CAD with the wedge sliding 4 mm per mm (2 mm steps).
+- pair: [P2145, P2054]
+  reason: ePix10k frame P2054 clears the wedge retainer by the same 9.297/1.297 mm as the wedge.
+# Mechanisms whose own drawn clearances are not faithful: every pair within a group is ignored,
+# while each member stays checked against the rest of the assembly.
+ignored_groups:
+- parts: [P323, P324, P325, P326, P327, P328, P329, P330, P331, P332, P333, P334, P335, P336]
+  reason: Newport M-EL80 lab jack LIB-000033108. Its pins stay seated over Newport's 53-113 mm, but
+    the library CAD is drawn tighter than the real jack. At 112.2 mm the arms' sliding
+    ends already cut 1.5 mm (36.5 mm3) into the plates' channels. Below 72.8 mm arm B sweeps into
+    the top plate's underside beside its pivot, and the top block meets its channel end at 60.0 mm.
+notes:
+- Offline provisional kinematic model; CAD pose is q=0 for every joint.
+- Axes and attachment order inferred from bearing geometry and coincident mounting planes.
+- Catalog travel is exposed for review; imported Parker and Kohzu absolute travel zeros are uncalibrated.
+- Kohzu XA/SA and Huber fused solids are partitioned at visible moving interfaces; internal bearings
+  simplified.
+- Bearing parts also list payloads riding a constant designed clearance to their own stage, which
+  the inflated hulls fill. These are Huber end plate P936 (0.5 mm over +/-45 degrees), Parker
+  bracket P698 (3.25 mm over +/-50 mm), slit lift brackets P092/P141 (0.787 mm over +/-4 mm) and
+  slit X-stage sensor brackets P107/P156 (0.498 mm to the X carriage over +/-7.5 mm). Source-CAD
+  gaps were checked across the full travel.
+- The four crystal rotation stages LIB-000032444 (P767/P811/P854/P897) replaced the Kohzu RA04A-W
+  in this revision and carry no solids in the STEP, so no rotation stage is drawn or checked. Each
+  rotation axis rides the adapter mo39185433 above it, which kept its place in the stack; the XA07A
+  translation stages sit 0.5 mm higher in each stack than before.
+- The STEP holds four mo39154771 crystal stacks A068-A071. Stack 4 joint frames are stack 1 frames
+  carried by the stack placement transform; the same transform reproduces stacks 2 and 3 to 0.022 mm.
+- Jet stage parts are present in this STEP revision.
+- Manual stages remain fixed, except the ePix100's M-EL80 lab jack, manual Kohzu translation and
+  swivel. Beam construction geometry and communication configuration omitted.
+- Analyzer (Huber 410) and crystal rotations are limited to +/-45 degrees about the CAD pose by
+  request.
+- Split outputs discard inverted and disconnected solids below 100 cubic millimetres; external stage
+  bodies and carriage interfaces retained.
+- Beamline axes, used to name the LJ, slit and detector joints, are y up (world +Z) and beam travelling
+  along -z (world -Y), so z is world +Y and x is world -X. The beam direction is inferred from the
+  slits upstream at world +Y and the ePix10k centred on world Y downstream.
+- Liquid jet DSG-000007948 is a three-axis chain, as in the 43841 review. Kohzu XA05A-L202-R A007
+  runs along the jet (x, 50 mm), XA05A-R202 A006 carries z (15 mm), then the ZA05A lift A005 carries
+  y (+/-4 mm). The lift is at mid-travel in this STEP. Its carriage sits at the library's zero
+  offset on its base, as both slit lifts do, and drops more than 5 mm before bottoming. The older
+  43841 STEP drew every LIB-000032469 carriage 3.105 mm lower, so that review modelled the jet lift
+  as fully down. The jet adapter DSG-000000506 P011 carries jet holder DSG-000108486 P520, which
+  holds tube DSG-000005121 P521; both ride the lift, as in the 2026-11-04 14:01 review. The long jet
+  DSG-000022427 that the 2026-11-12 export carried in their place is not in this export.
+- Bottom and top slits A009/A015 each stack a LIB-000032451 vertical lift (y, 8 mm) under an XA05A-R202
+  (x, 15 mm); the blade rods ride the X stage. See auxiliary-stages.md.
+- The slit blade holders DSG-000000720 (P511 bottom, P195 top) and their blade plates (P436 bottom,
+  P434/P435 top) are placed directly under chamber assembly A003 in the STEP, but are clamped by four
+  5-40 screws to the tip of each blade rod (P078, P124). They ride the slit X stages. The bottom
+  holder's second plate mo39143620 is not in this export.
+- The ePix10k detector rides two Newport IMS300CC slides, now multi-part library models
+  LIB-000033136, the lower A160 (base P2148, carriage P2149) along z and the upper A161 (base P2150,
+  carriage P2151) along x. Each base's carriage channel is open from 0 to 513.5 mm along its travel
+  and the library places its 179 mm carriage at 167 mm, mid-channel, which is taken as mid-travel
+  for the 300 mm stroke. The upper carriage is drawn there, so x runs +/-150 mm. The lower carriage
+  is drawn 134.378 mm towards world +Y, so z runs -284.378/+15.622 mm. Above the upper carriage's
+  adapter P2102, a Kohzu ZA16A-W2C01 wedge Z stage LIB-000033137 A157 lifts the detector along
+  world +Z (y, +/-8 mm). Its table P2147 rides with everything above it from frame P2054 up, and
+  its 1/4 wedge P2146 with retainer P2145 slides under the table 4 mm along world +Y per mm of
+  lift (detector_y_wedge_joint follows detector_y_joint), its incline faces in contact with the
+  table's at every height. The base P2144 and its pin P2143 stay on the x slide. The vendor drawing
+  gives the table 80 +/-8 mm above the mounting face, and the CAD table face sits at 80.01 mm, so
+  the CAD pose is mid-travel. The plates DSG-000007302 (P2090, P2118) now hang under the fixed
+  base plate P2124, and the lower base P2148 stands on its risers P2097/P2120.
+- Outer cage A040 is fixed collision geometry. Large spectrometer controls are the two 100 mm Parker
+  slides.
+- The user-supplied controls envelope P702 and its support posts ride the Parker lift plate P666;
+  this STEP revision replaces the earlier XCS Von Hamos Controls assembly DSG-000108873 with that
+  single envelope.
+- The supplied STEP is the 10 degree mounting configuration of DSG-000095826 on DSG-000097481. It
+  also holds a 0 degree copy A075 and a solid-less 5 degree placement P523, omitted here; their
+  placements give the alternative mountings exactly.
+- Detector assembly LCL5005-008450 (ePix10k on two Newport IMS300 slides) keeps its parts at least
+  100 mm across; smaller parts and electronics are omitted. The front plate mo39134025 is not in
+  this export.
+- Diffractometer base P973 is fixed geometry. The diffractometer body, 2-theta arm and 2-theta stage
+  (P974-P976) carry only coordinate systems in this STEP, so no further diffractometer geometry can
+  be shown; its goniometer SA-391-444-50 is not in the export. The rest of table assembly
+  DSG-000008836 (understructure, floor anchors) stays omitted.
+- Camera rotation stage LIB-000032933 (P471 base, P472 top) has geometry since the 2026-11-12 export
+  and is held fixed with the camera mount; LIB-000032929 still has no solids.
+- The upward-facing ePix100 (module mo39154223 in DSG-000042618 A021) rides, from the fixed block
+  P204, a manual Newport M-EL80 lab jack LIB-000033108 A033 along world +Z (y), a Micronix
+  VT-50L-13316 stepper stage LIB-000033066 A023 along world X, a manual stage LIB-000033109 A034 along
+  world Y, and a Kohzu SH05B-RM manual swivel LIB-000013709 A022 about world X through datum sphere
+  P221, where the swivel base's guideway arcs are centred. Its top plate's arcs sit 0.30 mm lower, a
+  small mating offset in the CAD left as drawn. A 10 degree wedge adapter P197 under the swivel gives
+  the detector's CAD tilt; the swivel itself is centred. The module's front/rear covers P287/P243
+  and cooling block P270/P271 are retained with the external coolant fittings and tubes
+  P272-P279/P309 and the transceiver P261 and ribbon cable P268 that protrude from the rear face; the
+  parts fully enclosed by the covers stay omitted as internals.
+- The M-EL80 is a single scissor drawn 83.00 mm high, mid-way through its 53-113 mm range, and
+  turned 180 degrees about world Z from the 2026-11-12 export. Arm A P325 pins to the base plate
+  P324 at (x -129.231, z -217.074) mm and slides on top block P328; arm B P326 pins to the top plate
+  P323 at z -160.174 and slides on bottom block P329; they cross at centre pin P330. The arms are
+  103.581 mm between pivots, at 33.33 degrees. Knob and screw P327 ride the top plate and drive
+  P328 as a nut. epix100_y_joint lifts the top plate; the arms and blocks follow it by the exact
+  scissor relation. ePix100 y covers Newport's full 53-113 mm, -30.000/+30.000 mm about the CAD
+  pose, as the user asked. The library CAD is drawn tighter than the real jack (see
+  ignored_groups), so its own parts visibly overlap low in the stroke.
+- The VT-50L-13316 is Micronix's 198 mm version. Its carriage P224 runs 175.5 mm towards the motor,
+  where its nut housing meets the motor mount, and 28.0 mm to the far end block, 203.5 mm in all. The
+  198 mm between its limit switches is assumed centred in that, so the carriage is drawn 73.8 mm
+  from mid-travel and ePix100 x runs -25.22/+172.78 mm along beamline x (world -X).
+- The manual stage LIB-000033109 (base P340, table P341, micrometer P342 along world +Y) replaces
+  the earlier fused Kohzu model; its CAD has no end stops, so it keeps that stage's +/-6.5 mm.
+stage_splits:
+  P933: P1177
+  P760: P1047
+  P765: P1052
+  P804: P1047
+  P809: P1052
+  P847: P1047
+  P852: P1052
+  P890: P1047
+  P895: P1052
+bodies:
+  assembly_base:
+    rgba: [0.6, 0.64, 0.69, 1.0]
+    parts:
+    - P684
+    - P686
+    - P687
+    - P697
+    - P716
+    - P001
+    - P002
+    - P003
+    - P013
+    - P030
+    - P032
+    - P034
+    - P036
+    - P037
+    - P051
+    - P053
+    - P055
+    - P063
+    - P064
+    - P067
+    - P344
+    - P345
+    - P346
+    - P348
+    - P350
+    - P353
+    - P356
+    - P358
+    - P359
+    - P360
+    - P362
+    - P363
+    - P365
+    - P366
+    - P367
+    - P373
+    - P375
+    - P382
+    - P385
+    - P386
+    - P392
+    - P393
+    - P397
+    - P399
+    - P400
+    - P404
+    - P407
+    - P408
+    - P413
+    - P416
+    - P418
+    - P425
+    - P069
+    - P087
+    - P088
+    - P089
+    - P095
+    - P100
+    - P101
+    - P102
+    - P118
+    - P119
+    - P120
+    - P136
+    - P137
+    - P138
+    - P144
+    - P149
+    - P150
+    - P151
+    - P167
+    - P168
+    - P177
+    - P182
+    - P183
+    - P184
+    - P185
+    - P186
+    - P187
+    - P194
+    - P204
+    # M-EL80 lab jack base plate and bottom fixed-pivot pin.
+    - P324
+    - P332
+    - P431
+    - P432
+    - P433
+    - P437
+    - P438
+    - P439
+    - P440
+    - P441
+    - P442
+    - P443
+    - P444
+    - P445
+    - P446
+    - P447
+    - P448
+    - P449
+    - P450
+    - P451
+    - P452
+    - P453
+    - P454
+    - P455
+    - P456
+    - P457
+    - P458
+    - P462
+    - P464
+    - P466
+    - P468
+    # Camera rotation stage LIB-000032933; held fixed like the rest of the camera mount.
+    - P471
+    - P472
+    - P475
+    - P478
+    - P479
+    - P480
+    - P485
+    - P490
+    - P496
+    - P507
+    - P508
+    - P514
+    - P1417
+    - P1418
+    - P1419
+    - P1426
+    - P524
+    - P525
+    - P526
+    - P527
+    - P558
+    - P554
+    - P555
+    - P551
+    - P532
+    - P556
+    - P534
+    - P535
+    - P536
+    - P538
+    - P539
+    - P540
+    - P552
+    - P543
+    - P563
+    - P564
+    - P565
+    - P566
+    - P567
+    - P568
+    - P569
+    - P570
+    - P571
+    - P572
+    - P573
+    - P574
+    - P575
+    - P576
+    - P577
+    - P578
+    - P579
+    - P580
+    - P581
+    - P582
+    - P583
+    - P584
+    - P585
+    - P586
+    - P587
+    - P588
+    - P589
+    - P606
+    - P607
+    - P608
+    - P010
+    - P023
+    - P352
+    - P414
+    - P428
+    - P429
+    - P553
+    - P557
+    - P2097
+    - P2120
+    - P2124
+    - P2148
+    - P2090
+    - P2118
+    - P343
+    - P430
+    - P973
+    part_colors:
+      P524: [0.43, 0.49, 0.56, 1.0]
+      P525: [0.43, 0.49, 0.56, 1.0]
+      P526: [0.43, 0.49, 0.56, 1.0]
+      P527: [0.43, 0.49, 0.56, 1.0]
+      P532: [0.43, 0.49, 0.56, 1.0]
+      P534: [0.43, 0.49, 0.56, 1.0]
+      P535: [0.43, 0.49, 0.56, 1.0]
+      P536: [0.43, 0.49, 0.56, 1.0]
+      P538: [0.43, 0.49, 0.56, 1.0]
+      P539: [0.43, 0.49, 0.56, 1.0]
+      P540: [0.43, 0.49, 0.56, 1.0]
+      P543: [0.43, 0.49, 0.56, 1.0]
+      P551: [0.43, 0.49, 0.56, 1.0]
+      P552: [0.43, 0.49, 0.56, 1.0]
+      P553: [0.43, 0.49, 0.56, 1.0]
+      P554: [0.43, 0.49, 0.56, 1.0]
+      P555: [0.43, 0.49, 0.56, 1.0]
+      P556: [0.43, 0.49, 0.56, 1.0]
+      P557: [0.43, 0.49, 0.56, 1.0]
+      P558: [0.43, 0.49, 0.56, 1.0]
+      P563: [0.43, 0.49, 0.56, 1.0]
+      P564: [0.43, 0.49, 0.56, 1.0]
+      P565: [0.43, 0.49, 0.56, 1.0]
+      P566: [0.43, 0.49, 0.56, 1.0]
+      P567: [0.43, 0.49, 0.56, 1.0]
+      P568: [0.43, 0.49, 0.56, 1.0]
+      P569: [0.43, 0.49, 0.56, 1.0]
+      P570: [0.43, 0.49, 0.56, 1.0]
+      P571: [0.43, 0.49, 0.56, 1.0]
+      P572: [0.43, 0.49, 0.56, 1.0]
+      P573: [0.43, 0.49, 0.56, 1.0]
+      P574: [0.43, 0.49, 0.56, 1.0]
+      P575: [0.43, 0.49, 0.56, 1.0]
+      P576: [0.43, 0.49, 0.56, 1.0]
+      P577: [0.43, 0.49, 0.56, 1.0]
+      P578: [0.43, 0.49, 0.56, 1.0]
+      P579: [0.43, 0.49, 0.56, 1.0]
+      P580: [0.43, 0.49, 0.56, 1.0]
+      P581: [0.43, 0.49, 0.56, 1.0]
+      P582: [0.43, 0.49, 0.56, 1.0]
+      P583: [0.43, 0.49, 0.56, 1.0]
+      P584: [0.43, 0.49, 0.56, 1.0]
+      P585: [0.43, 0.49, 0.56, 1.0]
+      P586: [0.43, 0.49, 0.56, 1.0]
+      P587: [0.43, 0.49, 0.56, 1.0]
+      P588: [0.43, 0.49, 0.56, 1.0]
+      P589: [0.43, 0.49, 0.56, 1.0]
+      P606: [0.43, 0.49, 0.56, 1.0]
+      P607: [0.43, 0.49, 0.56, 1.0]
+      P608: [0.43, 0.49, 0.56, 1.0]
+  parker_lift:
+    rgba: [0.2, 0.45, 0.75, 1.0]
+    parts: [P685, P701, P666, P652, P654, P655, P665, P757, P965, P967, P971, P702]
+    part_colors:
+      P702: [0.22, 0.25, 0.29, 1.0]
+  parker_cross:
+    rgba: [0.27, 0.59, 0.85, 1.0]
+    parts:
+    - P653
+    - P698
+    - P699
+    - P700
+    - P935
+    - {ref: P933, region: fixed}
+  analyzer_rotation:
+    rgba: [0.75, 0.43, 0.18, 1.0]
+    parts:
+    - {ref: P933, region: moving}
+    - P936
+    - P941
+    - P942
+    - P947
+    - P758
+    - {ref: P760, region: fixed}
+    - {ref: P804, region: fixed}
+    - {ref: P847, region: fixed}
+    - {ref: P890, region: fixed}
+  crystal_1_translation:
+    rgba: [0.26, 0.63, 0.46, 1.0]
+    parts:
+    - {ref: P760, region: moving}
+    - P763
+  crystal_1_rotation:
+    rgba: [0.59, 0.37, 0.78, 1.0]
+    parts:
+    - P766
+    - {ref: P765, region: fixed}
+    - {ref: P765, solids: [2, 3]}
+  crystal_1_tilt:
+    rgba: [0.12, 0.73, 0.72, 1.0]
+    parts:
+    - {ref: P765, region: moving}
+    - P761
+    - P769
+    - P800
+    - P801
+    - P802
+  crystal_2_translation:
+    rgba: [0.26, 0.63, 0.46, 1.0]
+    parts:
+    - {ref: P804, region: moving}
+    - P807
+  crystal_2_rotation:
+    rgba: [0.59, 0.37, 0.78, 1.0]
+    parts:
+    - P810
+    - {ref: P809, region: fixed}
+    - {ref: P809, solids: [2, 3]}
+  crystal_2_tilt:
+    rgba: [0.12, 0.73, 0.72, 1.0]
+    parts:
+    - {ref: P809, region: moving}
+    - P805
+    - P813
+    - P844
+    - P845
+    - P846
+  crystal_3_translation:
+    rgba: [0.26, 0.63, 0.46, 1.0]
+    parts:
+    - {ref: P847, region: moving}
+    - P850
+  crystal_3_rotation:
+    rgba: [0.59, 0.37, 0.78, 1.0]
+    parts:
+    - P853
+    - {ref: P852, region: fixed}
+    - {ref: P852, solids: [2, 3]}
+  crystal_3_tilt:
+    rgba: [0.12, 0.73, 0.72, 1.0]
+    parts:
+    - {ref: P852, region: moving}
+    - P848
+    - P856
+    - P887
+    - P888
+    - P889
+  crystal_4_translation:
+    rgba: [0.26, 0.63, 0.46, 1.0]
+    parts:
+    - {ref: P890, region: moving}
+    - P893
+  crystal_4_rotation:
+    rgba: [0.59, 0.37, 0.78, 1.0]
+    parts:
+    - P896
+    - {ref: P895, region: fixed}
+    - {ref: P895, solids: [2, 3]}
+  crystal_4_tilt:
+    rgba: [0.12, 0.73, 0.72, 1.0]
+    parts:
+    - {ref: P895, region: moving}
+    - P891
+    - P899
+    - P930
+    - P931
+    - P932
+  lj_x:
+    rgba: [0.16, 0.52, 0.44, 1.0]
+    parts: [P024, P021]
+  lj_z:
+    rgba: [0.32, 0.74, 0.62, 1.0]
+    parts: [P022, P019]
+  lj_y:
+    rgba: [0.1, 0.58, 0.95, 1.0]
+    parts: [P020, P011, P040, P042, P044, P046, P048, P057, P520, P521]
+  bottom_slit_y:
+    rgba: [0.82, 0.34, 0.48, 1.0]
+    parts: [P086, P092, P098, P104, P107, P108, P111]
+  bottom_slit_x:
+    rgba: [0.32, 0.74, 0.62, 1.0]
+    parts: [P105, P106, P112, P074, P075, P078, P511, P436]
+  top_slit_y:
+    rgba: [0.82, 0.34, 0.48, 1.0]
+    parts: [P135, P141, P147, P153, P156, P157, P160]
+  top_slit_x:
+    rgba: [0.32, 0.74, 0.62, 1.0]
+    parts: [P154, P155, P161, P123, P124, P195, P434, P435]
+  detector_z:
+    rgba: [0.2, 0.58, 0.68, 1.0]
+    parts:
+    # IMS300CC z carriage, and the x slide's base on it.
+    - P2149
+    - P2150
+  detector_x:
+    rgba: [0.18, 0.72, 0.62, 1.0]
+    parts:
+    # IMS300CC x carriage, its adapter, and the ZA16A-W2C01 base with its pin.
+    - P2151
+    - P2102
+    - P2144
+    - P2143
+  detector_y_wedge:
+    rgba: [0.18, 0.72, 0.62, 1.0]
+    parts:
+    # ZA16A 1/4 wedge and its retainer.
+    - P2146
+    - P2145
+  detector_y:
+    rgba: [0.22, 0.64, 0.84, 1.0]
+    parts:
+    - P2147
+    - P2054
+    - P2060
+    - P2070
+    - P2080
+    - P2089
+    - P2091
+    - P2092
+    - P2096
+    - P2100
+    - P1450
+    - P1459
+    - P1472
+    - P1485
+    - P1500
+    - P1506
+    - P1519
+    - P1530
+    - P1546
+    - P1554
+    - P1625
+    - P1626
+    - P1629
+    - P1630
+    - P1631
+    - P1635
+    - P1642
+    - P1643
+    - P1644
+    - P1651
+    - P1669
+    - P1678
+    - P1776
+    - P1778
+    - P1779
+    - P1780
+    - P1781
+    # The 16 ePix10k2M sensor modules DSG-000006659: frame, carrier PCB, four ASICs and
+    # the sensor chip each. Their Samtec connectors stay omitted behind the carrier PCBs.
+    - P1659
+    - P1662
+    - P1663
+    - P1664
+    - P1665
+    - P1666
+    - P1668
+    - P1819
+    - P1822
+    - P1823
+    - P1824
+    - P1825
+    - P1826
+    - P1828
+    - P1839
+    - P1842
+    - P1843
+    - P1844
+    - P1845
+    - P1846
+    - P1848
+    - P1849
+    - P1852
+    - P1853
+    - P1854
+    - P1855
+    - P1856
+    - P1858
+    - P1864
+    - P1867
+    - P1868
+    - P1869
+    - P1870
+    - P1871
+    - P1873
+    - P1879
+    - P1882
+    - P1883
+    - P1884
+    - P1885
+    - P1886
+    - P1888
+    - P1894
+    - P1897
+    - P1898
+    - P1899
+    - P1900
+    - P1901
+    - P1903
+    - P1909
+    - P1912
+    - P1913
+    - P1914
+    - P1915
+    - P1916
+    - P1918
+    - P1924
+    - P1927
+    - P1928
+    - P1929
+    - P1930
+    - P1931
+    - P1933
+    - P1939
+    - P1942
+    - P1943
+    - P1944
+    - P1945
+    - P1946
+    - P1948
+    - P1954
+    - P1957
+    - P1958
+    - P1959
+    - P1960
+    - P1961
+    - P1963
+    - P1969
+    - P1972
+    - P1973
+    - P1974
+    - P1975
+    - P1976
+    - P1978
+    - P1984
+    - P1987
+    - P1988
+    - P1989
+    - P1990
+    - P1991
+    - P1993
+    - P1999
+    - P2002
+    - P2003
+    - P2004
+    - P2005
+    - P2006
+    - P2008
+    - P2014
+    - P2017
+    - P2018
+    - P2019
+    - P2020
+    - P2021
+    - P2023
+    - P2029
+    - P2032
+    - P2033
+    - P2034
+    - P2035
+    - P2036
+    - P2038
+  epix100_y:
+    rgba: [0.47, 0.4, 0.68, 1.0]
+    parts:
+    # M-EL80 top plate, its drive knob and screw, and the top fixed-pivot pin; then the
+    # adapter and the VT-50L base above it.
+    - P323
+    - P327
+    - P331
+    - P201
+    - P223
+  # M-EL80 scissor: arm A with the centre pin, arm B, and the two sliding blocks with their
+  # pin bushings.
+  epix100_jack_arm_a:
+    rgba: [0.6, 0.6, 0.64, 1.0]
+    parts: [P325, P330]
+  epix100_jack_arm_b:
+    rgba: [0.6, 0.6, 0.64, 1.0]
+    parts: [P326]
+  epix100_jack_top_slider:
+    rgba: [0.6, 0.6, 0.64, 1.0]
+    parts: [P328, P333, P334]
+  epix100_jack_bottom_slider:
+    rgba: [0.6, 0.6, 0.64, 1.0]
+    parts: [P329, P335, P336]
+  epix100_x:
+    rgba: [0.55, 0.45, 0.75, 1.0]
+    # VT-50L carriage, adapter, and the manual stage's base and micrometer.
+    parts: [P224, P198, P340, P342]
+  epix100_z:
+    rgba: [0.65, 0.5, 0.82, 1.0]
+    # Manual stage table, 10 degree wedge adapter and the swivel's base.
+    parts: [P341, P197, P220]
+  epix100_tilt:
+    rgba: [0.75, 0.55, 0.9, 1.0]
+    parts: [P222, P225, P203, P200, P226, P227, P230, P319, P320, P322, P243, P270, P271, P287,
+      P261, P268, P272, P273, P274, P275, P276, P277, P278, P279, P309]
+joints:
+- name: parker_lift_joint
+  stack: Spectrometer / large vertical slide (100 mm travel)
+  stage_ref: P684
+  type: prismatic
+  parent: assembly_base
+  child: parker_lift
+  axis_xyz: [0.0, -0.173648177667, -0.984807753012]
+  origin_m: [-0.5102825771, 0.1033763, 0.5598908973]
+  limits: [-0.05, 0.05]
+  home: 0.0
+  bearing_parts: [[P684, P686, P687, P697], [P685]]
+- name: parker_cross_joint
+  stack: Spectrometer / large horizontal slide (100 mm travel)
+  stage_ref: P652
+  type: prismatic
+  parent: parker_lift
+  child: parker_cross
+  axis_xyz: [1.0, 0.0, 0.0]
+  origin_m: [-0.2441605771, 0.099219249, 0.5363150923]
+  limits: [-0.05, 0.05]
+  home: 0.0
+  bearing_parts: [[P652, P654, P655, P665], [P653, P698]]
+- name: analyzer_rotation_joint
+  stack: Analyzer support
+  stage_ref: P933
+  type: revolute
+  parent: parker_cross
+  child: analyzer_rotation
+  axis_xyz: [1.0, 0.0, 0.0]
+  origin_m: [-0.3121355771, 0.043412044, 0.2271591383]
+  limits: [-0.7853981633974483, 0.7853981633974483]
+  home: 0.0
+  bearing_parts: [[P933], [P933, P936]]
+- name: crystal_1_translation_joint
+  stack: crystal_1
+  stage_ref: P760
+  type: prismatic
+  parent: analyzer_rotation
+  child: crystal_1_translation
+  axis_xyz: [0.0, 0.059306373576, -0.998239827924]
+  origin_m: [0.1231444229, -0.016331469, 0.2558470933]
+  limits: [-0.035, 0.035]
+  home: 0.0
+  bearing_parts: [[P760], [P760]]
+- name: crystal_1_rotation_joint
+  stack: crystal_1
+  stage_ref: P767
+  type: revolute
+  parent: crystal_1_translation
+  child: crystal_1_rotation
+  axis_xyz: [-1.0, 0.0, 0.0]
+  origin_m: [0.0741194229, -0.014825087, 0.2304918013]
+  limits: [-0.7853981633974483, 0.7853981633974483]
+  home: 0.0
+  bearing_parts: [[], [P766]]
+- name: crystal_1_tilt_joint
+  stack: crystal_1
+  stage_ref: P765
+  type: revolute
+  parent: crystal_1_rotation
+  child: crystal_1_tilt
+  axis_xyz: [0.0, 0.998239827924, 0.059306373576]
+  origin_m: [-0.0394055771, -0.014825087, 0.2304918013]
+  limits: [-0.17453292519943295, 0.17453292519943295]
+  home: 0.0
+  bearing_parts: [[P765], [P765]]
+- name: crystal_2_translation_joint
+  stack: crystal_2
+  stage_ref: P804
+  type: prismatic
+  parent: analyzer_rotation
+  child: crystal_2_translation
+  axis_xyz: [0.0, -0.397147890635, -0.917754625684]
+  origin_m: [0.1231444229, 0.109364442, 0.2336835133]
+  limits: [-0.035, 0.035]
+  home: 0.0
+  bearing_parts: [[P804], [P804]]
+- name: crystal_2_rotation_joint
+  stack: crystal_2
+  stage_ref: P811
+  type: revolute
+  parent: crystal_2_translation
+  child: crystal_2_rotation
+  axis_xyz: [-1.0, 0.0, 0.0]
+  origin_m: [0.0741194229, 0.099276885, 0.2103725453]
+  limits: [-0.7853981633974483, 0.7853981633974483]
+  home: 0.0
+  bearing_parts: [[], [P810]]
+- name: crystal_2_tilt_joint
+  stack: crystal_2
+  stage_ref: P809
+  type: revolute
+  parent: crystal_2_rotation
+  child: crystal_2_tilt
+  axis_xyz: [0.0, 0.917754625684, -0.397147890635]
+  origin_m: [-0.0394055771, 0.099276885, 0.2103725453]
+  limits: [-0.17453292519943295, 0.17453292519943295]
+  home: 0.0
+  bearing_parts: [[P809], [P809]]
+- name: crystal_3_translation_joint
+  stack: crystal_3
+  stage_ref: P847
+  type: prismatic
+  parent: analyzer_rotation
+  child: crystal_3_translation
+  axis_xyz: [0.0, 0.059306373576, -0.998239827924]
+  origin_m: [-0.2324355771, -0.016331469, 0.2558470933]
+  limits: [-0.035, 0.035]
+  home: 0.0
+  bearing_parts: [[P847], [P847]]
+- name: crystal_3_rotation_joint
+  stack: crystal_3
+  stage_ref: P854
+  type: revolute
+  parent: crystal_3_translation
+  child: crystal_3_rotation
+  axis_xyz: [1.0, 0.0, 0.0]
+  origin_m: [-0.1834105771, -0.014825087, 0.2304918013]
+  limits: [-0.7853981633974483, 0.7853981633974483]
+  home: 0.0
+  bearing_parts: [[], [P853]]
+- name: crystal_3_tilt_joint
+  stack: crystal_3
+  stage_ref: P852
+  type: revolute
+  parent: crystal_3_rotation
+  child: crystal_3_tilt
+  axis_xyz: [0.0, -0.998239827924, -0.059306373576]
+  origin_m: [-0.0698855771, -0.014825087, 0.2304918013]
+  limits: [-0.17453292519943295, 0.17453292519943295]
+  home: 0.0
+  bearing_parts: [[P852], [P852]]
+- name: crystal_4_translation_joint
+  stack: crystal_4
+  stage_ref: P890
+  type: prismatic
+  parent: analyzer_rotation
+  child: crystal_4_translation
+  axis_xyz: [0.0, -0.397147890635, -0.917754625684]
+  origin_m: [-0.2324132221, 0.109367862, 0.2336829103]
+  limits: [-0.035, 0.035]
+  home: 0.0
+  bearing_parts: [[P890], [P890]]
+- name: crystal_4_rotation_joint
+  stack: crystal_4
+  stage_ref: P897
+  type: revolute
+  parent: crystal_4_translation
+  child: crystal_4_rotation
+  axis_xyz: [1.0, 0.0, 0.0]
+  origin_m: [-0.1833882221, 0.099280305, 0.2103719423]
+  limits: [-0.7853981633974483, 0.7853981633974483]
+  home: 0.0
+  bearing_parts: [[], [P896]]
+- name: crystal_4_tilt_joint
+  stack: crystal_4
+  stage_ref: P895
+  type: revolute
+  parent: crystal_4_rotation
+  child: crystal_4_tilt
+  axis_xyz: [0.0, -0.917754625684, 0.397147890635]
+  origin_m: [-0.0698632221, 0.099280305, 0.2103719423]
+  limits: [-0.17453292519943295, 0.17453292519943295]
+  home: 0.0
+  bearing_parts: [[P895], [P895]]
+- name: lj_x_joint
+  stack: Liquid jet x (Kohzu XA05A-L202-R, 50 mm)
+  stage_ref: P023
+  type: prismatic
+  parent: assembly_base
+  child: lj_x
+  axis_xyz: [-1.0, 0.0, 0.0]
+  origin_m: [0.1396517, 0.0, -0.225979]
+  limits: [-0.025, 0.025]
+  home: 0.0
+  bearing_parts: [[P023], [P024]]
+- name: lj_z_joint
+  stack: Liquid jet z (Kohzu XA05A-R202, 15 mm)
+  stage_ref: P021
+  type: prismatic
+  parent: lj_x
+  child: lj_z
+  axis_xyz: [0.0, 1.0, 0.0]
+  origin_m: [0.1396517, 0.0, -0.185979]
+  limits: [-0.0075, 0.0075]
+  home: 0.0
+  bearing_parts: [[P021], [P022]]
+- name: lj_y_joint
+  stack: Liquid jet y (Kohzu ZA05A-W101-BM, +/-4 mm, CAD pose mid-travel)
+  stage_ref: P019
+  type: prismatic
+  parent: lj_z
+  child: lj_y
+  axis_xyz: [0.0, 0.0, 1.0]
+  origin_m: [0.1396517, 0.0, -0.165979]
+  limits: [-0.004, 0.004]
+  home: 0.0
+  bearing_parts: [[P019], [P020]]
+- name: bottom_slit_y_joint
+  stack: Bottom slit y (LIB-000032451 lift, 8 mm)
+  stage_ref: P087
+  type: prismatic
+  parent: assembly_base
+  child: bottom_slit_y
+  axis_xyz: [0.0, 0.0, 1.0]
+  origin_m: [-0.1445352, 0.1290124, -0.165354]
+  limits: [-0.004, 0.004]
+  home: 0.0
+  bearing_parts: [[P087], [P086, P092]]
+- name: bottom_slit_x_joint
+  stack: Bottom slit x (Kohzu XA05A-R202, 15 mm)
+  stage_ref: P104
+  type: prismatic
+  parent: bottom_slit_y
+  child: bottom_slit_x
+  axis_xyz: [-1.0, 0.0, 0.0]
+  origin_m: [-0.1445352, 0.1290124, -0.109354]
+  limits: [-0.0075, 0.0075]
+  home: 0.0
+  bearing_parts: [[P104, P107], [P105]]
+- name: top_slit_y_joint
+  stack: Top slit y (LIB-000032451 lift, 8 mm)
+  stage_ref: P136
+  type: prismatic
+  parent: assembly_base
+  child: top_slit_y
+  axis_xyz: [0.0, 0.0, 1.0]
+  origin_m: [-0.1805574, 0.1294136, -0.063754]
+  limits: [-0.004, 0.004]
+  home: 0.0
+  bearing_parts: [[P136], [P135, P141]]
+- name: top_slit_x_joint
+  stack: Top slit x (Kohzu XA05A-R202, 15 mm)
+  stage_ref: P153
+  type: prismatic
+  parent: top_slit_y
+  child: top_slit_x
+  axis_xyz: [-1.0, 0.0, 0.0]
+  origin_m: [-0.1805574, 0.1294136, -0.007754]
+  limits: [-0.0075, 0.0075]
+  home: 0.0
+  bearing_parts: [[P153, P156], [P154]]
+- name: detector_z_joint
+  stack: ePix10k z (Newport IMS300CC, 300 mm)
+  stage_ref: P2148
+  type: prismatic
+  parent: assembly_base
+  child: detector_z
+  axis_xyz: [0.0, 1.0, 0.0]
+  origin_m: [0.009, -0.348730076, -0.3936104]
+  # The carriage is drawn 134.378 mm towards world +Y from mid-travel.
+  limits: [-0.284377924, 0.015622076]
+  home: 0.0
+  bearing_parts: [[P2148], [P2149]]
+- name: detector_x_joint
+  stack: ePix10k x (Newport IMS300CC, 300 mm)
+  stage_ref: P2150
+  type: prismatic
+  parent: detector_z
+  child: detector_x
+  axis_xyz: [-1.0, 0.0, 0.0]
+  origin_m: [0.009, -0.348730076, -0.3036104]
+  limits: [-0.15, 0.15]
+  home: 0.0
+  bearing_parts: [[P2150], [P2151]]
+- name: detector_y_joint
+  stack: ePix10k y (Kohzu ZA16A-W2C01 wedge Z stage, +/-8 mm)
+  stage_ref: P2147
+  type: prismatic
+  parent: detector_x
+  child: detector_y
+  axis_xyz: [0.0, 0.0, 1.0]
+  origin_m: [1.08e-05, -0.348730073, -0.220103109]
+  limits: [-0.008, 0.008]
+  home: 0.0
+  bearing_parts: [[P2144], [P2147]]
+# The ZA16A's 1/4 wedge slides 4 mm along world +Y (forward, towards the chamber) for every
+# 1 mm the table rises, so it has no slider of its own; viewers set it from detector_y_joint.
+- name: detector_y_wedge_joint
+  stack: ePix10k y wedge (Kohzu ZA16A-W2C01 1/4 wedge, follows ePix10k y)
+  stage_ref: P2146
+  type: prismatic
+  parent: detector_x
+  child: detector_y_wedge
+  axis_xyz: [0.0, 1.0, 0.0]
+  origin_m: [0.0061108, -0.381633524, -0.233396728]
+  limits: [-0.032, 0.032]
+  home: 0.0
+  bearing_parts: [[P2144], [P2146, P2145]]
+  follows: {joint: detector_y_joint, ratio: 4.0}
+- name: epix100_y_joint
+  stack: ePix100 y (manual Newport M-EL80 lab jack, 53-113 mm high)
+  stage_ref: P323
+  type: prismatic
+  parent: assembly_base
+  child: epix100_y
+  axis_xyz: [0.0, 0.0, 1.0]
+  origin_m: [-0.1815999995, 0.0188219984, -0.1471239559]
+  limits: [-0.03000004, 0.02999996]
+  home: 0.0
+  bearing_parts: [[], []]
+# The M-EL80 is a single scissor: arm A runs from the base's fixed pivot to the top slider,
+# arm B from the top plate's fixed pivot to the bottom slider, crossing at the centre pin. Its
+# arms, sliders and pins have no sliders of their own; viewers set them from epix100_y_joint.
+- name: epix100_jack_arm_a_joint
+  stack: ePix100 lab jack arm A (follows ePix100 y)
+  stage_ref: P323
+  type: revolute
+  parent: assembly_base
+  child: epix100_jack_arm_a
+  axis_xyz: [0.0, 1.0, 0.0]
+  origin_m: [-0.1292309, 0.018822, -0.21707399]
+  limits: [-0.318849522176, 0.413803216047]
+  home: 0.0
+  bearing_parts: [[P324, P332], [P325]]
+  follows:
+    joint: epix100_y_joint
+    scissor: {arm_m: 0.103580905, rise_m: 0.05689998, output: angle}
+- name: epix100_jack_arm_b_joint
+  stack: ePix100 lab jack arm B (follows ePix100 y)
+  stage_ref: P323
+  type: revolute
+  parent: epix100_y
+  child: epix100_jack_arm_b
+  axis_xyz: [0.0, -1.0, 0.0]
+  origin_m: [-0.1292309, 0.018822, -0.16017401]
+  limits: [-0.318849522176, 0.413803216047]
+  home: 0.0
+  bearing_parts: [[P323, P331], [P326]]
+  follows:
+    joint: epix100_y_joint
+    scissor: {arm_m: 0.103580905, rise_m: 0.05689998, output: angle}
+- name: epix100_jack_top_slider_joint
+  stack: ePix100 lab jack top slider (follows ePix100 y)
+  stage_ref: P323
+  type: prismatic
+  parent: epix100_y
+  child: epix100_jack_top_slider
+  axis_xyz: [-1.0, 0.0, 0.0]
+  origin_m: [-0.21578375, 0.018822, -0.16017401]
+  limits: [-0.030184382712, 0.013474130092]
+  home: 0.0
+  bearing_parts: [[P323, P327], [P328, P333, P334]]
+  follows:
+    joint: epix100_y_joint
+    scissor: {arm_m: 0.103580905, rise_m: 0.05689998, output: slide}
+- name: epix100_jack_bottom_slider_joint
+  stack: ePix100 lab jack bottom slider (follows ePix100 y)
+  stage_ref: P323
+  type: prismatic
+  parent: assembly_base
+  child: epix100_jack_bottom_slider
+  axis_xyz: [-1.0, 0.0, 0.0]
+  origin_m: [-0.21578375, 0.018822, -0.21707399]
+  limits: [-0.030184382712, 0.013474130092]
+  home: 0.0
+  bearing_parts: [[P324], [P329, P335, P336]]
+  follows:
+    joint: epix100_y_joint
+    scissor: {arm_m: 0.103580905, rise_m: 0.05689998, output: slide}
+- name: epix100_x_joint
+  stack: ePix100 x (Micronix VT-50L-13316, 198 mm)
+  stage_ref: P223
+  type: prismatic
+  parent: epix100_y
+  child: epix100_x
+  axis_xyz: [-1.0, 0.0, 0.0]
+  origin_m: [-0.14709, 0.01341, -0.1121211559]
+  limits: [-0.02522, 0.17278]
+  home: 0.0
+  bearing_parts: [[P223], [P224]]
+- name: epix100_z_joint
+  stack: ePix100 z (manual stage LIB-000033109, +/-6.5 mm)
+  stage_ref: P340
+  type: prismatic
+  parent: epix100_x
+  child: epix100_z
+  axis_xyz: [0.0, 1.0, 0.0]
+  origin_m: [-0.14709, 0.01722, -0.0877711559]
+  limits: [-0.0065, 0.0065]
+  home: 0.0
+  bearing_parts: [[P340, P342], [P341]]
+- name: epix100_tilt_joint
+  stack: ePix100 tilt (manual Kohzu SH05B-RM swivel, +/-10 deg)
+  stage_ref: P220
+  type: revolute
+  parent: epix100_z
+  child: epix100_tilt
+  axis_xyz: [-1.0, 0.0, 0.0]
+  origin_m: [-0.147086243, 0.029303745, 0.0060138521]
+  limits: [-0.17453292519943295, 0.17453292519943295]
+  home: 0.0
+  bearing_parts: [[P220], [P222]]
+omitted_occurrences:
+  Fasteners and small retention hardware:
+  - P004
+  - P005
+  - P006
+  - P007
+  - P008
+  - P009
+  - P012
+  - P014
+  - P015
+  - P016
+  - P017
+  - P018
+  - P025
+  - P026
+  - P027
+  - P028
+  - P029
+  - P031
+  - P033
+  - P035
+  - P038
+  - P039
+  - P041
+  - P043
+  - P045
+  - P047
+  - P049
+  - P050
+  - P052
+  - P054
+  - P056
+  - P058
+  - P059
+  - P060
+  - P061
+  - P062
+  - P065
+  - P066
+  - P068
+  - P070
+  - P071
+  - P072
+  - P073
+  - P076
+  - P077
+  - P079
+  - P080
+  - P081
+  - P082
+  - P083
+  - P084
+  - P085
+  - P090
+  - P091
+  - P093
+  - P094
+  - P096
+  - P097
+  - P099
+  - P103
+  - P109
+  - P110
+  - P113
+  - P114
+  - P115
+  - P116
+  - P117
+  - P121
+  - P122
+  - P125
+  - P126
+  - P127
+  - P128
+  - P129
+  - P130
+  - P131
+  - P132
+  - P133
+  - P134
+  - P139
+  - P140
+  - P142
+  - P143
+  - P145
+  - P146
+  - P148
+  - P152
+  - P158
+  - P159
+  - P162
+  - P163
+  - P164
+  - P165
+  - P166
+  - P169
+  - P170
+  - P171
+  - P172
+  - P173
+  - P174
+  - P175
+  - P176
+  - P178
+  - P179
+  - P180
+  - P181
+  - P188
+  - P189
+  - P190
+  - P191
+  - P192
+  - P193
+  - P196
+  - P199
+  - P202
+  - P205
+  - P206
+  - P207
+  - P208
+  - P209
+  - P210
+  - P211
+  - P212
+  - P213
+  - P214
+  - P215
+  - P216
+  - P217
+  - P218
+  - P219
+  - P234
+  - P235
+  - P236
+  - P237
+  - P242
+  - P244
+  - P245
+  - P246
+  - P247
+  - P248
+  - P249
+  - P250
+  - P251
+  - P252
+  - P253
+  - P254
+  - P255
+  - P256
+  - P257
+  - P258
+  - P265
+  - P267
+  - P280
+  - P281
+  - P282
+  - P284
+  - P285
+  - P286
+  - P288
+  - P289
+  - P290
+  - P291
+  - P292
+  - P293
+  - P294
+  - P295
+  - P296
+  - P297
+  - P298
+  - P299
+  - P300
+  - P301
+  - P302
+  - P303
+  - P304
+  - P305
+  - P306
+  - P308
+  - P310
+  - P311
+  - P312
+  - P313
+  - P314
+  - P315
+  - P316
+  - P317
+  - P318
+  - P337
+  - P338
+  - P339
+  - P347
+  - P349
+  - P351
+  - P354
+  - P355
+  - P361
+  - P364
+  - P368
+  - P369
+  - P371
+  - P372
+  - P374
+  - P376
+  - P377
+  - P378
+  - P379
+  - P380
+  - P381
+  - P383
+  - P384
+  - P387
+  - P388
+  - P389
+  - P390
+  - P391
+  - P394
+  - P395
+  - P396
+  - P398
+  - P401
+  - P403
+  - P405
+  - P406
+  - P409
+  - P410
+  - P411
+  - P412
+  - P415
+  - P417
+  - P419
+  - P420
+  - P421
+  - P422
+  - P423
+  - P424
+  - P426
+  - P427
+  - P459
+  - P460
+  - P461
+  - P463
+  - P465
+  - P467
+  - P469
+  - P470
+  - P476
+  - P477
+  - P481
+  - P482
+  - P483
+  - P484
+  - P486
+  - P487
+  - P488
+  - P489
+  - P491
+  - P492
+  - P493
+  - P494
+  - P495
+  - P497
+  - P498
+  - P499
+  - P500
+  - P501
+  - P502
+  - P503
+  - P504
+  - P505
+  - P506
+  - P509
+  - P510
+  - P512
+  - P513
+  - P515
+  - P516
+  - P517
+  - P518
+  - P519
+  - P522
+  - P637
+  - P638
+  - P639
+  - P640
+  - P643
+  - P644
+  - P645
+  - P646
+  - P647
+  - P648
+  - P649
+  - P650
+  - P656
+  - P657
+  - P658
+  - P659
+  - P661
+  - P662
+  - P663
+  - P664
+  - P669
+  - P670
+  - P671
+  - P672
+  - P675
+  - P676
+  - P677
+  - P678
+  - P679
+  - P680
+  - P681
+  - P682
+  - P688
+  - P689
+  - P690
+  - P691
+  - P693
+  - P694
+  - P695
+  - P696
+  - P703
+  - P704
+  - P705
+  - P706
+  - P707
+  - P708
+  - P709
+  - P710
+  - P711
+  - P712
+  - P713
+  - P714
+  - P715
+  - P717
+  - P718
+  - P719
+  - P720
+  - P721
+  - P722
+  - P723
+  - P724
+  - P725
+  - P726
+  - P727
+  - P728
+  - P729
+  - P730
+  - P731
+  - P732
+  - P733
+  - P734
+  - P735
+  - P736
+  - P737
+  - P738
+  - P739
+  - P740
+  - P741
+  - P742
+  - P743
+  - P744
+  - P745
+  - P746
+  - P747
+  - P748
+  - P749
+  - P750
+  - P751
+  - P752
+  - P753
+  - P754
+  - P755
+  - P756
+  - P759
+  - P762
+  - P764
+  - P768
+  - P770
+  - P771
+  - P772
+  - P773
+  - P774
+  - P775
+  - P776
+  - P777
+  - P778
+  - P779
+  - P780
+  - P781
+  - P782
+  - P783
+  - P784
+  - P785
+  - P786
+  - P787
+  - P788
+  - P789
+  - P790
+  - P791
+  - P792
+  - P793
+  - P794
+  - P795
+  - P796
+  - P797
+  - P798
+  - P799
+  - P806
+  - P808
+  - P812
+  - P814
+  - P815
+  - P816
+  - P817
+  - P818
+  - P819
+  - P820
+  - P821
+  - P822
+  - P823
+  - P824
+  - P825
+  - P826
+  - P827
+  - P828
+  - P829
+  - P830
+  - P831
+  - P832
+  - P833
+  - P834
+  - P835
+  - P836
+  - P837
+  - P838
+  - P839
+  - P840
+  - P841
+  - P842
+  - P843
+  - P849
+  - P851
+  - P855
+  - P857
+  - P858
+  - P859
+  - P860
+  - P861
+  - P862
+  - P863
+  - P864
+  - P865
+  - P866
+  - P867
+  - P868
+  - P869
+  - P870
+  - P871
+  - P872
+  - P873
+  - P874
+  - P875
+  - P876
+  - P877
+  - P878
+  - P879
+  - P880
+  - P881
+  - P882
+  - P883
+  - P884
+  - P885
+  - P886
+  - P892
+  - P894
+  - P898
+  - P900
+  - P901
+  - P902
+  - P903
+  - P904
+  - P905
+  - P906
+  - P907
+  - P908
+  - P909
+  - P910
+  - P911
+  - P912
+  - P913
+  - P914
+  - P915
+  - P916
+  - P917
+  - P918
+  - P919
+  - P920
+  - P921
+  - P922
+  - P923
+  - P924
+  - P925
+  - P926
+  - P927
+  - P928
+  - P929
+  - P934
+  - P937
+  - P938
+  - P939
+  - P940
+  - P943
+  - P944
+  - P945
+  - P946
+  - P948
+  - P949
+  - P950
+  - P951
+  - P952
+  - P953
+  - P954
+  - P955
+  - P956
+  - P957
+  - P958
+  - P959
+  - P960
+  - P961
+  - P962
+  - P963
+  - P964
+  - P966
+  - P968
+  - P969
+  - P970
+  - P972
+  - P1007
+  - P1008
+  - P1009
+  - P1010
+  - P1011
+  - P1012
+  - P1013
+  - P1014
+  - P1015
+  - P1016
+  - P1017
+  - P1018
+  - P1019
+  - P1020
+  - P1021
+  - P1022
+  - P1023
+  - P1024
+  - P1025
+  - P1026
+  - P1027
+  - P1028
+  - P1029
+  - P1030
+  - P1031
+  - P1032
+  - P1033
+  - P1034
+  - P1035
+  - P1036
+  - P1037
+  - P1038
+  - P1039
+  - P1040
+  - P1041
+  - P1042
+  - P1043
+  - P1044
+  - P1045
+  - P1046
+  - P1047
+  - P1048
+  - P1049
+  - P1050
+  - P1051
+  - P1052
+  - P1053
+  - P1054
+  - P1055
+  - P1056
+  - P1057
+  - P1058
+  - P1059
+  - P1060
+  - P1061
+  - P1063
+  - P1064
+  - P1066
+  - P1067
+  - P1068
+  - P1070
+  - P1071
+  - P1072
+  - P1074
+  - P1075
+  - P1076
+  - P1078
+  - P1420
+  - P1421
+  - P1422
+  - P1423
+  - P1424
+  - P1425
+  - P1427
+  - P1428
+  - P1429
+  - P1430
+  - P1431
+  - P1432
+  - P1433
+  - P1434
+  - P1435
+  - P1436
+  - P1437
+  - P1438
+  - P1439
+  - P1440
+  - P1441
+  - P1442
+  - P1443
+  - P1444
+  - P1446
+  - P1447
+  - P1448
+  - P1475
+  - P1476
+  - P1477
+  - P1478
+  - P1479
+  - P1480
+  - P1481
+  - P1482
+  - P1483
+  - P1484
+  - P1498
+  - P1499
+  - P1501
+  - P1502
+  - P1503
+  - P1504
+  - P1514
+  - P1515
+  - P1516
+  - P1517
+  - P1527
+  - P1528
+  - P1529
+  - P1543
+  - P1544
+  - P1593
+  - P1594
+  - P1595
+  - P1624
+  - P1632
+  - P1633
+  - P1634
+  - P1636
+  - P1637
+  - P1638
+  - P1639
+  - P1645
+  - P1646
+  - P1647
+  - P1648
+  - P1649
+  - P1650
+  - P1652
+  - P1654
+  - P1655
+  - P1657
+  - P1670
+  - P1671
+  - P1672
+  - P1673
+  - P1674
+  - P1675
+  - P1676
+  - P1677
+  - P1679
+  - P1680
+  - P1682
+  - P1683
+  - P1684
+  - P1685
+  - P1686
+  - P1687
+  - P1688
+  - P1689
+  - P1690
+  - P1691
+  - P1693
+  - P1694
+  - P1695
+  - P1696
+  - P1697
+  - P1698
+  - P1699
+  - P1700
+  - P1701
+  - P1702
+  - P1703
+  - P1704
+  - P1705
+  - P1706
+  - P1707
+  - P1708
+  - P1709
+  - P1710
+  - P1711
+  - P1712
+  - P1714
+  - P1715
+  - P1716
+  - P1717
+  - P1718
+  - P1719
+  - P1720
+  - P1721
+  - P1722
+  - P1723
+  - P1724
+  - P1725
+  - P1726
+  - P1727
+  - P1728
+  - P1729
+  - P1730
+  - P1731
+  - P1732
+  - P1733
+  - P1734
+  - P1735
+  - P1736
+  - P1737
+  - P1738
+  - P1739
+  - P1740
+  - P1741
+  - P1743
+  - P1746
+  - P1747
+  - P1748
+  - P1749
+  - P1750
+  - P1751
+  - P1752
+  - P1753
+  - P1754
+  - P1755
+  - P1756
+  - P1757
+  - P1758
+  - P1759
+  - P1760
+  - P1761
+  - P1762
+  - P1763
+  - P1764
+  - P1765
+  - P1767
+  - P1768
+  - P1769
+  - P1770
+  - P1771
+  - P1772
+  - P1774
+  - P1777
+  - P1782
+  - P1783
+  - P1784
+  - P1785
+  - P1786
+  - P1787
+  - P1788
+  - P1789
+  - P1790
+  - P1791
+  - P1792
+  - P1793
+  - P1795
+  - P1796
+  - P1797
+  - P1798
+  - P1799
+  - P1800
+  - P1801
+  - P1802
+  - P1803
+  - P1805
+  - P1806
+  - P1807
+  - P1808
+  - P1815
+  - P1816
+  - P2044
+  - P2045
+  - P2046
+  - P2047
+  - P2048
+  - P2049
+  - P2050
+  - P2051
+  - P2052
+  - P2053
+  - P2055
+  - P2057
+  - P2059
+  - P2061
+  - P2062
+  - P2063
+  - P2065
+  - P2066
+  - P2067
+  - P2068
+  - P2071
+  - P2072
+  - P2073
+  - P2074
+  - P2075
+  - P2076
+  - P2077
+  - P2078
+  - P2079
+  - P2081
+  - P2082
+  - P2083
+  - P2084
+  - P2085
+  - P2087
+  - P2088
+  - P2093
+  - P2094
+  - P2095
+  - P2098
+  - P2099
+  - P2101
+  - P2103
+  - P2104
+  - P2105
+  - P2106
+  - P2107
+  - P2108
+  - P2109
+  - P2110
+  - P2111
+  - P2112
+  - P2113
+  - P2114
+  - P2115
+  - P2116
+  - P2117
+  - P2119
+  - P2121
+  - P2122
+  - P2123
+  - P2126
+  - P2127
+  - P2128
+  - P2129
+  - P2130
+  - P2131
+  - P2133
+  - P2134
+  - P2135
+  - P2137
+  - P2138
+  - P2139
+  - P2141
+  - P2142
+  - P2152
+  - P2153
+  - P2154
+  - P2155
+  - P2156
+  - P2157
+  - P2158
+  Empty geometry in source STEP:
+  - P402
+  - P473
+  - P474
+  - P523
+  - P528
+  - P767
+  - P811
+  - P854
+  - P897
+  - P974
+  - P975
+  - P976
+  - P977
+  - P1211
+  - P1255
+  - P1298
+  - P1341
+  - P1452
+  - P1453
+  - P1461
+  - P1465
+  - P1466
+  - P1467
+  - P1469
+  - P1470
+  - P1471
+  - P1487
+  - P1491
+  - P1492
+  - P1493
+  - P1495
+  - P1496
+  - P1497
+  - P1508
+  - P1509
+  - P1521
+  - P1522
+  - P1532
+  - P1536
+  - P1537
+  - P1538
+  - P1540
+  - P1541
+  - P1542
+  - P1548
+  - P1549
+  - P1556
+  - P1560
+  - P1561
+  - P1562
+  - P1564
+  - P1565
+  - P1566
+  - P1660
+  - P1661
+  - P1681
+  - P1692
+  - P1713
+  - P1742
+  - P1820
+  - P1821
+  - P1840
+  - P1841
+  - P1850
+  - P1851
+  - P1865
+  - P1866
+  - P1880
+  - P1881
+  - P1895
+  - P1896
+  - P1910
+  - P1911
+  - P1925
+  - P1926
+  - P1940
+  - P1941
+  - P1955
+  - P1956
+  - P1970
+  - P1971
+  - P1985
+  - P1986
+  - P2000
+  - P2001
+  - P2015
+  - P2016
+  - P2030
+  - P2031
+  Detector internals; retain housing and sensor envelope:
+  - P228
+  - P229
+  - P231
+  - P232
+  - P233
+  - P238
+  - P239
+  - P240
+  - P241
+  - P259
+  - P260
+  - P262
+  - P263
+  - P264
+  - P266
+  - P269
+  - P283
+  - P307
+  - P321
+  - P1445
+  - P1449
+  - P1451
+  - P1454
+  - P1455
+  - P1456
+  - P1457
+  - P1458
+  - P1460
+  - P1462
+  - P1463
+  - P1464
+  - P1468
+  - P1473
+  - P1474
+  - P1486
+  - P1488
+  - P1489
+  - P1490
+  - P1494
+  - P1505
+  - P1507
+  - P1510
+  - P1511
+  - P1512
+  - P1513
+  - P1518
+  - P1520
+  - P1523
+  - P1524
+  - P1525
+  - P1526
+  - P1531
+  - P1533
+  - P1534
+  - P1535
+  - P1539
+  - P1545
+  - P1547
+  - P1550
+  - P1551
+  - P1552
+  - P1553
+  - P1555
+  - P1557
+  - P1558
+  - P1559
+  - P1563
+  - P1567
+  - P1568
+  - P1569
+  - P1570
+  - P1571
+  - P1572
+  - P1573
+  - P1574
+  - P1575
+  - P1576
+  - P1577
+  - P1578
+  - P1579
+  - P1580
+  - P1581
+  - P1582
+  - P1583
+  - P1584
+  - P1585
+  - P1586
+  - P1587
+  - P1588
+  - P1589
+  - P1590
+  - P1591
+  - P1592
+  - P1596
+  - P1597
+  - P1598
+  - P1599
+  - P1600
+  - P1601
+  - P1602
+  - P1603
+  - P1604
+  - P1605
+  - P1606
+  - P1607
+  - P1608
+  - P1609
+  - P1610
+  - P1611
+  - P1612
+  - P1613
+  - P1614
+  - P1615
+  - P1616
+  - P1617
+  - P1618
+  - P1619
+  - P1620
+  - P1621
+  - P1622
+  - P1623
+  - P1627
+  - P1628
+  - P1640
+  - P1641
+  - P1653
+  - P1656
+  - P1658
+  - P1667
+  - P1744
+  - P1745
+  - P1766
+  - P1773
+  - P1775
+  - P1794
+  - P1804
+  - P1809
+  - P1810
+  - P1811
+  - P1812
+  - P1813
+  - P1814
+  - P1817
+  - P1818
+  - P1827
+  - P1829
+  - P1830
+  - P1831
+  - P1832
+  - P1833
+  - P1834
+  - P1835
+  - P1836
+  - P1837
+  - P1838
+  - P1847
+  - P1857
+  - P1859
+  - P1860
+  - P1861
+  - P1862
+  - P1863
+  - P1872
+  - P1874
+  - P1875
+  - P1876
+  - P1877
+  - P1878
+  - P1887
+  - P1889
+  - P1890
+  - P1891
+  - P1892
+  - P1893
+  - P1902
+  - P1904
+  - P1905
+  - P1906
+  - P1907
+  - P1908
+  - P1917
+  - P1919
+  - P1920
+  - P1921
+  - P1922
+  - P1923
+  - P1932
+  - P1934
+  - P1935
+  - P1936
+  - P1937
+  - P1938
+  - P1947
+  - P1949
+  - P1950
+  - P1951
+  - P1952
+  - P1953
+  - P1962
+  - P1964
+  - P1965
+  - P1966
+  - P1967
+  - P1968
+  - P1977
+  - P1979
+  - P1980
+  - P1981
+  - P1982
+  - P1983
+  - P1992
+  - P1994
+  - P1995
+  - P1996
+  - P1997
+  - P1998
+  - P2007
+  - P2009
+  - P2010
+  - P2011
+  - P2012
+  - P2013
+  - P2022
+  - P2024
+  - P2025
+  - P2026
+  - P2027
+  - P2028
+  - P2037
+  - P2039
+  - P2040
+  - P2041
+  - P2042
+  - P2043
+  - P2056
+  - P2058
+  - P2064
+  - P2069
+  - P2086
+  - P2125
+  - P2132
+  - P2136
+  - P2140
+  Construction or optical reference geometry: [P221, P803]
+  Floor anchoring and table understructure omitted:
+  - P529
+  - P530
+  - P531
+  - P533
+  - P537
+  - P541
+  - P542
+  - P544
+  - P545
+  - P546
+  - P547
+  - P548
+  - P549
+  - P550
+  - P559
+  - P560
+  - P561
+  - P562
+  - P590
+  - P591
+  - P592
+  - P593
+  - P594
+  - P595
+  - P596
+  - P597
+  - P598
+  - P599
+  - P600
+  - P601
+  - P602
+  - P603
+  - P604
+  - P605
+  - P609
+  - P610
+  - P611
+  - P612
+  - P613
+  - P614
+  - P615
+  - P616
+  - P617
+  - P618
+  - P619
+  - P620
+  - P621
+  - P622
+  - P623
+  - P624
+  - P625
+  - P626
+  - P627
+  - P628
+  - P629
+  - P630
+  - P631
+  - P632
+  - P633
+  - P634
+  - P978
+  - P979
+  - P980
+  - P981
+  - P982
+  - P983
+  - P984
+  - P985
+  - P986
+  - P987
+  - P988
+  - P989
+  - P990
+  - P991
+  - P992
+  - P993
+  - P994
+  - P995
+  - P996
+  - P997
+  - P998
+  - P999
+  - P1000
+  - P1001
+  - P1002
+  - P1003
+  - P1004
+  - P1005
+  - P1006
+  - P1062
+  - P1065
+  - P1069
+  - P1073
+  - P1077
+  Parker reed switches and small control hardware: [P635, P636, P641, P642, P651, P660, P667, P668, P673, P674, P683, P692]
+  Flexible chamber boots around the slit blade rods; not rigid collision geometry: [P357, P370]
+  Alternative spectrometer mountings (0 and 5 degree copies):
+  - P1079
+  - P1080
+  - P1081
+  - P1082
+  - P1083
+  - P1084
+  - P1085
+  - P1086
+  - P1087
+  - P1088
+  - P1089
+  - P1090
+  - P1091
+  - P1092
+  - P1093
+  - P1094
+  - P1095
+  - P1096
+  - P1097
+  - P1098
+  - P1099
+  - P1100
+  - P1101
+  - P1102
+  - P1103
+  - P1104
+  - P1105
+  - P1106
+  - P1107
+  - P1108
+  - P1109
+  - P1110
+  - P1111
+  - P1112
+  - P1113
+  - P1114
+  - P1115
+  - P1116
+  - P1117
+  - P1118
+  - P1119
+  - P1120
+  - P1121
+  - P1122
+  - P1123
+  - P1124
+  - P1125
+  - P1126
+  - P1127
+  - P1128
+  - P1129
+  - P1130
+  - P1131
+  - P1132
+  - P1133
+  - P1134
+  - P1135
+  - P1136
+  - P1137
+  - P1138
+  - P1139
+  - P1140
+  - P1141
+  - P1142
+  - P1143
+  - P1144
+  - P1145
+  - P1146
+  - P1147
+  - P1148
+  - P1149
+  - P1150
+  - P1151
+  - P1152
+  - P1153
+  - P1154
+  - P1155
+  - P1156
+  - P1157
+  - P1158
+  - P1159
+  - P1160
+  - P1161
+  - P1162
+  - P1163
+  - P1164
+  - P1165
+  - P1166
+  - P1167
+  - P1168
+  - P1169
+  - P1170
+  - P1171
+  - P1172
+  - P1173
+  - P1174
+  - P1175
+  - P1176
+  - P1177
+  - P1178
+  - P1179
+  - P1180
+  - P1181
+  - P1182
+  - P1183
+  - P1184
+  - P1185
+  - P1186
+  - P1187
+  - P1188
+  - P1189
+  - P1190
+  - P1191
+  - P1192
+  - P1193
+  - P1194
+  - P1195
+  - P1196
+  - P1197
+  - P1198
+  - P1199
+  - P1200
+  - P1201
+  - P1202
+  - P1203
+  - P1204
+  - P1205
+  - P1206
+  - P1207
+  - P1208
+  - P1209
+  - P1210
+  - P1212
+  - P1213
+  - P1214
+  - P1215
+  - P1216
+  - P1217
+  - P1218
+  - P1219
+  - P1220
+  - P1221
+  - P1222
+  - P1223
+  - P1224
+  - P1225
+  - P1226
+  - P1227
+  - P1228
+  - P1229
+  - P1230
+  - P1231
+  - P1232
+  - P1233
+  - P1234
+  - P1235
+  - P1236
+  - P1237
+  - P1238
+  - P1239
+  - P1240
+  - P1241
+  - P1242
+  - P1243
+  - P1244
+  - P1245
+  - P1246
+  - P1247
+  - P1248
+  - P1249
+  - P1250
+  - P1251
+  - P1252
+  - P1253
+  - P1254
+  - P1256
+  - P1257
+  - P1258
+  - P1259
+  - P1260
+  - P1261
+  - P1262
+  - P1263
+  - P1264
+  - P1265
+  - P1266
+  - P1267
+  - P1268
+  - P1269
+  - P1270
+  - P1271
+  - P1272
+  - P1273
+  - P1274
+  - P1275
+  - P1276
+  - P1277
+  - P1278
+  - P1279
+  - P1280
+  - P1281
+  - P1282
+  - P1283
+  - P1284
+  - P1285
+  - P1286
+  - P1287
+  - P1288
+  - P1289
+  - P1290
+  - P1291
+  - P1292
+  - P1293
+  - P1294
+  - P1295
+  - P1296
+  - P1297
+  - P1299
+  - P1300
+  - P1301
+  - P1302
+  - P1303
+  - P1304
+  - P1305
+  - P1306
+  - P1307
+  - P1308
+  - P1309
+  - P1310
+  - P1311
+  - P1312
+  - P1313
+  - P1314
+  - P1315
+  - P1316
+  - P1317
+  - P1318
+  - P1319
+  - P1320
+  - P1321
+  - P1322
+  - P1323
+  - P1324
+  - P1325
+  - P1326
+  - P1327
+  - P1328
+  - P1329
+  - P1330
+  - P1331
+  - P1332
+  - P1333
+  - P1334
+  - P1335
+  - P1336
+  - P1337
+  - P1338
+  - P1339
+  - P1340
+  - P1342
+  - P1343
+  - P1344
+  - P1345
+  - P1346
+  - P1347
+  - P1348
+  - P1349
+  - P1350
+  - P1351
+  - P1352
+  - P1353
+  - P1354
+  - P1355
+  - P1356
+  - P1357
+  - P1358
+  - P1359
+  - P1360
+  - P1361
+  - P1362
+  - P1363
+  - P1364
+  - P1365
+  - P1366
+  - P1367
+  - P1368
+  - P1369
+  - P1370
+  - P1371
+  - P1372
+  - P1373
+  - P1374
+  - P1375
+  - P1376
+  - P1377
+  - P1378
+  - P1379
+  - P1380
+  - P1381
+  - P1382
+  - P1383
+  - P1384
+  - P1385
+  - P1386
+  - P1387
+  - P1388
+  - P1389
+  - P1390
+  - P1391
+  - P1392
+  - P1393
+  - P1394
+  - P1395
+  - P1396
+  - P1397
+  - P1398
+  - P1399
+  - P1400
+  - P1401
+  - P1402
+  - P1403
+  - P1404
+  - P1405
+  - P1406
+  - P1407
+  - P1408
+  - P1409
+  - P1410
+  - P1411
+  - P1412
+  - P1413
+  - P1414
+  - P1415
+  - P1416
+fixed_subsystems:
+  cage:
+    assembly_ref: A040
+    parts:
+    - P524
+    - P525
+    - P526
+    - P527
+    - P558
+    - P554
+    - P555
+    - P551
+    - P532
+    - P556
+    - P534
+    - P535
+    - P536
+    - P538
+    - P539
+    - P540
+    - P552
+    - P543
+    - P563
+    - P564
+    - P565
+    - P566
+    - P567
+    - P568
+    - P569
+    - P570
+    - P571
+    - P572
+    - P573
+    - P574
+    - P575
+    - P576
+    - P577
+    - P578
+    - P579
+    - P580
+    - P581
+    - P582
+    - P583
+    - P584
+    - P585
+    - P586
+    - P587
+    - P588
+    - P589
+    - P606
+    - P607
+    - P608
+    - P553
+    - P557
+    reason: Outer structural cage restored for visual and interference review.

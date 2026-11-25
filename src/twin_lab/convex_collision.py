@@ -45,9 +45,17 @@ class DecompositionSettings:
     threshold: float = 0.05
     max_hulls: int = 32
     seed: int = 0
+    preprocess_resolution: int = 50
+
+    def __post_init__(self):
+        if self.preprocess_resolution <= 0:
+            raise ValueError("preprocess_resolution must be positive")
 
     def as_dict(self) -> dict[str, float | int]:
-        return {"threshold": self.threshold, "max_hulls": self.max_hulls, "seed": self.seed}
+        settings = {"threshold": self.threshold, "max_hulls": self.max_hulls, "seed": self.seed}
+        if self.preprocess_resolution != 50:
+            settings["preprocess_resolution"] = self.preprocess_resolution
+        return settings
 
 
 @dataclass(frozen=True)
@@ -87,6 +95,7 @@ def _settings_from_entry(
         threshold=float(entry.get("threshold", base.threshold)),
         max_hulls=int(entry.get("max_hulls", base.max_hulls)),
         seed=int(entry.get("seed", base.seed)),
+        preprocess_resolution=int(entry.get("preprocess_resolution", base.preprocess_resolution)),
     )
 
 
@@ -266,6 +275,7 @@ def _decompose_part(
         threshold=settings.threshold,
         max_convex_hull=settings.max_hulls,
         seed=settings.seed,
+        preprocess_resolution=settings.preprocess_resolution,
     )
     written: list[Path] = []
     for hull_index, (hull_vertices, hull_faces) in enumerate(hulls):
@@ -691,6 +701,7 @@ def _override_snippet(refs: Iterable[str], resolver: PartSettings) -> str:
             f"      threshold: {settings.threshold}",
             f"      max_hulls: {settings.max_hulls}",
             f"      seed: {settings.seed}",
+            f"      preprocess_resolution: {settings.preprocess_resolution}",
             "      reason: <why these parts need different hulls>",
         ]
     return "\n".join(lines)
@@ -712,6 +723,10 @@ def main() -> None:
     parser.add_argument("--threshold", type=float, default=None, help="CoACD concavity threshold")
     parser.add_argument("--max-hulls", type=int, default=None, help="CoACD convex hull cap")
     parser.add_argument("--seed", type=int, default=None, help="CoACD random seed")
+    parser.add_argument(
+        "--preprocess-resolution", type=int, default=None,
+        help="CoACD preprocessing resolution (default 50; higher uses more time and memory)",
+    )
     parser.add_argument(
         "--force",
         action="store_true",
@@ -753,6 +768,7 @@ def main() -> None:
             ("threshold", args.threshold),
             ("max_hulls", args.max_hulls),
             ("seed", args.seed),
+            ("preprocess_resolution", args.preprocess_resolution),
         )
         if value is not None
     }
@@ -772,7 +788,8 @@ def main() -> None:
             state = "uncached" if cached is None else f"{cached} hulls"
             print(
                 f"  {source.stem}[{index}] {ref}: {state}, "
-                f"threshold {settings.threshold}, max_hulls {settings.max_hulls}"
+                f"threshold {settings.threshold}, max_hulls {settings.max_hulls}, "
+                f"preprocess_resolution {settings.preprocess_resolution}"
             )
     if changes:
         print(

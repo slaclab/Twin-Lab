@@ -92,6 +92,8 @@ body { background: #1a1a1a; }
 .dg.main li:not(.folder) { height: 24px !important; line-height: 24px !important; }
 .dg.main li.title { height: 24px !important; line-height: 24px !important; }
 .dg.main .cr .property-name { height: 24px !important; line-height: 24px !important; }
+.dg.main .cr.boolean .property-name { width: calc(100% - 28px) !important; }
+.dg.main .cr.boolean .c { width: 28px !important; }
 .dg.main .c { line-height: 24px !important; }
 .dg.main .c input[type=text] { height: 22px !important; line-height: 22px !important;
                                font-size: 13px !important; }
