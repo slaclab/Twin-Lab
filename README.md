@@ -1186,6 +1186,8 @@ and blue arrows through the cube are the model's own X, Y, and Z axes, so a
 Twin-Lab view and a CAD view can be checked against each other by their axes
 rather than by eye. Face names follow the CAD package: the front of the assembly
 faces `-Y`, right is `+X`, top is `+Z`.
+In spectroscopy mode, the preview pane covers the cube where they overlap.
+Collapse **ePix100 spectroscopy preview** to use the cube if it's covered.
 
 Two keys reframe the whole model rather than just turning it:
 

@@ -108,8 +108,7 @@ body { background: #1a1a1a; }
    leaves it short of; !important beats that, and outlasts dat.GUI reapplying it. */
 .dg.main .close-button { height: 24px !important; line-height: 24px !important;
                          width: 100% !important; }
-/* Bottom left is the one corner neither the control panel nor Drake's stats plot uses,
-   so the cube never has to move out of anything's way. */
+/* Keep the cube away from the control panel and Drake's stats plot. */
 #twinlab-view-cube { position: fixed; left: 12px; bottom: 12px; z-index: 8; }
 #twinlab-view-cube canvas { display: block; cursor: pointer; }
 /* Drake's own rtr% plot is switched off in every viewer here, so the top-left is free.
