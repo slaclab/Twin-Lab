@@ -204,8 +204,8 @@ def test_starting_poses_keep_partial_signal_and_rank_complete_coverage_first(opt
     before = align.AlignmentImage(image, None, None, (0,) * 4, (0,) * 4)
     tested = []
 
-    def search(_context, _optics, _rig, _positions, trial, _cancel, *, find_signal):
-        assert find_signal
+    def search(_context, _optics, _rig, _positions, trial, _cancel, *, find_signal, clearance):
+        assert find_signal and clearance is None
         tested.append(trial.spacing_a)
         if trial.spacing_a == optics.REFLECTIONS[0].spacing_a:
             hits = (1000, 1000, 0, 0)
@@ -226,6 +226,16 @@ def test_starting_poses_keep_partial_signal_and_rank_complete_coverage_first(opt
     assert tested == [optics.REFLECTIONS[index].spacing_a for _, _, index in progress]
     assert [pose.reflection for pose in poses] == [1, 0]
     assert [pose.alignment.after.signal_rank() for pose in poses] == [(4, 4), (2, 2)]
+
+    progress.clear()
+    tested.clear()
+    poses = align.find_starting_poses(
+        Mock(), spectrometer, Mock(), {}, request, Event(),
+        progress=progress.append, alternatives_only=True,
+    )
+    assert len(tested) == 4  # Replace the already-tried reflection rather than shrinking the list.
+    assert request.spacing_a not in tested
+    assert [pose.reflection for pose in poses] == [1]
 
     cancel = Event()
     tested.clear()

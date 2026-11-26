@@ -1,7 +1,7 @@
 """Bounded alignment search for a shared simulated ePix100 spot."""
 
 import math
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from threading import Event
 
@@ -20,6 +20,7 @@ from .spectroscopy import (
 STAGE_STEP = 0.05
 MIN_SIGNAL_HITS = 32
 STARTING_POSE_LIMIT = 4
+QUICK_TARGET_ERROR_MM = 2.0
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,17 @@ class AlignmentRig[PoseT]:
     @property
     def axes(self) -> tuple[AlignmentAxis, ...]:
         return (*self.shared, *(axis for group in self.independent for axis in group))
+
+    def endpoint(
+        self, positions: Mapping[str, float], target: tuple[float, ...],
+    ) -> dict[str, float]:
+        return {
+            **positions,
+            **{
+                axis.key: axis.from_slider(value)
+                for axis, value in zip(self.axes, target, strict=True)
+            },
+        }
 
 
 @dataclass(frozen=True)
@@ -98,12 +110,22 @@ class StartingPose:
     alignment: AlignmentResult
 
 
+@dataclass(frozen=True)
+class ClearanceSearch:
+    allows: Callable[[Mapping[str, float], Event], bool]
+    home: Mapping[str, float]
+    lock_groups: tuple[frozenset[str], ...]
+
+
 def starting_reflections(
     energy_ev: float, reflections: tuple[ReflectionPreset, ...], shortlist_angle_deg: float,
+    *, exclude_spacing_a: float | None = None,
 ) -> list[int]:
     """Prefer a matching setup reference, then angles near the model's nominal angle."""
     ranked = []
     for index, preset in enumerate(reflections):
+        if preset.spacing_a == exclude_spacing_a:
+            continue
         theta = bragg_angle(energy_ev, preset.spacing_a, 1)
         if theta is not None:
             ranked.append((
@@ -123,12 +145,15 @@ def find_starting_poses[PoseT](
     cancel: Event,
     *,
     progress: Callable[[tuple[int, int, int]], None] | None = None,
+    clearance: ClearanceSearch | None = None,
+    alternatives_only: bool = False,
 ) -> list[StartingPose]:
     """Rank the best bounded single-line poses from the reflection shortlist."""
     poses = []
     reflections = spectrometer.reflections
     eligible = starting_reflections(
         request.energy_ev, reflections, spectrometer.shortlist_angle_deg,
+        exclude_spacing_a=request.spacing_a if alternatives_only and request.order == 1 else None,
     )
     for step, index in enumerate(eligible, start=1):
         if cancel.is_set():
@@ -138,7 +163,7 @@ def find_starting_poses[PoseT](
         result = find_alignment(
             rig.clone(context), spectrometer, rig, positions,
             replace(request, spacing_a=reflections[index].spacing_a, order=1),
-            cancel, find_signal=True,
+            cancel, find_signal=True, clearance=clearance,
         )
         if result is not None:
             poses.append(StartingPose(index, result))
@@ -162,6 +187,93 @@ def find_alignment[PoseT](
     cancel: Event,
     *,
     find_signal: bool = False,
+    clearance: ClearanceSearch | None = None,
+    quick: bool = False,
+    on_interference: Callable[[], None] | None = None,
+) -> AlignmentResult | None:
+    """Rank optical solutions from bounded searches, discarding interfering endpoints."""
+    if clearance is None:
+        return _find_alignment(
+            context, spectrometer, rig, positions, request, cancel, find_signal=find_signal,
+        )
+
+    def bound(axis: AlignmentAxis, settings: Mapping[str, float]) -> AlignmentAxis:
+        if axis.key not in settings:
+            return axis
+        value = settings[axis.key]
+        return replace(axis, lower=value, upper=value)
+
+    def alternate_rigs() -> Iterator[AlignmentRig[PoseT]]:
+        if not quick:
+            yield rig
+        seen = set()
+        groups = reversed(clearance.lock_groups) if quick else iter(clearance.lock_groups)
+        for locked in groups:
+            for anchor in (positions, clearance.home):
+                settings = {}
+                for axis in rig.axes:
+                    if axis.key in locked:
+                        low = math.ceil(axis.lower / STAGE_STEP - 1e-10)
+                        high = math.floor(axis.upper / STAGE_STEP + 1e-10)
+                        tick = round(axis.to_slider(anchor[axis.key]) / STAGE_STEP)
+                        settings[axis.key] = min(max(tick, low), high) * STAGE_STEP
+                key = tuple(settings.items())
+                if key in seen:
+                    continue
+                seen.add(key)
+
+                yield replace(
+                    rig, shared=tuple(bound(axis, settings) for axis in rig.shared),
+                    independent=tuple(
+                        tuple(bound(axis, settings) for axis in group) for group in rig.independent
+                    ),
+                )
+        if quick:
+            yield rig
+
+    def rank(result: AlignmentResult) -> tuple[int, int, float, float, int]:
+        after = result.after
+        assert after.centroid_mm is not None and after.rms_mm is not None
+        error = float(np.linalg.norm(after.centroid_mm - request.target_mm))
+        return *after.signal_rank(), -error, -float(np.linalg.norm(after.rms_mm)), sum(after.hits)
+
+    best = None
+    checked = set()
+    for candidate_rig in alternate_rigs():
+        if cancel.is_set():
+            return None
+        result = _find_alignment(
+            rig.clone(context), spectrometer, candidate_rig, positions, request, cancel,
+            find_signal=find_signal,
+        )
+        if result is None or result.target in checked:
+            continue
+        if best is not None and rank(result) <= rank(best):
+            continue
+        checked.add(result.target)
+        if clearance.allows(rig.endpoint(positions, result.target), cancel):
+            best = result
+            if quick:
+                _, captured, neg_error, _, _ = rank(best)
+                if (
+                    captured == len(spectrometer.crystal_labels)
+                    and -neg_error <= QUICK_TARGET_ERROR_MM
+                ):
+                    break
+        elif on_interference is not None and not cancel.is_set():
+            on_interference()
+    return None if cancel.is_set() else best
+
+
+def _find_alignment[PoseT](
+    context: PoseT,
+    spectrometer: Spectrometer[PoseT],
+    rig: AlignmentRig[PoseT],
+    positions: Mapping[str, float],
+    request: AlignmentRequest,
+    cancel: Event,
+    *,
+    find_signal: bool,
 ) -> AlignmentResult | None:
     """Preview a better focus (or search for signal) on a private context."""
     target = np.asarray(request.target_mm)

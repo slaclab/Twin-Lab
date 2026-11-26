@@ -5,12 +5,14 @@ uv run slac-run 43841 --spectroscopy
 ```
 
 Run this from the Twin Lab repository root after [setup](../README.md#setup).
-This mode needs the reviewed `cad/DSG-000040389/source.stp`. It uses the motion
-geometry cache, not the published collision bundle. The first launch may need
-to prepare the CAD. Open the printed Meshcat URL and look for **ePix100
-spectroscopy preview**. This mode does not connect to motors or check clearance.
+This mode needs the reviewed `cad/DSG-000040389/source.stp` for the motion
+geometry and the pinned 43841 collision bundle for interference checks. The
+first launch may need to prepare CAD and fetch the bundle. Open the printed
+Meshcat URL and look for **ePix100 spectroscopy preview**. This mode does not
+connect to motors.
 The **Lower Slit** and **Upper Slit** stages are shown in the regular motion
-viewer, but their geometry and controls are omitted from spectroscopy mode.
+viewer. They are hidden in spectroscopy mode but remain at reviewed home in
+the interference model.
 
 1. **Choose the emitted photon energy.** Start with **Pt Lα1 (9442.3 eV)** and
    **Graphite(004)**, or try **Fe Kα1 (6403.84 eV)** and **Graphite(004)** or
@@ -18,12 +20,18 @@ viewer, but their geometry and controls are omitted from spectroscopy mode.
    [published PCXS paper][pcxs]; they do not establish which crystals are
    installed. For partial-fluorescence-yield XAS, use the fluorescence line here,
    not the incident absorption-edge energy (e.g. 11564 eV for the Pt L3 edge).
-2. **Find a starting pose.** Click **Find starting poses** to test up to four
-   compatible named reflections. Select the Graphite(004) result for the Pt
-   example. Review **Before**, **Proposed**, and the slider changes; click
-   **Apply to simulator** to load that pose and reflection. **Auto-align
-   preview** instead holds the selected reflection and searches for all three
-   beams. Neither action updates the stage sliders until you apply the proposal.
+2. **Find alignment.** This tries the selected reflection first. It refines
+   the current setup if all three beams have usable signal and the pose is
+   clear. Otherwise it searches for a clear starting pose, first trying the
+   polycapillaries and detector trims at their current or reviewed home
+   settings. If the selected reflection yields no usable, clear pose, it
+   automatically previews alternatives from up to four compatible named
+   presets. Check **Try other reflections** to compare presets immediately.
+   Review the proposed reflection, **Before** and **Proposed** images, and
+   slider changes. Only **Apply to simulator** loads the proposal and changes
+   the live reflection if required. Alternative presets are simulation
+   choices, not confirmation of installed crystals. If the bounded search
+   finds no clear pose, try a different target or starting configuration.
 3. **Place the spot on the detector.** Once you have a live spot, edit
    **Target u** or **Target v** and press Enter or leave the field. This moves
    the existing **A205** (u) or **A206** (v) LX10 slider and the detector in
@@ -32,8 +40,10 @@ viewer, but their geometry and controls are omitted from spectroscopy mode.
    travel. Near the sensor edge, clipping can shift the centroid; check the
    live image. If no spot is detected, the detector stays put. You can still
    drag either LX10 slider directly.
-4. **Check the fluorescence band at that pose.** Enter **Below line** and
-   **Above line**, then click **Compare reflections here**. **All 3 ≥80%**
+4. **Check the fluorescence band at that pose.** Click **Check band at this
+   pose** to run the scan with the current offsets. To change the range,
+   edit **Below line** and **Above line**, then click **Compare reflections here**.
+   The scan uses the current stage pose and does not move it. **All 3 ≥80%**
    counts the sampled energies at which each crystal delivers at least 80% of
    its Bragg-accepted rays to the modeled sensor. Compare the North, Middle and
    South coverage strips and the closest captured ray's edge margin. Rerun the
@@ -44,6 +54,13 @@ can stay dark if no Bragg rays reach the sensor. Colored aiming guides show the
 beam axes projected onto the sensor plane, even if they miss the crystal or
 are outside the Bragg window. Arrows point toward off-sensor projections. These
 guides never count as hits and can be turned off.
+
+The interference readouts list the worst part pairs and their signed hull
+distances. A negative value means the modeled hulls overlap. Pending or
+unavailable checks also prevent applying a proposal, but you can still move
+the simulated sliders and see the optical trace. These are endpoint checks,
+not checks of the swept motion or a guarantee of hardware clearance. Use the
+regular 43841 collision viewer for more detailed CAD verification.
 
 The model starts parallel rays at each reviewed polycapillary exit and clips
 them against the front face of the **70 × 30 mm** plate inside each STEP holder.

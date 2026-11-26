@@ -756,7 +756,7 @@ def view_stage_cad(
         if preview is None:
             print("Tick 'Animation' to start and stop cyclic motion.")
         else:
-            print("Optical geometry only; no collision checking or hardware connection.")
+            print("Offline spectroscopy preview; no hardware connection.")
     elif playback_keys:
         label = "Continuous playback" if has_ongoing_controls else "Live EPICS feed" if not has_playback_controls else "Playback"
         if getattr(playback, "has_commands", True):

@@ -1,11 +1,16 @@
 """Offline Bragg preview for the three polycapillary paths of 43841."""
 
 import argparse
+import logging
 import math
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ProcessPoolExecutor
 from contextlib import ExitStack
 from dataclasses import dataclass
+from functools import lru_cache, partial
+from multiprocessing import get_context
 from pathlib import Path
+from threading import Event
 from typing import Any
 
 import numpy as np
@@ -21,7 +26,11 @@ from .beam import (
     perpendicular_basis,
     read_beam_config,
 )
+from .collision import ClearanceReport, CollisionModel
+from .collision_artifacts import resolve_runtime
+from .collision_viewer import SliderJoint, read_joint_metadata
 from .convex_collision import read_obj_parts
+from .epics_playback import sdf_joint_name
 from .paths import resolve_repo_path
 from .spectroscopy import (
     ACTIVE_SIZE_M,
@@ -35,8 +44,15 @@ from .spectroscopy import (
 from .spectroscopy import (
     LINES as COMMON_LINES,
 )
-from .spectroscopy_align import AlignmentAxis, AlignmentRig
-from .spectroscopy_view import COLORS, SpectroscopyPreview, detector_panel, spectroscopy_page
+from .spectroscopy_align import AlignmentAxis, AlignmentRig, ClearanceSearch
+from .spectroscopy_view import (
+    COLORS,
+    CheckPose,
+    InterferencePreview,
+    SpectroscopyPreview,
+    detector_panel,
+    spectroscopy_page,
+)
 from .stage_cad_viewer import (
     _add_viewer_args,
     _slider_label,
@@ -52,6 +68,7 @@ LINES = (("Pt L\u03b1 (L\u03b11)", 9442.3), ("Fe K\u03b1 (K\u03b11)", 6403.84), 
 DEFAULT_HALF_WIDTH_DEG = 0.1
 # Millimetres of spot motion per millimetre of positive LX10 travel, in u/v order.
 DETECTOR_TARGET_AXES = (("A205", -1), ("A206", 1))
+SLIT_CHAINS = ("LJ Detector 1", "LJ Detector 2")
 # These towers' grounded hardware is grouped with unrelated fixed parts in the cached OBJ.
 SLIT_SUPPORT_REFS = frozenset({
     "P232", "P281", "P282", "P283", "P330", "P331", "P340", "P345", "P346", "P347",
@@ -262,6 +279,23 @@ class PolycapSpectrometer:
             dict.update, dict.copy,
         )
 
+    def clearance_search(
+        self, allows: Callable[[Mapping[str, float], Event], bool],
+    ) -> ClearanceSearch:
+        # Moving the polycapillary stack and outer detector trim can introduce contacts
+        # against the fixed chamber even when the ray trace improves.
+        sources = {
+            joint["key"]: joint["home"] for path in self.paths for joint in path.source_chain
+        }
+        trims = {key for key, _ in DETECTOR_TARGET_AXES}
+        home = {**sources, **{
+            joint["key"]: joint["home"] for joint in self.detector_chain if joint["key"] in trims
+        }}
+        caps = frozenset(sources)
+        return ClearanceSearch(
+            allows, home, (caps, caps | {"A206"}, caps | trims),
+        )
+
     def trace(
         self, pose: Pose, energy_ev: float, spacing_a: float, order: int, half_width_deg: float,
         *, crystals: Sequence[int] | None = None, aim: bool = False,
@@ -353,6 +387,63 @@ def load_spectrometer(scene_path: Path) -> PolycapSpectrometer:
     raise ValueError(f"Reviewed detector {ref} not found in {mesh.name}")
 
 
+def collision_positions(
+    positions: Mapping[str, float], joints: Mapping[str, SliderJoint], hidden: frozenset[str],
+) -> dict[str, float]:
+    if set(positions) - joints.keys() or joints.keys() - (positions.keys() | hidden):
+        raise ValueError("Spectroscopy pose is missing reviewed joints or contains unknown joints")
+    return {
+        joint.joint_name: positions.get(key, joint.reviewed_home) - joint.logical_offset
+        for key, joint in joints.items()
+    }
+
+
+def _build_interference_check(scene_path: Path) -> CheckPose:
+    scene = yaml.safe_load(scene_path.read_text(encoding="utf-8"))
+    root = resolve_runtime(Path(scene["source_inventory"]))
+    package = root / "package"
+    metadata = {joint.joint_name: joint for joint in read_joint_metadata(package)}
+    by_key = {
+        joint["key"]: sdf_joint_name(chain["name"], joint["key"])
+        for chain in scene["motion_chains"] for joint in chain["joints"]
+    }
+    if len(by_key) != len(metadata) or set(by_key.values()) != metadata.keys():
+        raise ValueError("Stage CAD does not match the reviewed 43841 collision joints")
+    joints = {key: metadata[name] for key, name in by_key.items()}
+    hidden = frozenset(
+        joint["key"] for chain in scene["motion_chains"] if chain["name"] in SLIT_CHAINS
+        for joint in chain["joints"]
+    )
+    sdf, = (path for path in package.glob("*.sdf") if not path.stem.endswith("_matlab"))
+    inventory = root / "review" / "inventory.yaml"
+    collision = CollisionModel.load(sdf, ignore_file=inventory, label_source=inventory)
+    if set(collision.joint_names()) != metadata.keys():
+        raise ValueError("The collision model does not match its reviewed joint metadata")
+    collision.set_reviewed_home({
+        joint.joint_name: joint.reviewed_home - joint.logical_offset for joint in joints.values()
+    })
+
+    def check(positions: Mapping[str, float]) -> ClearanceReport:
+        collision.set_positions(collision_positions(positions, joints, hidden))
+        return collision.report(warn_m=0.0)
+
+    return check
+
+
+@lru_cache(maxsize=1)
+def _load_interference_check(scene_path: Path) -> CheckPose | None:
+    try:
+        return _build_interference_check(scene_path)
+    except (OSError, ValueError, RuntimeError, KeyError):
+        logging.getLogger(__name__).exception("Could not load spectroscopy collision geometry")
+        return None
+
+
+def _check_interference(scene_path: Path, positions: Mapping[str, float]) -> ClearanceReport | None:
+    check = _load_interference_check(scene_path)
+    return None if check is None else check(positions)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("stage_inventory")
@@ -360,7 +451,7 @@ def main() -> None:
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--deflection-mm", type=float, default=2.0)
     parser.add_argument("--fps", type=float, default=30.0)
-    parser.add_argument("--once", action="store_true", help="Publish one frame and exit")
+    parser.add_argument("--once", action="store_true", help="Publish one optical frame and exit")
     _add_viewer_args(parser)
     args = parser.parse_args()
     print("Preparing or loading reviewed stage CAD for 43841…", flush=True)
@@ -375,15 +466,26 @@ def main() -> None:
     html = detector_panel(
         rig, crystal_labels=model.crystal_labels, reflections=model.reflections,
         root=ROOT, model_note=MODEL_NOTE, lines=LINES, focus_goal_mm=None, ray_guides=True,
-        target_moves_detector=True,
+        target_moves_detector=True, interference=not args.once,
     )
     try:
         with spectroscopy_page(html), ExitStack() as stack:
             def attach(meshcat: Meshcat) -> Callable[[Pose], None]:
+                interference = None
+                clearance = None
+                if not args.once:
+                    # Drake can hold the GIL while loading and querying collision geometry.
+                    interference = InterferencePreview(
+                        meshcat, ROOT, partial(_check_interference, scene),
+                        ProcessPoolExecutor(max_workers=1, mp_context=get_context("spawn")),
+                    )
+                    stack.callback(interference.close)
+                    clearance = model.clearance_search(interference.allows)
                 preview = SpectroscopyPreview(
                     meshcat, model, rig, root=ROOT, lines=LINES,
                     default_half_width_deg=DEFAULT_HALF_WIDTH_DEG,
-                    detector_target_axes=DETECTOR_TARGET_AXES,
+                    detector_target_axes=DETECTOR_TARGET_AXES, interference=interference,
+                    clearance=clearance,
                 )
                 stack.callback(preview.close)
                 previous: dict[str, tuple[float, ...]] = {}
@@ -404,7 +506,7 @@ def main() -> None:
 
             view_stage_cad(
                 scene, fps=args.fps, port=args.port, open_browser=not args.no_browser,
-                hidden_chains=("LJ Detector 1", "LJ Detector 2"),
+                hidden_chains=SLIT_CHAINS,
                 hidden_fixed_parts=SLIT_SUPPORT_REFS,
                 spectroscopy=attach, once=args.once,
             )

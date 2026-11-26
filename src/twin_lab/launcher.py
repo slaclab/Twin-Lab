@@ -79,7 +79,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--spectroscopy", action="store_true",
-        help="Open the offline ePix100 ray-tracing and alignment preview (no collisions)",
+        help="Open the offline ePix100 ray-tracing and alignment preview",
     )
     parser.add_argument("--list", action="store_true", help="List the models and exit")
     args, passthrough = parser.parse_known_args()

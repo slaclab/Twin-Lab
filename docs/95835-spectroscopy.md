@@ -26,31 +26,32 @@ automatically. Look for **ePix100 spectroscopy preview**.
 
 1. Select the **Emission line**. For a first run, try **Fe K&beta;1,3
    (7058.2 eV)**, based on the [published XCS Fe setup][fe-setup].
-2. Click **Find starting poses**. This can recover signal from a blank
-   detector. It tests up to four compatible reflections, even if a different
-   reflection is selected. It tries matching Fe or Co references first; the
-   rest of the shortlist is based on Bragg angle, not proven reachability.
-3. Use **Ranked starting poses** to review candidates. The search favors
-   signal from all four crystals but can return partial results. For the Fe
-   example, inspect the **Ge(620)** candidate. A crystal counts as having
-   signal in this search at 32 or more modeled hits, not 32 measured photons.
+2. Select **Ge(620)** for the Fe example and click **Find alignment**. This
+   recovers signal from a blank detector or refines the live spot if all four
+   crystals already have usable signal. It keeps the selected reflection.
+3. To explore other crystal choices, check **Try other reflections** before
+   clicking **Find alignment**, then use **Ranked starting poses** to review
+   candidates. This tests up to four compatible named presets. It prioritizes
+   matching Fe or Co references in the shortlist, then uses Bragg angle. The
+   search favors signal from all four crystals but can return partial results.
+   A crystal counts as having signal at 32 or more modeled hits, not 32
+   measured photons.
 4. Compare **Before** and **Proposed**, including the hit counts and spot
    widths. Open **Proposed slider changes** if you want to inspect the offsets.
    Click **Apply to simulator** to load the pose and its reflection.
    Previewing or cancelling a search moves nothing.
 
-If you already know which analyzers you will use, select that reflection in
-**Reflection for all four crystals** and click **Auto-align preview** instead.
-This keeps the selected reflection and looks for a shared spot with signal from
-all four crystals. **Target u / v** defaults to the detector center. Enter an
+Leave **Try other reflections** unchecked to keep the analyzers you selected.
+**Target u / v** defaults to the detector center. Enter an
 offset in mm if you want the line elsewhere on the sensor (positive **u** is
 right; positive **v** is up). Changing the pose, optics, or target invalidates a
 pending preview; rerun it before applying.
 
 ## 2. Check the energy band at that pose
 
-1. Open **Check energy band**. After applying a pose, **Check band at this
-   pose** opens the same section.
+1. Click **Check band at this pose** to open the planner and run the scan with
+   the current offsets. Open **Check energy band** directly to edit the range
+   first.
 2. Set **Below line (eV)** and **Above line (eV)** to bracket the features you
    need. For the Fe example, **Use published Fe band** fills in
    **7030&ndash;7125 eV**.
@@ -70,7 +71,7 @@ pending preview; rerun it before applying.
    to the modeled edge as well: a centered centroid can hide clipping.
 
 **Use reflection in simulator** changes only the reflection. If you change a
-stage, use auto-align, or change the Bragg half-width, run **Compare reflections
+stage, apply an alignment, or change the Bragg half-width, run **Compare reflections
 here** again. A sharp line at one energy does not guarantee that the rest of
 the band fits.
 
@@ -98,8 +99,8 @@ brighter image does not mean more signal.
 - Named reflections already specify their lattice planes and use order 1.
   To enter a different spacing and order, select **Custom d-spacing / order**,
   set **Custom d-spacing (angstrom)** and **Custom Bragg order**, then use
-  **Auto-align preview**. **Find starting poses** and **Compare reflections
-  here** test named reflections only.
+  **Find alignment** with **Try other reflections** unchecked. **Try other
+  reflections** and **Compare reflections here** test named reflections only.
 - Fe K&beta;1,3 with **Ge(620)** is a [published XCS example][fe-setup].
   The Co setup notes list **Si(533)** for K&beta;1,3 (~7649 eV) and
   **Ge(444)** for valence-to-core K&beta;2,5 (~7705 eV), both at 250 mm

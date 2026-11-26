@@ -30,6 +30,8 @@
   #vh-align-images figure { flex: 1; min-width: 0; margin: 4px 0; }
   #vh-align-images canvas { margin-top: 2px; }
   #vh-align-moves td:last-child, #vh-align-moves th:last-child { text-align: right; }
+  .vh-interference { white-space: pre-line; overflow-wrap: anywhere; }
+  .vh-interference[data-contact="true"] { color: #ffaba2; }
 </style>
 <details id="twinlab-spectroscopy" open>
   <summary>ePix100 spectroscopy preview</summary>
@@ -76,13 +78,13 @@
   <small>Gold +: target · cyan ring: centroid. No detector gaps modeled.</small>
   <br><small id="vh-x-floor"></small>
   <div id="vh-align-actions">
-    <button id="vh-align-search" type="button" disabled>Find starting poses</button>
-    <button id="vh-align-preview" type="button" disabled>Auto-align preview</button>
+    <button id="vh-align-find" type="button" disabled>Find alignment</button>
     <button id="vh-align-apply" type="button" disabled>Apply to simulator</button>
     <button id="vh-align-cancel" type="button" hidden>Cancel search</button>
   </div>
+  <label><input id="vh-align-other-reflections" type="checkbox" disabled> Try other reflections</label>
   <p id="vh-align-status" role="status">Waiting for the optical trace.</p>
-  <button id="vh-check-applied" type="button" hidden>Check band at this pose</button>
+  <button id="vh-check-band" type="button" disabled>Check band at this pose</button>
   <div id="vh-align-result" hidden>
     <div id="vh-starting-poses" hidden>
       <label>Ranked starting poses <select id="vh-align-candidate"></select></label>
@@ -107,8 +109,10 @@
         <tbody></tbody>
       </table>
     </details>
-    <small>Each image is normalized separately. Clearance not checked.</small>
+    <p id="vh-proposed-interference" class="vh-interference" role="status" hidden></p>
+    <small id="vh-alignment-note">Each image is normalized separately. Clearance not checked.</small>
   </div>
+  <p id="vh-live-interference" class="vh-interference" role="status" hidden></p>
   <p id="vh-bragg"></p>
   <canvas id="vh-image" aria-label="Simulated ePix100 hit image; horizontal u and vertical v"></canvas>
   <small id="vh-scale"></small>
@@ -128,6 +132,7 @@
   const opt = __OPTIONS__;
   const align = opt.alignment;
   const status = align.status;
+  const interference = opt.interference;
   const plan = opt.planner;
   const planStatus = plan.status;
   const el = (id) => document.getElementById("vh-" + id);
@@ -145,11 +150,18 @@
   const rayGuides = el("ray-guides");
   el("guide-controls").hidden = !opt.rayGuides;
   el("target-motion").hidden = !align.targetMovesDetector;
+  if (interference) {
+    el("alignment-note").textContent =
+      "Each image is normalized separately. Clearance checks the final pose, not the motion path.";
+    el("live-interference").hidden = false;
+    el("live-interference").textContent = "Live pose: checking interference…";
+    el("proposed-interference").hidden = false;
+  }
   const allCrystals = `all ${opt.crystals.length} crystals`;
   el("reflection-caption").textContent = `Reflection for ${allCrystals}`;
   el("all-capture").textContent = `All ${opt.crystals.length} ≥80%`;
   el("reflection-model").textContent =
-    `${opt.modelNote} Starting-pose search tests up to ${align.startingPoseLimit} reflections.`;
+    `${opt.modelNote} Trying other reflections tests up to ${align.startingPoseLimit} named presets.`;
   if (align.xFloor !== null) {
     el("x-floor").textContent = `ePix100 x cannot go below ${align.xFloor.toFixed(2)} mm.`;
   }
@@ -165,6 +177,7 @@
   const line = dropdown("line", opt.lineLabel, opt.lines);
   const reflection = dropdown("reflection", opt.reflectionLabel, opt.reflections);
   const compareButton = el("plan-compare");
+  const checkBand = el("check-band");
   const publishedButton = el("plan-published");
   const bandFields = ["band-below", "band-above"].map((id) => {
     const field = el(id);
@@ -190,7 +203,9 @@
   function refreshPlanner() {
     const valid = bandFields.every((field) => field.validity.valid);
     const [below, above] = bandFields.map((field) => field.valueAsNumber);
-    compareButton.disabled = liveEnergy === null || !valid || comparing;
+    checkBand.disabled = compareButton.disabled = liveEnergy === null || comparing ||
+      !viewer.gui_controllers[plan.compareLabel];
+    compareButton.disabled ||= !valid;
     publishedButton.hidden = !publishedBand();
     el("plan-band").textContent = valid && liveEnergy !== null ?
       `Scan ${(liveEnergy - below).toFixed(1)}–${(liveEnergy + above).toFixed(1)} eV` : "";
@@ -207,7 +222,7 @@
       current ? `${energies.length} sampled energies. No stages moved.` :
       comparison ? "Energy or band changed. Compare again." : messages[planningState];
   }
-  compareButton.addEventListener("click", () => {
+  function requestBandComparison() {
     if (!bandFields.every((field) => field.reportValidity())) return;
     const compare = viewer.gui_controllers[plan.compareLabel]?.object[plan.compareLabel];
     if (!compare || viewer.connection?.readyState !== 1) {
@@ -220,6 +235,11 @@
     comparing = true;
     refreshPlanner();
     compare();
+  }
+  compareButton.addEventListener("click", requestBandComparison);
+  checkBand.addEventListener("click", () => {
+    el("planner").open = true;
+    requestBandComparison();
   });
   publishedButton.addEventListener("click", () => {
     const band = publishedBand();
@@ -347,13 +367,13 @@
   let alignStatus = status.IDLE;
   let meetsPreviewGoal = false;
   let searchProgress = null;
+  let searchReason = status.IDLE;
   let startingCount = 0;
   let selectedCandidate = 0;
-  const searchButton = el("align-search");
-  const previewButton = el("align-preview");
+  const findButton = el("align-find");
+  const otherReflections = el("align-other-reflections");
   const applyButton = el("align-apply");
   const cancelButton = el("align-cancel");
-  const checkApplied = el("check-applied");
   const candidateSelect = el("align-candidate");
   const alignmentResult = el("align-result");
   const alignmentStatus = el("align-status");
@@ -378,25 +398,21 @@
       }
     });
   }
-  function requestAlignment(label) {
+  function requestAlignment() {
     if (!targetFields.every((field) => field.reportValidity())) return;
-    const controller = viewer.gui_controllers[label];
+    const controller = viewer.gui_controllers[align.findLabel];
     if (!controller || viewer.connection?.readyState !== 1) {
       alignmentStatus.textContent = "The simulator is not connected or still loading.";
       return;
     }
     sendTarget();
-    controller.object[label]();
+    viewer.set_control_value(align.tryReflectionsLabel, Number(otherReflections.checked), true);
+    controller.object[align.findLabel]();
   }
-  searchButton.addEventListener("click", () => requestAlignment(align.searchLabel));
-  previewButton.addEventListener("click", () => requestAlignment(align.previewLabel));
+  findButton.addEventListener("click", requestAlignment);
+  otherReflections.addEventListener("change", refreshAlignmentControls);
   cancelButton.addEventListener("click", () => {
     viewer.gui_controllers[align.cancelLabel]?.object[align.cancelLabel]();
-  });
-  checkApplied.addEventListener("click", () => {
-    const planner = el("planner");
-    planner.open = true;
-    compareButton.focus();
   });
   candidateSelect.addEventListener("change", () => {
     viewer.set_control_value(align.candidateLabel, +candidateSelect.value, true);
@@ -411,11 +427,13 @@
     return row.insertCell();
   });
   let braggAllowed = null;
+  let proposedClear = false;
   function readyMessage() {
     if (startingCount) {
-      return "Review the proposed signal and spot size. Applying changes the reflection and stages.";
+      return "Review the proposed reflection and signal. The live reflection and stages are unchanged.";
     }
-    return meetsPreviewGoal ?
+    return align.focusGoalMm === null ?
+      "Review the proposed signal and spot position before applying." : meetsPreviewGoal ?
       "Compact spot near the target in the model. Review the pose before applying." :
       "Best effort only: target error or RMS exceeds 0.5 mm. The stages are unchanged.";
   }
@@ -424,30 +442,45 @@
     const canCancel = alignStatus === status.RUNNING || alignStatus === status.SEARCHING;
     const busy = canCancel || alignStatus === status.CANCELLING;
     const valid = targetFields.every((field) => field.validity.valid);
-    searchButton.disabled = liveEnergy === null || busy || !valid ||
-      !viewer.gui_controllers[align.searchLabel] || line.disabled;
-    previewButton.disabled = !braggAllowed || busy || !valid ||
-      !viewer.gui_controllers[align.previewLabel] || reflection.disabled;
+    const connected = Boolean(viewer.gui_controllers[align.findLabel] &&
+      viewer.gui_controllers[align.tryReflectionsLabel] && !line.disabled && !reflection.disabled);
+    const autoFallback = interference !== null;
+    otherReflections.disabled = !connected || busy;
+    findButton.disabled = !connected || liveEnergy === null || busy || !valid ||
+      (!braggAllowed && !autoFallback && !otherReflections.checked);
     cancelButton.hidden = !canCancel;
-    checkApplied.hidden = alignStatus !== status.APPLIED;
     const ready = alignStatus === status.READY;
     const pendingCandidate = startingCount > 0 && +candidateSelect.value !== selectedCandidate;
-    applyButton.disabled = !ready || pendingTarget || pendingCandidate;
+    applyButton.disabled = !ready || pendingTarget || pendingCandidate ||
+      (interference !== null && !proposedClear);
     alignmentResult.hidden = !ready;
+    const selectedIssues = {
+      [status.IMPOSSIBLE]: "The selected reflection cannot satisfy Bragg at this energy.",
+      [status.NO_SIGNAL]: `No tested pose reached ${align.minSignalHits} modeled hits on even one crystal with the selected reflection.`,
+      [status.NO_CLEAR_POSE]: "The selected reflection found signal, but the tested poses failed interference checks.",
+    };
+    const noAlternative = autoFallback ? " No clear alternative was found in the shortlist." : "";
+    const searchNote = selectedIssues[searchReason] ? `${selectedIssues[searchReason]} ` : "";
     const messages = {
       [status.IDLE]: braggAllowed ?
-        "Find signal across reflections, or refine a shared spot with the selected reflection." :
-        "This reflection cannot satisfy Bragg. Find starting poses to try the other reflections.",
-      [status.RUNNING]: `Searching simulated poses for ${allCrystals}. The stages are unchanged.`,
+        (autoFallback ? "Search the selected reflection first, then preview alternatives if needed." :
+          "Find a starting pose or refine the live spot with the selected reflection.") :
+        `${selectedIssues[status.IMPOSSIBLE]} ${autoFallback ?
+          "Find alignment can preview other reflections." :
+          "Choose another or enable Try other reflections."}`,
+      [status.RUNNING]: `Searching the selected reflection${interference ? " for signal and clearance" : ""}. No stages moved.`,
       [status.SEARCHING]: searchProgress ?
-        `Testing ${searchProgress.label} (${searchProgress.step} of ${searchProgress.total}). No stages moved.` :
-        "Shortlisting Bragg-compatible reflections. No stages moved.",
+        `${searchNote}Testing ${searchProgress.label} (${searchProgress.step} of ${searchProgress.total})${interference ? " for signal and clearance" : ""}. No stages moved.` :
+        `${searchNote}Shortlisting Bragg-compatible reflections. No stages moved.`,
       [status.CANCELLING]: "Cancelling the search…",
       [status.CANCELLED]: "Search cancelled. No stages moved.",
       [status.READY]: readyMessage(),
       [status.STALE]: "The pose, optics, or target changed. Run a new preview before applying.",
-      [status.NO_IMPROVEMENT]: `Bragg is possible, but this search did not find a better pose with enough hits from ${allCrystals}.`,
-      [status.NO_SIGNAL]: `No shortlisted pose reached ${align.minSignalHits} modeled hits on any crystal. Try a reflection manually.`,
+      [status.NO_IMPROVEMENT]: `Bragg is possible, but this search did not find a better ${interference ? "clear " : ""}pose with enough hits from ${allCrystals}.`,
+      [status.NO_SIGNAL]: selectedIssues[status.NO_SIGNAL] + noAlternative,
+      [status.NO_CLEAR_POSE]: selectedIssues[status.NO_CLEAR_POSE] + noAlternative,
+      [status.IMPOSSIBLE]: selectedIssues[status.IMPOSSIBLE] + noAlternative,
+      [status.NO_STARTING_POSE]: `No usable ${interference ? "clear " : ""}pose was found in the reflection shortlist.`,
       [status.APPLIED]: "Applied to the simulator.",
       [status.FAILED]: "The alignment search failed. See the viewer log.",
     };
@@ -570,12 +603,10 @@
   }
   function drawAlignment(data) {
     alignStatus = data[0];
-    if (alignStatus === status.SEARCHING && data.length === 4) {
-      const [, step, total, index] = data;
-      searchProgress = { label: plan.presets[index][0], step, total };
-    } else {
-      searchProgress = null;
-    }
+    const [, reason, step, total, index] = data;
+    searchReason = alignStatus === status.SEARCHING ? reason ?? status.IDLE : status.IDLE;
+    searchProgress = alignStatus === status.SEARCHING && index !== undefined ?
+      { label: plan.presets[index][0], step, total } : null;
     if (alignStatus === status.READY) {
       [startingCount, selectedCandidate] = data.slice(1, 3);
       el("starting-poses").hidden = !startingCount;
@@ -648,11 +679,31 @@
     readout.textContent = message || "";
     readout.hidden = !message;
   }
+  function showInterference([state, ...detail], proposed) {
+    const readout = el(proposed ? "proposed-interference" : "live-interference");
+    const messages = {
+      [interference.PENDING]: "checking interference…",
+      [interference.CLEAR]: "no interference detected in the reviewed model.",
+      [interference.INTERFERENCE]: "modeled interference (collision hulls)",
+      [interference.UNAVAILABLE]: "interference check unavailable. See the viewer log.",
+    };
+    const contact = state === interference.INTERFERENCE;
+    readout.dataset.contact = contact;
+    readout.textContent = `${proposed ? "Proposed" : "Live"} pose: ${messages[state]}`;
+    if (proposed && contact) readout.textContent += "; cannot apply";
+    if (contact) readout.textContent += "\n" + new TextDecoder().decode(Uint8Array.from(detail));
+    if (proposed) {
+      proposedClear = state === interference.CLEAR;
+      refreshAlignmentControls();
+    }
+  }
   const handle = viewer.handle_command.bind(viewer);
   viewer.handle_command = (command) => {
     if (command.type === "set_property" && command.path === opt.root) {
       if (command.property === "detector_frame") return draw(command.value);
       if (command.property === "alignment_frame") return drawAlignment(command.value);
+      if (command.property === "live_interference") return showInterference(command.value, false);
+      if (command.property === "proposed_interference") return showInterference(command.value, true);
       if (command.property === "alignment_target") return updateTarget(command.value);
       if (command.property === "target_move_status") return showTargetMove(command.value);
       if (command.property === "planning_band") return updateBand(command.value);
@@ -662,14 +713,16 @@
     if (command.type === "set_control") {
       if (command.name === opt.lineLabel) line.disabled = false;
       if (command.name === opt.reflectionLabel) reflection.disabled = false;
-      if ([align.previewLabel, align.applyLabel, align.searchLabel, align.cancelLabel,
+      if ([align.findLabel, align.applyLabel, align.tryReflectionsLabel, align.cancelLabel,
         align.candidateLabel, ...align.targetLabels, plan.compareLabel,
         ...plan.bandLabels].includes(command.name)) {
         showSlider(command.name, false);
       }
-      if ([opt.lineLabel, opt.reflectionLabel, align.previewLabel, align.searchLabel].includes(command.name)) {
+      if ([opt.lineLabel, opt.reflectionLabel, align.findLabel,
+        align.tryReflectionsLabel].includes(command.name)) {
         refreshAlignmentControls();
       }
+      if (command.name === plan.compareLabel) refreshPlanner();
     }
   };
 })();

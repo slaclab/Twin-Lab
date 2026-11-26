@@ -3,6 +3,7 @@
 import json
 import math
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 from unittest.mock import Mock
 
@@ -11,6 +12,8 @@ import pytest
 
 from twin_lab import launcher
 from twin_lab.beam import Plane, intersect_plane
+from twin_lab.collision import Clearance, ClearanceReport
+from twin_lab.collision_viewer import SliderJoint
 from twin_lab.paths import CACHE_ROOT
 from twin_lab.spectroscopy import Detector, bragg_angle, detector_image
 from twin_lab.spectroscopy_43841 import (
@@ -19,17 +22,42 @@ from twin_lab.spectroscopy_43841 import (
     LINES,
     CrystalFace,
     chain_pose,
+    collision_positions,
     disk_offsets,
     load_crystal_face,
     load_spectrometer,
     trace_flat,
 )
-from twin_lab.spectroscopy_align import AlignmentRequest, find_alignment, find_starting_poses
+from twin_lab.spectroscopy_align import (
+    AlignmentAxis,
+    AlignmentImage,
+    AlignmentRequest,
+    AlignmentResult,
+    AlignmentRig,
+    ClearanceSearch,
+    StartingPose,
+    find_alignment,
+    find_starting_poses,
+)
 from twin_lab.spectroscopy_plan import compare_reflections
-from twin_lab.spectroscopy_view import TARGET_U, TARGET_V, SpectroscopyPreview, TargetMoveStatus
+from twin_lab.spectroscopy_view import (
+    ALIGN,
+    APPLY,
+    CANDIDATE,
+    REFLECTION,
+    TARGET_U,
+    TARGET_V,
+    TRY_REFLECTIONS,
+    AlignmentPreview,
+    AlignmentStatus,
+    InterferencePreview,
+    InterferenceStatus,
+    SpectroscopyPreview,
+    TargetMoveStatus,
+)
 
 
-def test_launcher_routes_spectroscopy_without_enabling_collision(monkeypatch):
+def test_launcher_routes_to_flat_spectroscopy_viewer(monkeypatch):
     execute = Mock()
     monkeypatch.setattr(launcher.os, "execv", execute)
     monkeypatch.setattr(sys, "argv", ["slac-run", "43841", "--spectroscopy", "--once"])
@@ -37,6 +65,249 @@ def test_launcher_routes_spectroscopy_without_enabling_collision(monkeypatch):
     execute.assert_called_once_with(sys.executable, [
         sys.executable, "-m", "twin_lab.spectroscopy_43841", launcher.INVENTORY_43841, "--once",
     ])
+
+
+def test_collision_pose_preserves_sdf_offsets_and_hidden_slit_home():
+    joints = {
+        "A231:z": SliderJoint(
+            "north_polycap_a231_z", "North Polycap", "A231", "prismatic",
+            -0.000894545, 0.007105455, -0.003105455, 0,
+        ),
+        "A024": SliderJoint(
+            "lj_detector_1_a024_motion", "LJ Detector 1", "A024", "prismatic",
+            -0.004, 0.004, 0, 0.001,
+        ),
+    }
+    hidden = frozenset({"A024"})
+    assert collision_positions({"A231:z": -0.001}, joints, hidden) == pytest.approx({
+        "north_polycap_a231_z": 0.002105455, "lj_detector_1_a024_motion": 0.001,
+    })
+    with pytest.raises(ValueError, match="missing reviewed joints"):
+        collision_positions({"A231": -0.001}, joints, hidden)
+
+
+def _interfering_report():
+    return ClearanceReport(
+        (Clearance("model::base::P2239", "model::north_polycap::P2783", -0.004),),
+        warn_m=0, part_labels={"P2783": "REF-000221284"},
+    )
+
+
+def _finish_check(preview, *, proposed=False):
+    slot = preview.proposed if proposed else preview.live
+    assert slot.in_flight is not None
+    slot.in_flight[1].result(timeout=3)
+
+
+def test_live_check_never_publishes_a_result_for_an_old_slider_pose():
+    controls = Mock()
+    release = Event()
+
+    def check(pose):
+        if pose["A231:z"] == 0:
+            assert release.wait(timeout=3)
+            return ClearanceReport((), warn_m=0)
+        return _interfering_report()
+
+    preview = InterferencePreview(controls, "/test", check, ThreadPoolExecutor(max_workers=1))
+    try:
+        preview.update({"A231:z": 0})
+        moved = {"A231:z": -0.001}
+        assert preview.update(moved) == InterferenceStatus.PENDING
+        release.set()
+        _finish_check(preview)
+        assert preview.update(moved) == InterferenceStatus.PENDING
+        _finish_check(preview)
+        assert preview.update(moved) == InterferenceStatus.INTERFERENCE
+        frames = [call.args[2] for call in controls.SetProperty.call_args_list]
+        assert all(frame[0] != InterferenceStatus.CLEAR for frame in frames)
+        assert "north_polycap/REF-000221284: -4.00 mm" in bytes(map(int, frames[-1][1:])).decode()
+    finally:
+        release.set()
+        preview.close()
+
+
+@pytest.mark.parametrize("unavailable", [False, True])
+def test_apply_requires_clear_selected_endpoint_and_fresh_full_pose(monkeypatch, unavailable):
+    controls = Mock()
+    clicks, sliders = {ALIGN: 0, APPLY: 0}, {CANDIDATE: 0, TRY_REFLECTIONS: 1}
+    controls.GetButtonClicks.side_effect = lambda name: clicks.get(name, 0)
+    controls.GetSliderValue.side_effect = sliders.__getitem__
+    axis = AlignmentAxis("A205", "Detector u", -12.5, 12.5, lambda x: 1000 * x, lambda x: x / 1000)
+    rig = AlignmentRig((axis,), (), dict.update, dict.copy)
+    frame = AlignmentImage(np.zeros((1, 1)), None, None, (812, 812, 812), (812, 812, 812))
+    proposals = [
+        StartingPose(i, AlignmentResult((0,), (move,), (0, 0), frame, frame))
+        for i, move in enumerate((2, 1))
+    ]
+    monkeypatch.setattr("twin_lab.spectroscopy_view.find_starting_poses", lambda *a, **k: proposals)
+    release = Event()
+
+    def check(pose):
+        assert release.wait(timeout=3)
+        if unavailable:
+            return None
+        return _interfering_report() if pose["A205"] == 0.002 else ClearanceReport((), warn_m=0)
+
+    interference = InterferencePreview(
+        controls, "/test", check, ThreadPoolExecutor(max_workers=1),
+    )
+    preview = AlignmentPreview(controls, Mock(), rig, "/test", interference)
+    pose = {"A205": 0.0, "A007": 0.0}
+    request = AlignmentRequest(9442.3, 1.677, 1, 0.1)
+
+    def tick():
+        preview.update(pose, pose, ("same optical settings",), request=request)
+
+    def search():
+        clicks[ALIGN] += 1
+        sliders[CANDIDATE] = 0
+        tick()
+        assert preview.future is not None
+        preview.future.result(timeout=3)
+        tick()
+        controls.SetSliderValue.reset_mock()
+
+    try:
+        search()
+        clicks[APPLY] += 1
+        tick()
+        assert interference.proposed.status == InterferenceStatus.PENDING
+        controls.SetSliderValue.assert_not_called()
+        release.set()
+        _finish_check(interference, proposed=True)
+        clicks[APPLY] += 1
+        tick()
+        controls.SetSliderValue.assert_not_called()
+        assert interference.proposed.status == (
+            InterferenceStatus.UNAVAILABLE if unavailable else InterferenceStatus.INTERFERENCE
+        )
+        if unavailable:
+            return
+
+        sliders[CANDIDATE] = 1
+        tick()
+        _finish_check(interference, proposed=True)
+        tick()
+        assert interference.proposed.status == InterferenceStatus.CLEAR
+
+        pose["A007"] = 0.001  # Long Jet is not an alignment axis.
+        clicks[APPLY] += 1
+        tick()
+        controls.SetSliderValue.assert_not_called()
+        controls.SetProperty.assert_any_call("/test", "alignment_frame", [AlignmentStatus.STALE])
+
+        search()
+        _finish_check(interference, proposed=True)
+        tick()
+        sliders[CANDIDATE] = 1
+        tick()
+        _finish_check(interference, proposed=True)
+        tick()
+        clicks[APPLY] += 1
+        tick()
+        controls.SetSliderValue.assert_any_call("Detector u", 1)
+        controls.SetProperty.assert_any_call("/test", "alignment_frame", [AlignmentStatus.APPLIED])
+    finally:
+        release.set()
+        preview.close()
+        interference.close()
+
+
+@pytest.mark.parametrize(("hits", "clear", "expected"), [
+    ((812, 812, 812), None, AlignmentStatus.NO_IMPROVEMENT),
+    ((0, 0, 0), None, AlignmentStatus.NO_SIGNAL),
+    ((812, 812, 812), True, AlignmentStatus.NO_IMPROVEMENT),
+])
+def test_find_alignment_keeps_the_selected_reflection(monkeypatch, hits, clear, expected):
+    controls = Mock()
+    controls.GetButtonClicks.side_effect = lambda name: int(name == ALIGN)
+    controls.GetSliderValue.return_value = 0  # Do not try other reflections.
+    spectrometer = Mock(crystal_labels=("North", "Middle", "South"))
+    spectrometer.trace.return_value = (
+        None, None, [Mock(weights=np.ones(count), accepted=count) for count in hits],
+    )
+    clearance = None if clear is None else ClearanceSearch(Mock(return_value=clear), {}, ())
+    solve, shortlist = Mock(return_value=None), Mock()
+    monkeypatch.setattr("twin_lab.spectroscopy_view.find_alignment", solve)
+    monkeypatch.setattr("twin_lab.spectroscopy_view.find_starting_poses", shortlist)
+    preview = AlignmentPreview(controls, spectrometer, Mock(), "/test", clearance=clearance)
+    positions = {}
+    request = AlignmentRequest(9442.3, 1.677, 1, 0.1)
+    try:
+        preview.update(positions, positions, (), request=request)
+        assert preview.future is not None
+        assert preview.future.result(timeout=3) == expected
+        preview.update(positions, positions, (), request=request)
+        controls.SetProperty.assert_called_with("/test", "alignment_frame", [expected])
+        assert solve.call_args.args[4] == request
+        assert solve.call_args.kwargs["find_signal"] == (expected == AlignmentStatus.NO_SIGNAL)
+        shortlist.assert_not_called()
+        controls.SetSliderValue.assert_not_called()
+    finally:
+        preview.close()
+
+
+@pytest.mark.parametrize("reason", [
+    AlignmentStatus.NO_CLEAR_POSE, AlignmentStatus.IMPOSSIBLE, AlignmentStatus.NO_SIGNAL,
+])
+def test_find_alignment_previews_an_alternative_until_apply(monkeypatch, reason):
+    controls = Mock()
+    clicks = {ALIGN: 1}
+    controls.GetButtonClicks.side_effect = lambda name: clicks.get(name, 0)
+    controls.GetSliderValue.return_value = 0  # Try other reflections is unchecked.
+    controls.SetSliderValue.side_effect = lambda label, _: order.append(label)
+    axis = AlignmentAxis("A205", "Detector u", -12.5, 12.5, lambda x: x, lambda x: x)
+    rig = AlignmentRig((axis,), (), dict.update, dict.copy)
+    spectrometer = Mock(crystal_labels=("North", "Middle", "South"))
+    spectrometer.trace.return_value = (
+        None, None, [Mock(weights=np.zeros(0), accepted=0)] * 3,
+    )
+    clearance = ClearanceSearch(Mock(return_value=True), {}, ())
+    hits = AlignmentImage(np.zeros((1, 1)), np.zeros(2), np.ones(2), (812,) * 3, (812,) * 3)
+    candidate = StartingPose(3, AlignmentResult((0,), (1,), (0, 0), hits, hits))
+    order = []
+
+    def selected(*args, **kwargs):
+        order.append("selected")
+        assert kwargs["find_signal"]
+        if reason == AlignmentStatus.NO_CLEAR_POSE:
+            kwargs["on_interference"]()
+
+    def shortlist(*args, progress, alternatives_only, **kwargs):
+        order.append("alternatives")
+        assert alternatives_only
+        progress((1, 4, candidate.reflection))
+        return [candidate]
+
+    monkeypatch.setattr("twin_lab.spectroscopy_view.find_alignment", selected)
+    monkeypatch.setattr("twin_lab.spectroscopy_view.find_starting_poses", shortlist)
+    preview = AlignmentPreview(controls, spectrometer, rig, "/test", clearance=clearance)
+    pose = {"A205": 0.0}
+    spacing = 0.3 if reason == AlignmentStatus.IMPOSSIBLE else 1.677
+    request = AlignmentRequest(6403.84, spacing, 1, 0.1)
+
+    def tick():
+        preview.update(pose, pose, (), request=request)
+
+    try:
+        tick()
+        assert preview.future is not None
+        assert preview.future.result(timeout=3) == [candidate]
+        assert preview.progress.get_nowait() == (reason,)
+        tick()
+        assert order == (
+            ["alternatives"] if reason == AlignmentStatus.IMPOSSIBLE
+            else ["selected", "alternatives"]
+        ) + [CANDIDATE]
+        assert preview.proposal is candidate.alignment
+        clicks[APPLY] = 1
+        tick()
+        assert order[-2:] == ["Detector u", REFLECTION]
+        controls.SetSliderValue.assert_any_call("Detector u", 1)
+        controls.SetSliderValue.assert_any_call(REFLECTION, candidate.reflection)
+    finally:
+        preview.close()
 
 
 def test_parallel_rays_need_the_front_of_the_flat_crystal_and_active_sensor():
@@ -182,6 +453,51 @@ def test_pt_starting_pose_recovers_all_three_cad_paths_and_scans_the_band():
     )
 
     assert_target_edits_move_the_detector_only(model, rig, home, proposed)
+
+
+@pytest.mark.parametrize(("has_clear_endpoint", "quick"), [
+    (True, False), (False, False), (True, True),
+])
+def test_pt_search_tries_alternatives_when_optical_winner_is_blocked(has_clear_endpoint, quick):
+    scene = CACHE_ROOT / "stage-cad" / "DSG-000040389.43841-stage-stack" / "scene.yaml"
+    if not scene.exists():
+        pytest.skip("requires the local 43841 CAD cache from --spectroscopy --prepare-only")
+    model = load_spectrometer(scene)
+    rig = model.rig()
+    caps = [joint for path in model.paths for joint in path.source_chain]
+    joints = [*caps, *model.detector_chain, *(j for p in model.paths for j in p.crystal_chain)]
+    home = {joint["key"]: joint["home"] for joint in joints}
+    # Start with a cap moved: the search must try reviewed home, not just lock current settings.
+    pose = {**home, "A231:z": -0.001, "A007": 0.002}
+    checks = []
+    rejected = Mock()
+
+    def allows(endpoint, _cancel):
+        assert endpoint["A007"] == pose["A007"]
+        allowed = endpoint["A206"] == home["A206"] and all(
+            endpoint[joint["key"]] == joint["home"] for joint in caps
+        )
+        checks.append(allowed)
+        return has_clear_endpoint and allowed
+
+    request = AlignmentRequest(
+        LINES[0][1], model.reflections[0].spacing_a, 1, DEFAULT_HALF_WIDTH_DEG,
+    )
+    result = find_alignment(
+        pose, model, rig, pose, request, Event(), find_signal=True,
+        clearance=model.clearance_search(allows), quick=quick, on_interference=rejected,
+    )
+    assert checks[0] is False and any(checks)
+    assert rejected.call_count == sum(not (has_clear_endpoint and allowed) for allowed in checks)
+    if quick:
+        assert checks == [False, True]  # No wider trial after the clear, well-captured result.
+    assert pose["A231:z"] == -0.001
+    if has_clear_endpoint:
+        assert result is not None
+        assert result.after.hits == (812, 812, 812)
+        assert allows(rig.endpoint(pose, result.target), Event())
+    else:
+        assert result is None
 
 
 def assert_target_edits_move_the_detector_only(model, rig, home, proposed):
