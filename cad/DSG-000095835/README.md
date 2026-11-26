@@ -27,6 +27,68 @@ no shared source files or stage catalog were changed.
 Generated geometry lives in `.cache/twin_lab/`; SDF and MATLAB exports live in
 `exports/DSG-000095835/`.
 
+## Offline ePix100 spectroscopy preview
+
+See the [beamline guide](../../docs/95835-spectroscopy.md) for a walkthrough
+of the spectroscopy panel, starting-pose search, and energy-band comparison.
+
+```bash
+uv run slac-run 95835 --spectroscopy
+```
+
+The preview uses the existing liquid-jet interaction datum (the fixed CAD world
+origin), all four concave crystal faces in the reviewed mounting, and the
+upward-facing ePix100 sensor. It resolves the active faces from the local STEP
+cache and follows the spectroscopy stage sliders. The jet sliders move the CAD
+solids without moving the fixed interaction point. The slits stay at their CAD
+pose without sliders; they do not mask rays in this preview. The separate
+spectroscopy export omits the downstream ePix10k2M scattering detector, its
+dedicated mounts, and its stage controls. Spectroscopy also omits the stage
+animation and zoom-limit override controls. The spectroscopy export and viewer
+enforce **-6.5 mm** as the **ePix100 x** lower limit. The y and z limits and the
+regular assembly viewer are unchanged.
+This mode does not check collisions or connect to motors.
+
+### Optical model notes
+
+The line presets use the [XCS standard configuration][xcs-standard] and
+nominal NIST energies (K&alpha; uses K&alpha;1). All reflections use the same
+250 mm-radius CAD apertures and symmetric reflection. The ray trace assumes an
+isotropic point source and omits occlusion, absorption, and detector response.
+The sensor image bins weighted hits in 4-by-4 pixel bins.
+
+Both searches use the full 256-by-256 ray grid on each crystal they evaluate.
+They sample bounded pose candidates rather than enumerate all combinations of
+the 19 axes (three per crystal, three common analyzer axes, four detector axes).
+Starting-pose shortlisting favors angles closest to 79 degrees after matching
+setup references. Auto-align requires every crystal to retain at least as many
+hits as at the starting pose, at least 32 hits, and at least 80% of accepted
+rays. It refines ePix100 x to center the weighted spot horizontally without
+sacrificing hits or focus.
+
+[xcs-standard]: https://lcls.slac.stanford.edu/instruments/xcs/standard-configurations
+
+### Single-line geometry check
+
+From the CAD pose, change **ePix100 x** to **-4 mm** with the default Fe line
+and reflection. The centroid should move about 4 mm toward the crosshair.
+
+For a **simulator-only focus example**, leave the default energy, reflection,
+and Bragg half-width selected, reset to the CAD pose, and set:
+
+| Slider | Value |
+|---|---:|
+| Spectrometer vertical | -19.10 mm |
+| Analyzer rotation | +0.45 degrees |
+| ePix100 x | +1.95 mm |
+| ePix100 y | -8.30 mm |
+| ePix100 z | -6.50 mm |
+
+With the reviewed 2026-11-21 CAD, the centroid lands at about (-0.03, -0.14) mm
+with RMS widths of (0.26, 0.29) mm. Crystals 1 and 2 contribute at this pose;
+3 and 4 do not meet the Bragg window. These are CAD slider offsets, not
+motor setpoints or a clearance-checked path.
+
 ## Included motion
 
 The model has 35 rigid bodies and 34 joints. 29 have sliders. The other five follow

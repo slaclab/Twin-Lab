@@ -1,11 +1,15 @@
 import json
 import math
+import os
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 import yaml
+from pydrake import geometry
 
+from twin_lab import meshcat_ui, stage_cad_viewer
 from twin_lab.stage_cad_viewer import (
     _auto_amplitude,
     _is_fastener_name,
@@ -22,6 +26,7 @@ from twin_lab.stage_cad_viewer import (
     _transform_data,
     _write_ongoing_resume,
     manual_playback_keys,
+    view_stage_cad,
 )
 
 
@@ -47,6 +52,61 @@ def test_pv_name_labels_matches_real_crystal_stack_command_map() -> None:
     assert labels["A213"] == "POLYCAP:CRY:N:SWI"
     assert labels["A233:x"] == "POLYCAP:PC:N:X"
     assert len(labels) == 19
+
+
+@pytest.mark.parametrize("invalidate", [None, "changed supplement", "missing generated mesh"])
+def test_stage_cad_cache_tracks_supplemental_mesh_as_input(tmp_path, monkeypatch, invalidate):
+    class RebuildRequested(Exception):
+        pass
+
+    cache = tmp_path / "stage-cad" / "test"
+    cache.mkdir(parents=True)
+    step = tmp_path / "source.stp"
+    catalog = tmp_path / "catalog.yaml"
+    manifest = tmp_path / "manifest.json"
+    supplement = tmp_path / "supplement.obj"
+    generated = cache / "stage.obj"
+    scene = cache / "scene.yaml"
+    inventory = tmp_path / "test.inventory.yaml"
+    step.touch()
+    supplement.touch()
+    generated.touch()
+    catalog.write_text("stages: {}\n")
+    manifest.write_text(json.dumps({"occurrences": [
+        {"ref": "A1", "name": "Assembly"}, {"ref": "A2", "name": "LIB-Stage"},
+    ]}))
+    inventory.write_text(yaml.safe_dump({
+        "source_step": str(step),
+        "stage_catalog": str(catalog),
+        "cad_manifest": str(manifest),
+        "subassembly": {"ref": "A1", "name": "Assembly"},
+        "stage_instances": [{"ref": "A2"}],
+        "supplemental_attachments": [{"mesh": str(supplement)}],
+    }))
+    scene.write_text(yaml.safe_dump({
+        "schema": "slac-stage-cad-scene/v8",
+        "instances": [{"mesh": str(generated)}],
+        "attachments": [{"mesh": str(supplement)}],
+    }))
+    os.utime(supplement, (100, 100))
+    for path in (step, catalog, manifest, inventory):
+        os.utime(path, (200, 200))
+    for path in (generated, scene):
+        os.utime(path, (300, 300))
+    if invalidate == "changed supplement":
+        os.utime(supplement, (400, 400))
+    elif invalidate == "missing generated mesh":
+        generated.unlink()
+
+    read_step = Mock(side_effect=RebuildRequested)
+    monkeypatch.setattr(stage_cad_viewer, "_read_step_document", read_step)
+    if invalidate is None:
+        assert stage_cad_viewer.prepare_stage_cad(inventory, cache_root=tmp_path) == scene
+        read_step.assert_not_called()
+    else:
+        with pytest.raises(RebuildRequested):
+            stage_cad_viewer.prepare_stage_cad(inventory, cache_root=tmp_path)
+        read_step.assert_called_once_with(step)
 
 
 @pytest.mark.xfail(reason="Legacy occurrence assertions predate the reviewed 2026-09-24 STEP")
@@ -344,6 +404,76 @@ def test_lx10_stage_instances_are_manual_replay_axes() -> None:
     )
     lx10 = [item for item in inventory["stage_instances"] if item["catalog"] == "thorlabs_lx10"]
     assert [item["ref"] for item in lx10] == ["A205", "A206"]
+
+
+@pytest.mark.parametrize("spectroscopy", [False, True])
+def test_slit_chains_and_supports_are_only_hidden_for_spectroscopy(
+    tmp_path, monkeypatch, spectroscopy,
+) -> None:
+    scene_path = tmp_path / "scene.yaml"
+    mesh_path = tmp_path / "triangle.obj"
+    mesh_path.write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+    stacks = {"Detector": "A205", "LJ Detector 1": "A024", "LJ Detector 2": "A030"}
+    mixed = tmp_path / "fixed.obj"
+    mixed.write_text(
+        "o Support\nv 3 0 0\nv 4 0 0\nv 3 1 0\nf 1 2 3\n"
+        "o Fixture\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 4 5 6\n"
+    )
+    instances = []
+    chains = []
+    attachments = []
+    rgba = [0.7, 0.7, 0.7, 1.0]
+    for stack, ref in stacks.items():
+        instances.append({"ref": ref, "rgba": rgba, "translation_m": [0, 0, 0]})
+        chains.append({"name": stack, "joints": [{
+            "ref": ref, "key": ref, "stack": stack, "name": "motion", "model": "Test",
+            "joint_type": "prismatic", "fixed_role": "fixed", "moving_role": "moving",
+            "limits": [-0.01, 0.01], "home": 0.0, "axis_world": [1, 0, 0],
+        }]})
+        attachments.append({"parent_stage_ref": ref, "mesh": str(mesh_path), "rgba": rgba})
+    attachments.append({
+        "parent_stage_ref": None, "mesh": str(mixed), "rgba": rgba,
+    })
+    scene_path.write_text(yaml.safe_dump({
+        "instances": instances, "motion_chains": chains,
+        "motion_stage_meshes": {
+            ref: {"fixed": str(mesh_path), "moving": str(mesh_path)} for ref in stacks.values()
+        },
+        "attachments": attachments, "attached_part_count": len(attachments),
+    }))
+
+    meshcat = Mock()
+    meshcat.GetButtonClicks.return_value = meshcat.GetSliderValue.return_value = 0
+    monkeypatch.setattr(geometry, "Meshcat", lambda params: meshcat)
+    monkeypatch.setattr(meshcat_ui, "announce_viewer", Mock())
+    monkeypatch.setattr(meshcat_ui, "patch_meshcat_page", Mock())
+    preview = Mock()
+    view_stage_cad(
+        scene_path, once=True, open_browser=False,
+        spectroscopy=(lambda _: preview) if spectroscopy else None,
+        hidden_chains=("LJ Detector 1", "LJ Detector 2") if spectroscopy else (),
+        hidden_fixed_parts=frozenset({"Support"}) if spectroscopy else frozenset(),
+    )
+    visible = {"Detector": "A205", "Lower Slit": "A024", "Upper Slit": "A030"}
+    expected = ["Detector"] if spectroscopy else list(visible)
+    labels = [call.args[0] for call in meshcat.AddSlider.call_args_list]
+    slider_stacks = [label.split(" / ")[0] for label in labels if " / " in label]
+    assert slider_stacks == expected
+    objects = {call.args[0] for call in meshcat.SetObject.call_args_list}
+    for stack, ref in visible.items():
+        assert (f"/chains/{stack}/{ref} fixed geometry" in objects) == (stack in expected)
+        assert (f"/chains/{stack}/{ref} motion/default geometry" in objects) == (stack in expected)
+    fixed_path = "/attached geometry/fixed/default"
+    assert (fixed_path in objects) == (not spectroscopy)
+    if spectroscopy:
+        meshcat.SetTriangleMesh.assert_called_once()
+        path, verts, faces, _ = meshcat.SetTriangleMesh.call_args.args
+        assert path == fixed_path
+        assert verts.T.tolist() == [[0, 0, 0], [1, 0, 0], [0, 1, 0]]
+        assert faces.T.tolist() == [[0, 1, 2]]
+        preview.assert_called_once_with({"A205": 0})
+    else:
+        meshcat.SetTriangleMesh.assert_not_called()
 
 
 def test_manual_replay_keys_only_include_unpowered_lx10_stages() -> None:

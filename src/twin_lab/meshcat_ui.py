@@ -46,6 +46,11 @@ FRAMING_DISTANCE = 2.2
 VIEW_CUBE_PX = 132
 
 
+def stage_stack_label(name: str) -> str:
+    """Translate legacy stack names without changing the pinned collision bundle."""
+    return {"LJ Detector 1": "Lower Slit", "LJ Detector 2": "Upper Slit"}.get(name, name)
+
+
 def _swing_and_rise(swing_deg: float, rise_deg: float) -> tuple[float, float, float]:
     """A unit direction ``swing_deg`` off the front face (-Y) and ``rise_deg`` above it."""
 
@@ -103,8 +108,7 @@ body { background: #1a1a1a; }
    leaves it short of; !important beats that, and outlasts dat.GUI reapplying it. */
 .dg.main .close-button { height: 24px !important; line-height: 24px !important;
                          width: 100% !important; }
-/* Bottom left is the one corner neither the control panel nor Drake's stats plot uses,
-   so the cube never has to move out of anything's way. */
+/* Keep the cube away from the control panel and Drake's stats plot. */
 #twinlab-view-cube { position: fixed; left: 12px; bottom: 12px; z-index: 8; }
 #twinlab-view-cube canvas { display: block; cursor: pointer; }
 /* Drake's own rtr% plot is switched off in every viewer here, so the top-left is free.
@@ -260,7 +264,7 @@ window.addEventListener("load", function () {
   // the row lands at the top of the panel and has to be moved down to the toggle it
   // belongs with once that toggle exists.
   var overrideRow = null;
-  if (viewer.gui) {
+  if (__SHOW_ZOOM_OVERRIDE__ && viewer.gui) {
     overrideRow = viewer.gui.add(override, "Zoom limit override").onChange(apply).__li;
   }
 
@@ -277,9 +281,11 @@ window.addEventListener("load", function () {
     row.parentElement.insertBefore(overrideRow, row.nextSibling);
   }
 
-  var set_control = viewer.set_control.bind(viewer);
-  viewer.set_control = function () { set_control.apply(null, arguments); regroup(); };
-  regroup();
+  if (overrideRow) {
+    var set_control = viewer.set_control.bind(viewer);
+    viewer.set_control = function () { set_control.apply(null, arguments); regroup(); };
+    regroup();
+  }
 
   // Drake builds a fresh OrbitControls whenever the server sets a camera.
   var set_camera = viewer.set_camera.bind(viewer);
@@ -980,24 +986,30 @@ def wsl_ipv4_address() -> str | None:
         return None
 
 
-def patch_meshcat_page() -> None:
+def patch_meshcat_page(
+    *, extra_html: str = "", resource_root: Path = RESOURCE_ROOT, show_zoom_override: bool = True,
+) -> None:
     """Redirect Drake's resource lookup at a patched page. Call before ``Meshcat()``."""
 
-    if os.environ.get("DRAKE_RESOURCE_ROOT"):
+    if not extra_html and show_zoom_override and os.environ.get("DRAKE_RESOURCE_ROOT"):
         return
     try:
-        os.environ["DRAKE_RESOURCE_ROOT"] = str(_build_resource_root())
+        os.environ["DRAKE_RESOURCE_ROOT"] = str(_build_resource_root(
+            resource_root, extra_html, show_zoom_override=show_zoom_override,
+        ))
     except (RuntimeError, OSError) as error:
+        if extra_html or not show_zoom_override:
+            raise RuntimeError("Cannot install the requested Meshcat page") from error
         print(f"Meshcat UI patch unavailable ({error}); using Drake's page.")
 
 
-def _build_resource_root() -> Path:
+def _build_resource_root(resource_root: Path, extra_html: str, *, show_zoom_override: bool) -> Path:
     """Mirror Drake's resource tree with symlinks, swapping in our own meshcat.html."""
 
     from pydrake.common import FindResourceOrThrow
 
     source = Path(FindResourceOrThrow("drake/geometry/meshcat.html")).resolve()
-    drake = RESOURCE_ROOT / "drake"
+    drake = resource_root / "drake"
     (drake / "geometry").mkdir(parents=True, exist_ok=True)
     for entry in source.parents[1].iterdir():
         if entry.name != "geometry":
@@ -1008,9 +1020,12 @@ def _build_resource_root() -> Path:
     # Written via a temporary so a second viewer starting at the same time never reads
     # a half-written page.
     patched = drake / "geometry" / "meshcat.html.new"
-    patched.write_text(_patched_html(source), encoding="utf-8")
+    patched.write_text(
+        _patched_html(source, extra_html=extra_html, show_zoom_override=show_zoom_override),
+        encoding="utf-8",
+    )
     patched.replace(drake / "geometry" / source.name)
-    return RESOURCE_ROOT
+    return resource_root
 
 
 def _link(link: Path, target: Path) -> None:
@@ -1020,22 +1035,23 @@ def _link(link: Path, target: Path) -> None:
     link.symlink_to(target)
 
 
-def _patched_html(source: Path) -> str:
+def _patched_html(source: Path, *, extra_html: str = "", show_zoom_override: bool = True) -> str:
     html = source.read_text(encoding="utf-8")
     if "</body>" not in html:
         raise RuntimeError("Drake's meshcat.html no longer has a </body> to patch")
+    controls = CONTROLS_JS.replace("__SHOW_ZOOM_OVERRIDE__", json.dumps(show_zoom_override))
     patch = (
         f"<style>{PANEL_CSS}</style>\n"
         f"<script>{VIEW_SETTINGS_JS}</script>\n"
         f"<script>{SCENE_JS}</script>\n"
         f"<script>{PANEL_JS}</script>\n"
-        f"<script>{CONTROLS_JS}</script>\n"
+        f"<script>{controls}</script>\n"
         f"<script>{TOGGLE_JS}</script>\n"
         f"<script>{FPS_JS}</script>\n"
         f"<script>{SCRUB_JS}</script>\n"
         f"<script>{VIEW_CUBE_JS}</script>\n"
     )
-    html = html.replace("</body>", f"{patch}</body>")
+    html = html.replace("</body>", f"{patch}{extra_html}</body>")
     # Inlined rather than served as a sibling file: Drake only maps meshcat.html onto its
     # resource root, so a relative icon href would 404.
     icon = base64.b64encode(FAVICON_PATH.read_bytes()).decode("ascii")

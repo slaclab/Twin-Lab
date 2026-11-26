@@ -69,7 +69,7 @@ slac-static-review = "twin_lab.static_review:main"
 package-dir = {"" = "src"}
 
 [tool.setuptools.package-data]
-twin_lab = ["assets/*.png"]
+twin_lab = ["assets/*.png", "assets/*.html"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

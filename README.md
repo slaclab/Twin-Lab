@@ -14,6 +14,12 @@ Two models are currently runnable:
 In `43841`, the two Thorlabs LX10 detector stages are manual-only because they
 are not powered and have no EPICS archive data.
 
+Planning a von Hamos run with the ePix100? See the
+[95835 spectroscopy beamline guide](docs/95835-spectroscopy.md) for a worked
+Fe example, starting poses, and energy-band checks.
+For flat graphite analyzers with polycapillary optics, see the
+[43841 spectroscopy preview](docs/43841-spectroscopy.md).
+
 ## Collision Viewer Quick Start: Published Geometry
 
 **You do not need to mesh the CAD or compute convex hulls to run the published
@@ -682,7 +688,9 @@ Answer with the number or the key. To skip the prompt, name the model:
 
 ```bash
 uv run slac-run 43841                  # collision viewer
+uv run slac-run 43841 --spectroscopy   # three flat analyzers and ePix100 preview
 uv run slac-run 95835 --motion-only    # lighter viewer, no collision checking
+uv run slac-run 95835 --spectroscopy   # four von Hamos analyzers and ePix100 preview
 uv run slac-run --list                 # list the models and exit
 ```
 
@@ -1178,6 +1186,8 @@ and blue arrows through the cube are the model's own X, Y, and Z axes, so a
 Twin-Lab view and a CAD view can be checked against each other by their axes
 rather than by eye. Face names follow the CAD package: the front of the assembly
 faces `-Y`, right is `+X`, top is `+Z`.
+In spectroscopy mode, the preview pane covers the cube where they overlap.
+Collapse **ePix100 spectroscopy preview** to use the cube if it's covered.
 
 Two keys reframe the whole model rather than just turning it:
 

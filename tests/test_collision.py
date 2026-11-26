@@ -1206,14 +1206,19 @@ def test_read_joint_metadata_parses_the_compiled_table(tmp_path):
     (tmp_path / "joint_metadata.csv").write_text(
         "joint_name,stack,stage_ref,type,sdf_lower,sdf_upper,logical_home_offset,"
         "reviewed_home,units,axis_x,axis_y,axis_z\n"
-        "detector_a041_motion,Detector,A041,prismatic,-0.4,0.0,0.0,0.0,m,1,0,0\n",
+        "detector_a041_motion,Detector,A041,prismatic,-0.4,0.0,0.0,0.0,m,1,0,0\n"
+        "lj_detector_1_a024_motion,LJ Detector 1,A024,prismatic,-0.004,0.004,0,0,m,0,0,1\n"
+        "lj_detector_2_a030_motion,LJ Detector 2,A030,prismatic,-0.004,0.004,0,0,m,0,0,1\n",
         encoding="utf-8",
     )
 
     joints = read_joint_metadata(tmp_path)
 
-    assert len(joints) == 1
-    assert joints[0].label == "Detector / A041 detector_a041_motion (mm)"
+    assert [joint.label for joint in joints] == [
+        "Detector / A041 detector_a041_motion (mm)",
+        "Lower Slit / A024 motion (mm)",
+        "Upper Slit / A030 motion (mm)",
+    ]
     assert joints[0].slider_bounds() == pytest.approx((-400.0, 0.0, 0.0))
 
 

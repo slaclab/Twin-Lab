@@ -509,13 +509,8 @@ def propagate(
     return BeamPath(name=name, rays=rays)
 
 
-def manifest_rotation(manifest_path: str | Path, ref: str) -> np.ndarray:
-    """The 3x3 rotation taking a leaf occurrence's local axes into the STEP root frame.
-
-    The part's local z is the axis both optical faces are defined against, and the
-    manifest is the only place it survives: the cached meshes are already baked into the
-    root frame, which throws each part's own orientation away.
-    """
+def manifest_transform(manifest_path: str | Path, ref: str) -> np.ndarray:
+    """The leaf occurrence's local-to-STEP-root transform, in STEP units (mm)."""
 
     occurrences = json.loads(Path(manifest_path).read_text(encoding="utf-8"))["occurrences"]
     by_id = {item["id"]: item for item in occurrences}
@@ -532,7 +527,12 @@ def manifest_rotation(manifest_path: str | Path, ref: str) -> np.ndarray:
     transform = np.eye(4)
     for node in reversed(chain):
         transform = transform @ np.asarray(node["transform_to_parent"], dtype=float)
-    return transform[:3, :3]
+    return transform
+
+
+def manifest_rotation(manifest_path: str | Path, ref: str) -> np.ndarray:
+    """The rotation taking an occurrence's local axes into the STEP root frame."""
+    return manifest_transform(manifest_path, ref)[:3, :3]
 
 
 def face_from_cache(

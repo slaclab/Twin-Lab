@@ -19,6 +19,7 @@ class Model:
     title: str
     collision: tuple[str, ...]
     motion: tuple[str, ...]
+    spectroscopy: tuple[str, ...]
 
 
 INVENTORY_43841 = str(
@@ -32,12 +33,14 @@ MODELS = (
         "DSG-000040389 *43841 polycapillary stage stack (31 joints)",
         ("-m", "twin_lab.collision_viewer", INVENTORY_43841),
         ("-m", "twin_lab.stage_cad_viewer", INVENTORY_43841),
+        ("-m", "twin_lab.spectroscopy_43841", INVENTORY_43841),
     ),
     Model(
         "95835",
         "DSG-000095835 offline assembly (34 joints)",
         (BUILD_95835, "--view"),
         (BUILD_95835, "--collision", "none", "--view"),
+        (BUILD_95835, "--spectroscopy"),
     ),
 )
 
@@ -74,6 +77,10 @@ def main() -> None:
         "--motion-only", action="store_true",
         help="Open the lighter viewer without collision checking",
     )
+    parser.add_argument(
+        "--spectroscopy", action="store_true",
+        help="Open the offline ePix100 ray-tracing and alignment preview",
+    )
     parser.add_argument("--list", action="store_true", help="List the models and exit")
     args, passthrough = parser.parse_known_args()
 
@@ -87,7 +94,11 @@ def main() -> None:
     else:
         model = next(model for model in MODELS if model.key == args.model)
 
-    command = [sys.executable, *(model.motion if args.motion_only else model.collision)]
+    entry = (
+        model.spectroscopy if args.spectroscopy else
+        model.motion if args.motion_only else model.collision
+    )
+    command = [sys.executable, *entry]
     command += passthrough
     print("Running:", " ".join(command), flush=True)
     # Replace this process so Ctrl-C reaches the viewer directly and caches close cleanly.

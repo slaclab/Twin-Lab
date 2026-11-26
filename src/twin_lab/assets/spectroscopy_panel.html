@@ -1,0 +1,730 @@
+<style>
+  #twinlab-view-cube { z-index: 7; }
+  #twinlab-spectroscopy {
+    position: fixed; top: 52px; left: 12px; z-index: 8; width: min(350px, 68vw);
+    max-height: calc(100dvh - 60px); overflow: auto; box-sizing: border-box;
+    color: #e7eefb; background: #101927; border: 1px solid #546783; border-radius: 8px;
+    padding: 10px 12px; font: 12px/1.45 system-ui, sans-serif;
+  }
+  #twinlab-spectroscopy summary { cursor: pointer; font-weight: 650; font-size: 14px; }
+  #twinlab-spectroscopy label { display: block; margin-top: 6px; }
+  #twinlab-spectroscopy select { display: block; width: 100%; color-scheme: dark; }
+  #twinlab-spectroscopy canvas { display: block; width: 100%; margin-top: 8px; }
+  #twinlab-spectroscopy p { margin: 6px 0; }
+  #twinlab-spectroscopy small { color: #b6c4d6; }
+  #twinlab-spectroscopy table { width: 100%; text-align: left; border-collapse: collapse; }
+  #twinlab-spectroscopy th, #twinlab-spectroscopy td { padding: 1px 3px; white-space: nowrap; }
+  #vh-target-fields, #vh-band-fields { display: flex; flex-wrap: wrap; gap: 8px; }
+  #vh-target-fields input, #vh-band-fields input { width: 5em; color-scheme: dark; }
+  #vh-planner { border-block: 1px solid #546783; margin-top: 8px; padding: 6px 0; }
+  #vh-planner button { color-scheme: dark; }
+  #vh-plan-compare, #vh-plan-published, #vh-plan-use { margin: 4px 3px 4px 0; }
+  #vh-plan-rows button[aria-pressed="true"] { outline: 1px solid #75efff; }
+  #vh-plan-map-scale { display: flex; justify-content: space-between; }
+  #vh-plan-spectrum { height: 5px; background: linear-gradient(90deg, #568bff, #33e6ac, #ffae46); }
+  #vh-plan-coverage td { border: 1px solid #101927; padding: 0; height: 8px; }
+  #vh-plan-source a { color: #95d5ff; }
+  #vh-align-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+  #vh-align-actions button { color-scheme: dark; cursor: pointer; }
+  #vh-align-actions button:disabled { cursor: default; }
+  #vh-align-images { display: flex; gap: 8px; }
+  #vh-align-images figure { flex: 1; min-width: 0; margin: 4px 0; }
+  #vh-align-images canvas { margin-top: 2px; }
+  #vh-align-moves td:last-child, #vh-align-moves th:last-child { text-align: right; }
+  .vh-interference { white-space: pre-line; overflow-wrap: anywhere; }
+  .vh-interference[data-contact="true"] { color: #ffaba2; }
+</style>
+<details id="twinlab-spectroscopy" open>
+  <summary>ePix100 spectroscopy preview</summary>
+  <small>Choose a line, find a starting pose, then check its energy band.</small>
+  <label>Emission line <select id="vh-line"></select></label>
+  <details id="vh-planner">
+    <summary>Check energy band</summary>
+    <div id="vh-band-fields">
+      <label>Below line (eV) <input id="vh-band-below" type="number" required></label>
+      <label>Above line (eV) <input id="vh-band-above" type="number" required></label>
+    </div>
+    <small id="vh-plan-band"></small>
+    <div>
+      <button id="vh-plan-compare" type="button" disabled>Compare reflections here</button>
+      <button id="vh-plan-published" type="button" hidden>Use published Fe band</button>
+    </div>
+    <p id="vh-plan-status" role="status">Compare the band at this simulator pose.</p>
+    <div id="vh-plan-result" hidden>
+      <table aria-label="Reflection comparison at the current pose">
+        <thead><tr><th>Reflection</th><th>Line θ</th><th id="vh-all-capture"></th><th>Any hit</th></tr></thead>
+        <tbody id="vh-plan-rows"></tbody>
+      </table>
+      <p id="vh-plan-source"></p>
+      <table aria-label="Geometric capture by crystal and energy"><tbody id="vh-plan-coverage"></tbody></table>
+      <small>One crystal per row. Green ≥80%, amber partial, red off-sensor, gray no accepted rays.</small>
+      <canvas id="vh-plan-map" aria-label="Simulated ePix100 centroids by photon energy"></canvas>
+      <div id="vh-plan-spectrum"></div>
+      <div id="vh-plan-map-scale"><small id="vh-plan-low"></small><small id="vh-plan-high"></small></div>
+      <p id="vh-plan-edge"></p>
+      <button id="vh-plan-use" type="button">Use reflection in simulator</button>
+      <small>Sampled geometry only. No detector gaps, reflectivity, or inventory modeled.</small>
+    </div>
+  </details>
+  <label><span id="vh-reflection-caption"></span> <select id="vh-reflection"></select></label>
+  <small id="vh-reflection-model"></small>
+  <div id="vh-target-fields">
+    <label>Target u (mm) <input id="vh-target-u" type="number" value="0" required></label>
+    <label>Target v (mm) <input id="vh-target-v" type="number" value="0" required></label>
+  </div>
+  <div id="vh-target-motion" hidden>
+    <small>Editing a target moves its LX10 stage to place the live spot.</small>
+    <p id="vh-target-motion-status" role="status" hidden></p>
+  </div>
+  <small>Gold +: target · cyan ring: centroid. No detector gaps modeled.</small>
+  <br><small id="vh-x-floor"></small>
+  <div id="vh-align-actions">
+    <button id="vh-align-find" type="button" disabled>Find alignment</button>
+    <button id="vh-align-apply" type="button" disabled>Apply to simulator</button>
+    <button id="vh-align-cancel" type="button" hidden>Cancel search</button>
+  </div>
+  <label><input id="vh-align-other-reflections" type="checkbox" disabled> Try other reflections</label>
+  <p id="vh-align-status" role="status">Waiting for the optical trace.</p>
+  <button id="vh-check-band" type="button" disabled>Check band at this pose</button>
+  <div id="vh-align-result" hidden>
+    <div id="vh-starting-poses" hidden>
+      <label>Ranked starting poses <select id="vh-align-candidate"></select></label>
+      <small id="vh-starting-note"></small>
+    </div>
+    <div id="vh-align-images">
+      <figure>
+        <figcaption>Before</figcaption>
+        <canvas id="vh-align-before" aria-label="Before: simulated hits from all crystals"></canvas>
+        <small id="vh-align-before-report"></small>
+      </figure>
+      <figure>
+        <figcaption>Proposed</figcaption>
+        <canvas id="vh-align-after" aria-label="Proposed: simulated hits from all crystals"></canvas>
+        <small id="vh-align-after-report"></small>
+      </figure>
+    </div>
+    <details>
+      <summary>Proposed slider changes</summary>
+      <table id="vh-align-moves">
+        <thead><tr><th>Simulator slider</th><th>Before &rarr; proposed</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </details>
+    <p id="vh-proposed-interference" class="vh-interference" role="status" hidden></p>
+    <small id="vh-alignment-note">Each image is normalized separately. Clearance not checked.</small>
+  </div>
+  <p id="vh-live-interference" class="vh-interference" role="status" hidden></p>
+  <p id="vh-bragg"></p>
+  <canvas id="vh-image" aria-label="Simulated ePix100 hit image; horizontal u and vertical v"></canvas>
+  <small id="vh-scale"></small>
+  <div id="vh-guide-controls" hidden>
+    <label><input id="vh-ray-guides" type="checkbox" checked> Show aiming guides when a beam has no hits</label>
+    <small>Colored marks show where the beam axis would land if reflected, even if it misses the crystal or Bragg window. Edge arrows point off-sensor.</small>
+  </div>
+  <p id="vh-result" role="status">Waiting for the optical trace.</p>
+  <table>
+    <thead><tr><th>Crystal</th><th>Incidence</th><th>Hits / accepted</th></tr></thead>
+    <tbody id="vh-crystals"></tbody>
+  </table>
+  <small>Offline geometry only. Brightness is relative to the brightest bin in each image.</small>
+</details>
+<script>
+(() => {
+  const opt = __OPTIONS__;
+  const align = opt.alignment;
+  const status = align.status;
+  const interference = opt.interference;
+  const plan = opt.planner;
+  const planStatus = plan.status;
+  const el = (id) => document.getElementById("vh-" + id);
+  function initializeImage(id) {
+    const canvas = el(id);
+    canvas.width = opt.cols * 2;
+    canvas.height = opt.rows * 2;
+    return canvas.getContext("2d");
+  }
+  const mainImage = initializeImage("image");
+  const beforeImage = initializeImage("align-before");
+  const afterImage = initializeImage("align-after");
+  const planImage = initializeImage("plan-map");
+  const [uSize, vSize] = opt.sizeMm;
+  const rayGuides = el("ray-guides");
+  el("guide-controls").hidden = !opt.rayGuides;
+  el("target-motion").hidden = !align.targetMovesDetector;
+  if (interference) {
+    el("alignment-note").textContent =
+      "Each image is normalized separately. Clearance checks the final pose, not the motion path.";
+    el("live-interference").hidden = false;
+    el("live-interference").textContent = "Live pose: checking interference…";
+    el("proposed-interference").hidden = false;
+  }
+  const allCrystals = `all ${opt.crystals.length} crystals`;
+  el("reflection-caption").textContent = `Reflection for ${allCrystals}`;
+  el("all-capture").textContent = `All ${opt.crystals.length} ≥80%`;
+  el("reflection-model").textContent =
+    `${opt.modelNote} Trying other reflections tests up to ${align.startingPoseLimit} named presets.`;
+  if (align.xFloor !== null) {
+    el("x-floor").textContent = `ePix100 x cannot go below ${align.xFloor.toFixed(2)} mm.`;
+  }
+  el("scale").textContent = `${uSize.toFixed(1)} × ${vSize.toFixed(1)} mm · u → v ↑ · 4 × 4 pixel bins`;
+
+  function dropdown(id, label, options) {
+    const select = el(id);
+    select.disabled = true;
+    options.forEach((text, index) => select.add(new Option(text, index)));
+    select.addEventListener("change", () => viewer.set_control_value(label, +select.value, true));
+    return select;
+  }
+  const line = dropdown("line", opt.lineLabel, opt.lines);
+  const reflection = dropdown("reflection", opt.reflectionLabel, opt.reflections);
+  const compareButton = el("plan-compare");
+  const checkBand = el("check-band");
+  const publishedButton = el("plan-published");
+  const bandFields = ["band-below", "band-above"].map((id) => {
+    const field = el(id);
+    field.min = 0;
+    field.max = plan.maxOffset;
+    field.step = 0.1;
+    field.value = plan.defaultOffset;
+    field.addEventListener("input", refreshPlanner);
+    return field;
+  });
+  let liveEnergy = null;
+  let liveWidth = null;
+  let comparison = null;
+  let planningState = planStatus.IDLE;
+  let comparing = false;
+  let selected = null;
+  let energies = [];
+
+  function publishedBand() {
+    return plan.presets.find(([, , , band]) => band && band[0] <= liveEnergy &&
+      liveEnergy <= band[1])?.[3];
+  }
+  function refreshPlanner() {
+    const valid = bandFields.every((field) => field.validity.valid);
+    const [below, above] = bandFields.map((field) => field.valueAsNumber);
+    checkBand.disabled = compareButton.disabled = liveEnergy === null || comparing ||
+      !viewer.gui_controllers[plan.compareLabel];
+    compareButton.disabled ||= !valid;
+    publishedButton.hidden = !publishedBand();
+    el("plan-band").textContent = valid && liveEnergy !== null ?
+      `Scan ${(liveEnergy - below).toFixed(1)}–${(liveEnergy + above).toFixed(1)} eV` : "";
+    const current = comparison && Math.abs(comparison.energy - liveEnergy) < 1e-8 &&
+      Math.abs(comparison.width - liveWidth) < 1e-8 &&
+      Math.abs(comparison.below - below) < 1e-8 && Math.abs(comparison.above - above) < 1e-8;
+    el("plan-result").hidden = !current || comparing;
+    const messages = {
+      [planStatus.IDLE]: "Compare the band at this simulator pose.",
+      [planStatus.STALE]: "Pose or settings changed. Compare again.",
+      [planStatus.FAILED]: "The comparison failed. See the viewer log.",
+    };
+    el("plan-status").textContent = comparing ? "Tracing the energy band…" :
+      current ? `${energies.length} sampled energies. No stages moved.` :
+      comparison ? "Energy or band changed. Compare again." : messages[planningState];
+  }
+  function requestBandComparison() {
+    if (!bandFields.every((field) => field.reportValidity())) return;
+    const compare = viewer.gui_controllers[plan.compareLabel]?.object[plan.compareLabel];
+    if (!compare || viewer.connection?.readyState !== 1) {
+      el("plan-status").textContent = "The simulator is not connected.";
+      return;
+    }
+    bandFields.forEach((field, i) => {
+      viewer.set_control_value(plan.bandLabels[i], field.valueAsNumber, true);
+    });
+    comparing = true;
+    refreshPlanner();
+    compare();
+  }
+  compareButton.addEventListener("click", requestBandComparison);
+  checkBand.addEventListener("click", () => {
+    el("planner").open = true;
+    requestBandComparison();
+  });
+  publishedButton.addEventListener("click", () => {
+    const band = publishedBand();
+    if (!band) return;
+    bandFields[0].value = (liveEnergy - band[0]).toFixed(1);
+    bandFields[1].value = (band[1] - liveEnergy).toFixed(1);
+    refreshPlanner();
+  });
+  el("plan-use").addEventListener("click", () => {
+    if (selected !== null && !el("plan-result").hidden) {
+      viewer.set_control_value(opt.reflectionLabel, selected, true);
+    }
+  });
+
+  function energyColor(index) {
+    const colors = ["#568bff", "#33e6ac", "#ffae46"];
+    if (energies.length === 1) return colors[1];
+    const x = 2 * index / (energies.length - 1);
+    const i = Math.min(1, Math.floor(x));
+    const rgb = colors.slice(i, i + 2).map(c => c.slice(1).match(/../g).map(h => parseInt(h, 16)));
+    return `rgb(${rgb[0].map((c, j) => Math.round(c + (rgb[1][j] - c) * (x - i))).join(",")})`;
+  }
+  function describeCapture(value) {
+    if (value === -2) return "No real Bragg angle";
+    if (value === -1) return "No analyzer samples accepted";
+    if (!value) return "Bragg rays miss the sensor";
+    return `${(value * 100).toFixed(0)}% of accepted samples reach the sensor`;
+  }
+  function selectCandidate(index, points) {
+    selected = index;
+    for (const button of el("plan-rows").querySelectorAll("button")) {
+      button.setAttribute("aria-pressed", String(+button.value === index));
+    }
+    const [, label, source] = plan.presets[index];
+    const evidence = el("plan-source");
+    evidence.textContent = `${label}. Availability unconfirmed.`;
+    if (source) {
+      const link = document.createElement("a");
+      link.textContent = " Source";
+      link.href = source;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      evidence.append(link);
+    }
+    const coverage = el("plan-coverage");
+    coverage.replaceChildren();
+    const w = planImage.canvas.width, h = planImage.canvas.height;
+    planImage.fillStyle = "#030916";
+    planImage.fillRect(0, 0, w, h);
+    planImage.strokeStyle = "#546783";
+    planImage.strokeRect(0.5, 0.5, w - 1, h - 1);
+    let edge = Infinity;
+    opt.colors.forEach((color, crystal) => {
+      const row = coverage.insertRow();
+      const labelCell = document.createElement("th");
+      labelCell.scope = "row";
+      labelCell.textContent = opt.crystals[crystal];
+      labelCell.style.color = `rgb(${color.join(",")})`;
+      row.append(labelCell);
+      points.forEach((sample, i) => {
+        const [fraction, u, v, margin] = sample[crystal];
+        const cell = row.insertCell();
+        const description = `${energies[i].toFixed(1)} eV: ${describeCapture(fraction)}`;
+        cell.title = description;
+        cell.setAttribute("aria-label", description);
+        cell.style.backgroundColor = fraction >= plan.captureGoal ? "#43b08f" :
+          fraction > 0 ? "#da9b52" : fraction === 0 ? "#a84a48" :
+          fraction === -1 ? "#566781" : "#293545";
+        if (fraction <= 0) return;
+        edge = Math.min(edge, margin);
+        planImage.fillStyle = energyColor(i);
+        planImage.beginPath();
+        planImage.arc(w * (0.5 + u / uSize), h * (0.5 - v / vSize), 3, 0, 2 * Math.PI);
+        planImage.fill();
+      });
+    });
+    el("plan-low").textContent = `${energies[0].toFixed(1)} eV`;
+    el("plan-high").textContent = `${energies.at(-1).toFixed(1)} eV`;
+    el("plan-edge").textContent = Number.isFinite(edge) ?
+      `Closest captured ray to modeled sensor edge: ${edge.toFixed(2)} mm. Map shows centroids only.` :
+      "No detector hits in this scan. Try a different reflection or pose.";
+  }
+  function drawPlanning(data) {
+    comparing = false;
+    planningState = data[0];
+    comparison = null;
+    if (planningState !== planStatus.READY) return refreshPlanner();
+    const [, energy, width, below, above, n] = data;
+    comparison = {energy, width, below, above};
+    let offset = 6;
+    energies = data.slice(offset, offset += n);
+    const table = el("plan-rows");
+    table.replaceChildren();
+    for (let i = 0; i < plan.presets.length; i++) {
+      const index = data[offset++], angle = data[offset++];
+      const points = energies.map(() =>
+        opt.colors.map(() => data.slice(offset, offset += 4)));
+      const row = table.insertRow();
+      const button = document.createElement("button");
+      button.type = "button";
+      button.value = index;
+      button.textContent = plan.presets[index][0];
+      button.setAttribute("aria-pressed", "false");
+      button.onclick = () => selectCandidate(index, points);
+      row.insertCell().append(button);
+      row.insertCell().textContent = angle < 0 ? "—" : `${angle.toFixed(1)}°`;
+      const complete = points.filter(sample => sample.every(([f]) => f >= plan.captureGoal)).length;
+      const any = points.filter(sample => sample.some(([f]) => f > 0)).length;
+      row.insertCell().textContent = `${complete}/${n}`;
+      row.insertCell().textContent = `${any}/${n}`;
+      if (i === 0) selectCandidate(index, points);
+    }
+    refreshPlanner();
+  }
+  function updateBand(data) {
+    if (comparing) return;
+    bandFields.forEach((field, i) => {
+      if (field !== document.activeElement) field.value = +data[i].toFixed(1);
+    });
+    refreshPlanner();
+  }
+
+  let detectorTarget = [0, 0];
+  let latestTrace = null;
+  let alignStatus = status.IDLE;
+  let meetsPreviewGoal = false;
+  let searchProgress = null;
+  let searchReason = status.IDLE;
+  let startingCount = 0;
+  let selectedCandidate = 0;
+  const findButton = el("align-find");
+  const otherReflections = el("align-other-reflections");
+  const applyButton = el("align-apply");
+  const cancelButton = el("align-cancel");
+  const candidateSelect = el("align-candidate");
+  const alignmentResult = el("align-result");
+  const alignmentStatus = el("align-status");
+  const targetFields = ["target-u", "target-v"].map((id, i) => {
+    const field = el(id);
+    field.min = -align.targetLimitsMm[i];
+    field.max = align.targetLimitsMm[i];
+    field.step = align.targetStepMm;
+    field.addEventListener("input", refreshAlignmentControls);
+    field.addEventListener("change", () => {
+      if (field.reportValidity()) sendTarget();
+    });
+    field.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") field.blur();
+    });
+    return field;
+  });
+  function sendTarget() {
+    targetFields.forEach((field, i) => {
+      if (field.validity.valid && field.valueAsNumber !== detectorTarget[i]) {
+        viewer.set_control_value(align.targetLabels[i], field.valueAsNumber, true);
+      }
+    });
+  }
+  function requestAlignment() {
+    if (!targetFields.every((field) => field.reportValidity())) return;
+    const controller = viewer.gui_controllers[align.findLabel];
+    if (!controller || viewer.connection?.readyState !== 1) {
+      alignmentStatus.textContent = "The simulator is not connected or still loading.";
+      return;
+    }
+    sendTarget();
+    viewer.set_control_value(align.tryReflectionsLabel, Number(otherReflections.checked), true);
+    controller.object[align.findLabel]();
+  }
+  findButton.addEventListener("click", requestAlignment);
+  otherReflections.addEventListener("change", refreshAlignmentControls);
+  cancelButton.addEventListener("click", () => {
+    viewer.gui_controllers[align.cancelLabel]?.object[align.cancelLabel]();
+  });
+  candidateSelect.addEventListener("change", () => {
+    viewer.set_control_value(align.candidateLabel, +candidateSelect.value, true);
+    refreshAlignmentControls();
+  });
+  applyButton.addEventListener("click", () => {
+    viewer.gui_controllers[align.applyLabel]?.object[align.applyLabel]();
+  });
+  const moves = align.axes.map((axis) => {
+    const row = el("align-moves").tBodies[0].insertRow();
+    row.insertCell().textContent = axis;
+    return row.insertCell();
+  });
+  let braggAllowed = null;
+  let proposedClear = false;
+  function readyMessage() {
+    if (startingCount) {
+      return "Review the proposed reflection and signal. The live reflection and stages are unchanged.";
+    }
+    return align.focusGoalMm === null ?
+      "Review the proposed signal and spot position before applying." : meetsPreviewGoal ?
+      "Compact spot near the target in the model. Review the pose before applying." :
+      "Best effort only: target error or RMS exceeds 0.5 mm. The stages are unchanged.";
+  }
+  function refreshAlignmentControls() {
+    const pendingTarget = targetFields.some((field, i) => field.valueAsNumber !== detectorTarget[i]);
+    const canCancel = alignStatus === status.RUNNING || alignStatus === status.SEARCHING;
+    const busy = canCancel || alignStatus === status.CANCELLING;
+    const valid = targetFields.every((field) => field.validity.valid);
+    const connected = Boolean(viewer.gui_controllers[align.findLabel] &&
+      viewer.gui_controllers[align.tryReflectionsLabel] && !line.disabled && !reflection.disabled);
+    const autoFallback = interference !== null;
+    otherReflections.disabled = !connected || busy;
+    findButton.disabled = !connected || liveEnergy === null || busy || !valid ||
+      (!braggAllowed && !autoFallback && !otherReflections.checked);
+    cancelButton.hidden = !canCancel;
+    const ready = alignStatus === status.READY;
+    const pendingCandidate = startingCount > 0 && +candidateSelect.value !== selectedCandidate;
+    applyButton.disabled = !ready || pendingTarget || pendingCandidate ||
+      (interference !== null && !proposedClear);
+    alignmentResult.hidden = !ready;
+    const selectedIssues = {
+      [status.IMPOSSIBLE]: "The selected reflection cannot satisfy Bragg at this energy.",
+      [status.NO_SIGNAL]: `No tested pose reached ${align.minSignalHits} modeled hits on even one crystal with the selected reflection.`,
+      [status.NO_CLEAR_POSE]: "The selected reflection found signal, but the tested poses failed interference checks.",
+    };
+    const noAlternative = autoFallback ? " No clear alternative was found in the shortlist." : "";
+    const searchNote = selectedIssues[searchReason] ? `${selectedIssues[searchReason]} ` : "";
+    const messages = {
+      [status.IDLE]: braggAllowed ?
+        (autoFallback ? "Search the selected reflection first, then preview alternatives if needed." :
+          "Find a starting pose or refine the live spot with the selected reflection.") :
+        `${selectedIssues[status.IMPOSSIBLE]} ${autoFallback ?
+          "Find alignment can preview other reflections." :
+          "Choose another or enable Try other reflections."}`,
+      [status.RUNNING]: `Searching the selected reflection${interference ? " for signal and clearance" : ""}. No stages moved.`,
+      [status.SEARCHING]: searchProgress ?
+        `${searchNote}Testing ${searchProgress.label} (${searchProgress.step} of ${searchProgress.total})${interference ? " for signal and clearance" : ""}. No stages moved.` :
+        `${searchNote}Shortlisting Bragg-compatible reflections. No stages moved.`,
+      [status.CANCELLING]: "Cancelling the search…",
+      [status.CANCELLED]: "Search cancelled. No stages moved.",
+      [status.READY]: readyMessage(),
+      [status.STALE]: "The pose, optics, or target changed. Run a new preview before applying.",
+      [status.NO_IMPROVEMENT]: `Bragg is possible, but this search did not find a better ${interference ? "clear " : ""}pose with enough hits from ${allCrystals}.`,
+      [status.NO_SIGNAL]: selectedIssues[status.NO_SIGNAL] + noAlternative,
+      [status.NO_CLEAR_POSE]: selectedIssues[status.NO_CLEAR_POSE] + noAlternative,
+      [status.IMPOSSIBLE]: selectedIssues[status.IMPOSSIBLE] + noAlternative,
+      [status.NO_STARTING_POSE]: `No usable ${interference ? "clear " : ""}pose was found in the reflection shortlist.`,
+      [status.APPLIED]: "Applied to the simulator.",
+      [status.FAILED]: "The alignment search failed. See the viewer log.",
+    };
+    alignmentStatus.textContent = braggAllowed === null ? "Waiting for the optical trace." :
+      messages[alignStatus];
+  }
+  const rows = opt.colors.map((rgb, i) => {
+    const row = el("crystals").insertRow();
+    const label = row.insertCell();
+    label.textContent = `● ${opt.crystals[i]}`;
+    label.style.color = `rgb(${rgb.join(",")})`;
+    return [row.insertCell(), row.insertCell()];
+  });
+  function showSlider(label, show) {
+    const item = viewer.gui_controllers[label]?.domElement.closest("li");
+    if (item) item.hidden = !show;
+  }
+  function draw(data) {
+    const [lineId, crystalId, e, d, order, width, theta, u, v, rmsU, rmsV] = data;
+    line.value = lineId;
+    reflection.value = crystalId;
+    liveEnergy = e;
+    liveWidth = width;
+    refreshPlanner();
+    braggAllowed = theta >= 0;
+    refreshAlignmentControls();
+    showSlider(opt.lineLabel, false);
+    showSlider(opt.reflectionLabel, false);
+    showSlider(opt.energyLabel, lineId === opt.lines.length - 1);
+    showSlider(opt.spacingLabel, crystalId === opt.reflections.length - 1);
+    showSlider(opt.orderLabel, crystalId === opt.reflections.length - 1);
+    const angle = theta < 0 ? "no real Bragg angle" : `θ ${theta.toFixed(2)}° ± ${width.toFixed(3)}°`;
+    el("bragg").textContent = `${e.toFixed(1)} eV · d ${d.toFixed(4)} Å · n ${order} · ${angle}`;
+    let offset = 11;
+    let hits = 0;
+    let accepted = 0;
+    const guides = [];
+    rows.forEach(([incidence, counts]) => {
+      const [a, h, low, high, hasGuide, guideU, guideV] = data.slice(offset, offset + 7);
+      incidence.textContent = low < 0 ? "—" : `${low.toFixed(1)}–${high.toFixed(1)}°`;
+      counts.textContent = `${h} / ${a}`;
+      hits += h;
+      accepted += a;
+      guides.push(!h && hasGuide ? [guideU, guideV] : null);
+      offset += 7;
+    });
+    latestTrace = [data.slice(offset), hits, u, v];
+    latestGuides = guides;
+    paintLive();
+    if (hits) {
+      el("result").textContent = `Centroid (${u.toFixed(2)}, ${v.toFixed(2)}) mm · ` +
+        `RMS (${rmsU.toFixed(2)}, ${rmsV.toFixed(2)}) mm`;
+    } else {
+      el("result").textContent = theta < 0 ? "This energy and reflection cannot satisfy Bragg." :
+        accepted ? "Bragg rays miss the active sensor." :
+          opt.rayGuides ? "No crystal-face hits within the Bragg window." :
+          "No analyzer samples meet the Bragg window.";
+    }
+  }
+  let latestGuides = [];
+  function paintLive() {
+    if (!latestTrace) return;
+    paint(mainImage, ...latestTrace, detectorTarget);
+    if (!opt.rayGuides || !rayGuides.checked) return;
+    const ctx = mainImage;
+    const w = ctx.canvas.width, h = ctx.canvas.height;
+    latestGuides.forEach((point, i) => {
+      if (!point) return;
+      const du = point[0] * w / uSize, dv = -point[1] * h / vSize;
+      const offSensor = Math.abs(du) >= w / 2 || Math.abs(dv) >= h / 2;
+      const scale = offSensor ?
+        Math.max(Math.abs(du) / (w / 2 - 12), Math.abs(dv) / (h / 2 - 12)) : 1;
+      ctx.save();
+      ctx.translate(w / 2 + du / scale, h / 2 + dv / scale);
+      ctx.strokeStyle = `rgb(${opt.colors[i].join(",")})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      if (offSensor) {
+        ctx.rotate(Math.atan2(dv, du));
+        ctx.moveTo(-7, -5); ctx.lineTo(3, 0); ctx.lineTo(-7, 5);
+      } else {
+        ctx.moveTo(-5, 0); ctx.lineTo(0, -5); ctx.lineTo(5, 0); ctx.lineTo(0, 5);
+        ctx.closePath();
+      }
+      ctx.stroke();
+      ctx.restore();
+    });
+  }
+  rayGuides.addEventListener("change", paintLive);
+  function paint(ctx, bins, hits, u, v, aim) {
+    const w = ctx.canvas.width, h = ctx.canvas.height;
+    ctx.fillStyle = "#030916";
+    ctx.fillRect(0, 0, w, h);
+    for (let i = 0; i < bins.length; i += 2) {
+      const bin = bins[i];
+      const brightness = Math.sqrt(bins[i + 1]);
+      ctx.fillStyle = `rgb(${Math.round(250 * brightness)},${Math.round(192 * brightness)},` +
+        `${Math.round(70 + 178 * brightness)})`;
+      ctx.fillRect(2 * (bin % opt.cols), h - 2 * (1 + Math.floor(bin / opt.cols)), 2, 2);
+    }
+    ctx.strokeStyle = "#879db49c";
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    ctx.moveTo(w / 2, 0); ctx.lineTo(w / 2, h);
+    ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    const x = w * (0.5 + aim[0] / uSize), y = h * (0.5 - aim[1] / vSize);
+    ctx.strokeStyle = "#ffca67";
+    ctx.beginPath();
+    ctx.moveTo(x - 7, y); ctx.lineTo(x + 7, y);
+    ctx.moveTo(x, y - 7); ctx.lineTo(x, y + 7);
+    ctx.stroke();
+    if (hits) {
+      ctx.strokeStyle = "#75efff";
+      ctx.beginPath();
+      ctx.arc(w * (0.5 + u / uSize), h * (0.5 - v / vSize), 6, 0, 2 * Math.PI);
+      ctx.stroke();
+    }
+  }
+  function drawAlignment(data) {
+    alignStatus = data[0];
+    const [, reason, step, total, index] = data;
+    searchReason = alignStatus === status.SEARCHING ? reason ?? status.IDLE : status.IDLE;
+    searchProgress = alignStatus === status.SEARCHING && index !== undefined ?
+      { label: plan.presets[index][0], step, total } : null;
+    if (alignStatus === status.READY) {
+      [startingCount, selectedCandidate] = data.slice(1, 3);
+      el("starting-poses").hidden = !startingCount;
+      candidateSelect.replaceChildren();
+      let offset = 3;
+      for (let i = 0; i < startingCount; i++) {
+        const [index, usable, captured] = data.slice(offset, offset + 3);
+        const [label, evidence] = plan.presets[index];
+        const n = opt.crystals.length;
+        const coverage = `${usable}/${n} with signal · ${captured}/${n} ≥80%`;
+        candidateSelect.add(new Option(`${label} · ${coverage}`, i));
+        if (i === selectedCandidate) {
+          el("starting-note").textContent = `${evidence}; availability unconfirmed. Both images use ${label}.`;
+        }
+        offset += 3;
+      }
+      if (startingCount) candidateSelect.value = selectedCandidate;
+      const aim = data.slice(offset, offset + 2);
+      const [xLimited, xLimitMm] = data.slice(offset + 2, offset + 4);
+      offset += 4;
+      const n = align.axes.length;
+      moves.forEach((cell, index) => {
+        const from = data[offset + index], to = data[offset + n + index];
+        cell.textContent = `${from.toFixed(2)} → ${to.toFixed(2)}`;
+        cell.parentElement.hidden = Math.abs(to - from) < 0.001;
+      });
+      offset += 2 * n;
+      [[beforeImage, "align-before-report"], [afterImage, "align-after-report"]].forEach(
+        ([image, report]) => {
+          const [u, v, rmsU, rmsV] = data.slice(offset, offset + 4);
+          offset += 4;
+          const perCrystal = data.slice(offset, offset + opt.colors.length);
+          offset += opt.colors.length;
+          const count = data[offset++];
+          const totalHits = perCrystal.reduce((sum, hits) => sum + hits, 0);
+          paint(image, data.slice(offset, offset + count), totalHits, u, v, aim);
+          offset += count;
+          const hits = `Hits (${opt.crystals.join(", ")}): ${perCrystal.join(" / ")}`;
+          const distance = Math.hypot(u - aim[0], v - aim[1]);
+          let limitNote = "";
+          if (image === afterImage) {
+            meetsPreviewGoal = align.focusGoalMm === null ||
+              Math.max(distance, rmsU, rmsV) <= align.focusGoalMm;
+            if (xLimited) {
+              limitNote = ` · ePix100 x travel limit (${xLimitMm.toFixed(2)} mm)`;
+            }
+          }
+          el(report).textContent = totalHits ?
+            `${distance.toFixed(2)} mm from target${limitNote} · ` +
+            `RMS ${rmsU.toFixed(2)} × ${rmsV.toFixed(2)} mm · ${hits}` : `No spot · ${hits}`;
+        },
+      );
+    }
+    refreshAlignmentControls();
+  }
+  function updateTarget(data) {
+    detectorTarget = data.map((value) => Number(value.toFixed(1)));
+    targetFields.forEach((field, i) => {
+      if (field !== document.activeElement) field.value = detectorTarget[i];
+    });
+    paintLive();
+    refreshAlignmentControls();
+  }
+  function showTargetMove(code) {
+    const message = {
+      [align.targetMoveStatus.NO_SIGNAL]: "No detected spot; detector stages did not move.",
+      [align.targetMoveStatus.TRAVEL_LIMIT]: "Requested move exceeds LX10 travel. Check the live centroid.",
+    }[code];
+    const readout = el("target-motion-status");
+    readout.textContent = message || "";
+    readout.hidden = !message;
+  }
+  function showInterference([state, ...detail], proposed) {
+    const readout = el(proposed ? "proposed-interference" : "live-interference");
+    const messages = {
+      [interference.PENDING]: "checking interference…",
+      [interference.CLEAR]: "no interference detected in the reviewed model.",
+      [interference.INTERFERENCE]: "modeled interference (collision hulls)",
+      [interference.UNAVAILABLE]: "interference check unavailable. See the viewer log.",
+    };
+    const contact = state === interference.INTERFERENCE;
+    readout.dataset.contact = contact;
+    readout.textContent = `${proposed ? "Proposed" : "Live"} pose: ${messages[state]}`;
+    if (proposed && contact) readout.textContent += "; cannot apply";
+    if (contact) readout.textContent += "\n" + new TextDecoder().decode(Uint8Array.from(detail));
+    if (proposed) {
+      proposedClear = state === interference.CLEAR;
+      refreshAlignmentControls();
+    }
+  }
+  const handle = viewer.handle_command.bind(viewer);
+  viewer.handle_command = (command) => {
+    if (command.type === "set_property" && command.path === opt.root) {
+      if (command.property === "detector_frame") return draw(command.value);
+      if (command.property === "alignment_frame") return drawAlignment(command.value);
+      if (command.property === "live_interference") return showInterference(command.value, false);
+      if (command.property === "proposed_interference") return showInterference(command.value, true);
+      if (command.property === "alignment_target") return updateTarget(command.value);
+      if (command.property === "target_move_status") return showTargetMove(command.value);
+      if (command.property === "planning_band") return updateBand(command.value);
+      if (command.property === "planning_frame") return drawPlanning(command.value);
+    }
+    handle(command);
+    if (command.type === "set_control") {
+      if (command.name === opt.lineLabel) line.disabled = false;
+      if (command.name === opt.reflectionLabel) reflection.disabled = false;
+      if ([align.findLabel, align.applyLabel, align.tryReflectionsLabel, align.cancelLabel,
+        align.candidateLabel, ...align.targetLabels, plan.compareLabel,
+        ...plan.bandLabels].includes(command.name)) {
+        showSlider(command.name, false);
+      }
+      if ([opt.lineLabel, opt.reflectionLabel, align.findLabel,
+        align.tryReflectionsLabel].includes(command.name)) {
+        refreshAlignmentControls();
+      }
+      if (command.name === plan.compareLabel) refreshPlanner();
+    }
+  };
+})();
+</script>
