@@ -7,7 +7,9 @@ uv run slac-run 43841 --spectroscopy
 Run this from the Twin Lab repository root after [setup](../README.md#setup).
 This mode needs the reviewed `cad/DSG-000040389/source.stp` for the motion
 geometry and the pinned 43841 collision bundle for interference checks. The
-first launch may need to prepare CAD and fetch the bundle. Open the printed
+first launch may need to prepare CAD and fetch the bundle. Later launches
+reuse the CAD cache when its inputs are unchanged, but each new viewer still
+loads the interference model. Open the printed
 Meshcat URL and look for **ePix100 spectroscopy preview**. This mode does not
 connect to motors.
 The **Lower Slit** and **Upper Slit** stages are shown in the regular motion

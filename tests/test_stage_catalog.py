@@ -1,5 +1,6 @@
 import json
 import math
+import os
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock
@@ -8,7 +9,7 @@ import pytest
 import yaml
 from pydrake import geometry
 
-from twin_lab import meshcat_ui
+from twin_lab import meshcat_ui, stage_cad_viewer
 from twin_lab.stage_cad_viewer import (
     _auto_amplitude,
     _is_fastener_name,
@@ -51,6 +52,61 @@ def test_pv_name_labels_matches_real_crystal_stack_command_map() -> None:
     assert labels["A213"] == "POLYCAP:CRY:N:SWI"
     assert labels["A233:x"] == "POLYCAP:PC:N:X"
     assert len(labels) == 19
+
+
+@pytest.mark.parametrize("invalidate", [None, "changed supplement", "missing generated mesh"])
+def test_stage_cad_cache_tracks_supplemental_mesh_as_input(tmp_path, monkeypatch, invalidate):
+    class RebuildRequested(Exception):
+        pass
+
+    cache = tmp_path / "stage-cad" / "test"
+    cache.mkdir(parents=True)
+    step = tmp_path / "source.stp"
+    catalog = tmp_path / "catalog.yaml"
+    manifest = tmp_path / "manifest.json"
+    supplement = tmp_path / "supplement.obj"
+    generated = cache / "stage.obj"
+    scene = cache / "scene.yaml"
+    inventory = tmp_path / "test.inventory.yaml"
+    step.touch()
+    supplement.touch()
+    generated.touch()
+    catalog.write_text("stages: {}\n")
+    manifest.write_text(json.dumps({"occurrences": [
+        {"ref": "A1", "name": "Assembly"}, {"ref": "A2", "name": "LIB-Stage"},
+    ]}))
+    inventory.write_text(yaml.safe_dump({
+        "source_step": str(step),
+        "stage_catalog": str(catalog),
+        "cad_manifest": str(manifest),
+        "subassembly": {"ref": "A1", "name": "Assembly"},
+        "stage_instances": [{"ref": "A2"}],
+        "supplemental_attachments": [{"mesh": str(supplement)}],
+    }))
+    scene.write_text(yaml.safe_dump({
+        "schema": "slac-stage-cad-scene/v8",
+        "instances": [{"mesh": str(generated)}],
+        "attachments": [{"mesh": str(supplement)}],
+    }))
+    os.utime(supplement, (100, 100))
+    for path in (step, catalog, manifest, inventory):
+        os.utime(path, (200, 200))
+    for path in (generated, scene):
+        os.utime(path, (300, 300))
+    if invalidate == "changed supplement":
+        os.utime(supplement, (400, 400))
+    elif invalidate == "missing generated mesh":
+        generated.unlink()
+
+    read_step = Mock(side_effect=RebuildRequested)
+    monkeypatch.setattr(stage_cad_viewer, "_read_step_document", read_step)
+    if invalidate is None:
+        assert stage_cad_viewer.prepare_stage_cad(inventory, cache_root=tmp_path) == scene
+        read_step.assert_not_called()
+    else:
+        with pytest.raises(RebuildRequested):
+            stage_cad_viewer.prepare_stage_cad(inventory, cache_root=tmp_path)
+        read_step.assert_called_once_with(step)
 
 
 @pytest.mark.xfail(reason="Legacy occurrence assertions predate the reviewed 2026-09-24 STEP")
